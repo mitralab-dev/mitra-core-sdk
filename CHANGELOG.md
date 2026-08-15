@@ -7,3 +7,4 @@ All notable changes to this project are documented in this file.
 - Add environment-neutral transport and error interfaces.
 - Add shared auth, entity, custom query, Function, and integration modules.
 - Add safe path encoding and structural response validation.
+- Add the canonical SDK parity fixture and testable MCP, JavaScript, and Python matrix.

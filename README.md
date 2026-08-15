@@ -9,6 +9,13 @@ Most application and Server Function code should install a concrete SDK instead:
 
 The core package exists so both SDKs build entity, custom query, Function, integration, and current-user requests from one contract.
 
+The versioned contract corpus in `contracts/` is the canonical source for the
+MCP, JavaScript, and Python capability matrix. Its manifest identifies the
+current fixture and pins every packaged version with SHA-256. Core executes all
+success operations and response validation. Functions JavaScript inherits those
+checks and owns its HTTP adapter cases. Python consumes all case groups because
+it does not depend on Core, using a digest-pinned snapshot so tests stay offline.
+
 ## Boundary
 
 The package contains:
@@ -63,6 +70,12 @@ const tasks = await core.entities.getTable("Task").list({ limit: 20 })
 ```
 
 The transport owns URL resolution, authentication, serialization, error parsing, redirects, retries, and timeouts. The core never reads or stores credentials.
+
+Custom query requests currently target the Data Manager `main` contract and
+send both `dataSourceId` and `parameters`. The recorded `alpha` contract accepts
+that body but ignores `dataSourceId`, resolving the data source from the
+authenticated app instead. The SDK does not retry this POST with another body
+because the first request can already execute.
 
 ## Error mapping
 

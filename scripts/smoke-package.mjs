@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import process from "node:process"
+import { validateContractCorpus } from "./contract-manifest.mjs"
 
 const consumerDirectory = mkdtempSync(join(tmpdir(), "mitra-sdk-core-smoke-"))
 const typeScriptCompiler = join(process.cwd(), "node_modules", "typescript", "bin", "tsc")
@@ -24,6 +25,8 @@ try {
     cwd: consumerDirectory,
     stdio: "inherit",
   })
+  const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
+  validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
 import { createSdkCore, type Plan, type Transport } from "@mitralab.io/sdk-core"
 const plan: Plan = { id: "plan-1", name: "Free" }

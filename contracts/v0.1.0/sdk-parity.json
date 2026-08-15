@@ -1,0 +1,787 @@
+{
+  "contract": "SDK-PARITY-001",
+  "version": "0.1.0",
+  "description": "Canonical semantic and HTTP contract fixtures for the Mitra runtime SDKs.",
+  "sources": {
+    "mcp": {
+      "repository": "mitralab-dev/mitra-mcp-server",
+      "commit": "12f33cceb94eaf6ed69f9ed9127f6a5260a7c2e9",
+      "paths": [
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerRecordTools.java",
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerCustomQueryTools.java",
+        "src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java",
+        "src/main/java/io/mitralab/mcp/tools/iam/IamTools.java",
+        "src/main/java/io/mitralab/mcp/tools/integration/IntegrationProxyTools.java",
+        "src/main/java/io/mitralab/mcp/tools/integration/IntegrationResourceTools.java"
+      ]
+    },
+    "dataManagerMain": {
+      "repository": "mitralab-dev/mitra-data-manager",
+      "commit": "4ec85ceac720da5d056cc85fecd6b27104e13396",
+      "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
+      "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
+      "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java"
+    },
+    "dataManagerAlpha": {
+      "repository": "mitralab-dev/mitra-data-manager",
+      "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+      "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
+      "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
+      "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java",
+      "errorHandler": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/exception/GlobalExceptionHandler.java",
+      "controllerTest": "api/src/test/java/io/mitralab/datamanager/api/CustomQueryControllerTest.java"
+    }
+  },
+  "matrix": [
+    {
+      "operation": "auth.me",
+      "mcpTool": "getMe",
+      "javascript": "auth.me()",
+      "python": "auth.me()",
+      "endpoint": "GET /iam/api/v1/auth/me",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "entities.list",
+      "mcpTool": "listRecords",
+      "javascript": "entities.getTable(table).list(options)",
+      "python": "entities.table(table).list(**options)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.filter",
+      "mcpTool": "listRecords",
+      "javascript": "entities.getTable(table).filter(query, sort, limit, skip, fields)",
+      "python": "entities.table(table).filter(query, sort=sort, limit=limit, skip=skip, fields=fields)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.get",
+      "mcpTool": "getRecord",
+      "javascript": "entities.getTable(table).get(id)",
+      "python": "entities.table(table).get(id)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.create",
+      "mcpTool": "createRecord",
+      "javascript": "entities.getTable(table).create(data)",
+      "python": "entities.table(table).create(data)",
+      "endpoint": "POST /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.bulkCreate",
+      "mcpTool": "bulkCreateRecords",
+      "javascript": "entities.getTable(table).bulkCreate(data)",
+      "python": "entities.table(table).bulk_create(data)",
+      "endpoint": "POST /data-manager/api/v1/tables/{table}/records/bulk",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.update",
+      "mcpTool": "updateRecord",
+      "javascript": "entities.getTable(table).update(id, data)",
+      "python": "entities.table(table).update(id, data)",
+      "endpoint": "PUT /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.delete",
+      "mcpTool": "deleteRecord",
+      "javascript": "entities.getTable(table).delete(id)",
+      "python": "entities.table(table).delete(id)",
+      "endpoint": "DELETE /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.deleteMany",
+      "mcpTool": "deleteManyRecords",
+      "javascript": "entities.getTable(table).deleteMany(query)",
+      "python": "entities.table(table).delete_many(query)",
+      "endpoint": "DELETE /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "queries.execute",
+      "mcpTool": "executeCustomQuery",
+      "javascript": "queries.execute(id, parameters)",
+      "python": "queries.execute(id, parameters)",
+      "endpoint": "POST /data-manager/api/v1/custom-queries/{id}/execute",
+      "mcpTransportParity": "main-request-compatible"
+    },
+    {
+      "operation": "functions.execute",
+      "mcpTool": "executeFunction",
+      "javascript": "functions.execute(id, input)",
+      "python": "functions.execute(id, input)",
+      "endpoint": "POST /functions/api/v1/functions/{id}/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "functions.executeAsync",
+      "mcpTool": null,
+      "javascript": "functions.executeAsync(id, input)",
+      "python": "functions.execute_async(id, input)",
+      "endpoint": "POST /functions/api/v1/functions/{id}/execute",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "functions.getExecution",
+      "mcpTool": "getExecution",
+      "javascript": "functions.getExecution(id)",
+      "python": "functions.get_execution(id)",
+      "endpoint": "GET /functions/api/v1/executions/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "functions.cancelExecution",
+      "mcpTool": null,
+      "javascript": "functions.cancelExecution(id)",
+      "python": "functions.cancel_execution(id)",
+      "endpoint": "POST /functions/api/v1/executions/{id}/cancel",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "integration.execute",
+      "mcpTool": "executeIntegrationTemplateConfig",
+      "javascript": "integration.execute(configId, request)",
+      "python": "integration.execute(config_id, request)",
+      "endpoint": "POST /integration/api/v1/proxy/template-configs/{id}/execute",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "integration.executeResource",
+      "mcpTool": "executeIntegrationResource",
+      "javascript": "integration.executeResource(resourceId, parameters)",
+      "python": "integration.execute_resource(resource_id, parameters)",
+      "endpoint": "POST /integration/api/v1/proxy/resources/{id}/execute",
+      "mcpTransportParity": "exact"
+    }
+  ],
+  "customQueryTransition": {
+    "currentSdkTarget": "main",
+    "sharedRequestBody": {
+      "dataSourceId": "00000000-0000-4000-8000-000000000001",
+      "parameters": { "status": "active" }
+    },
+    "main": {
+      "acceptsSharedRequestBody": true,
+      "dataSourceIdTransportBehavior": "consumed",
+      "dataSourceResolution": "request-body"
+    },
+    "alpha": {
+      "acceptsSharedRequestBody": true,
+      "dataSourceIdTransportBehavior": "ignored",
+      "dataSourceResolution": "authenticated-app",
+      "semanticCompatibility": "The request is accepted, but alpha resolves the data source from the authenticated app rather than dataSourceId."
+    },
+    "singlePayloadTransportCompatibility": true,
+    "automaticFallbackAllowed": false,
+    "automaticFallbackReason": "The main request is already accepted by both recorded contracts, and retrying a POST could execute a query twice.",
+    "removeDataSourceIdGate": [
+      "The parameters-only request is present on Data Manager main.",
+      "A Data Manager integration test proves authenticated app and data source resolution on main.",
+      "The canonical fixture version is bumped and both SDK suites pass the parameters-only request.",
+      "MITRA_DATA_SOURCE_ID and init-time data source resolution are deprecated before removal."
+    ]
+  },
+  "consumerRequirements": {
+    "@mitralab.io/sdk-core": { "successCases": "all", "responseValidationCases": "all" },
+    "@mitralab.io/functions-sdk": { "httpAdapterCases": "all" },
+    "mitra-functions-sdk": {
+      "successCases": "all",
+      "responseValidationCases": "all",
+      "httpAdapterCases": "all"
+    }
+  },
+  "cases": [
+    {
+      "id": "auth.me.success",
+      "kind": "success",
+      "operation": "auth.me",
+      "input": {},
+      "request": { "service": "auth", "method": "GET", "path": "/api/v1/auth/me" },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "user-1",
+          "tenant": {
+            "id": "tenant-1",
+            "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+            "legacyId": null,
+            "slug": "tenant-one",
+            "plan": { "id": "plan-1", "name": "Free" },
+            "name": "Tenant One",
+            "description": null,
+            "hexColor": null,
+            "icon": null,
+            "infraStatus": "ACTIVE",
+            "active": true
+          },
+          "name": "Test User",
+          "email": "user@example.com",
+          "imageUrl": null,
+          "onboardingCompleted": false
+        }
+      },
+      "expectedResult": {
+        "id": "user-1",
+        "tenant": {
+          "id": "tenant-1",
+          "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+          "legacyId": null,
+          "slug": "tenant-one",
+          "plan": { "id": "plan-1", "name": "Free" },
+          "name": "Tenant One",
+          "description": null,
+          "hexColor": null,
+          "icon": null,
+          "infraStatus": "ACTIVE",
+          "active": true
+        },
+        "name": "Test User",
+        "email": "user@example.com",
+        "imageUrl": null,
+        "onboardingCompleted": false
+      }
+    },
+    {
+      "id": "entities.list.success",
+      "kind": "success",
+      "operation": "entities.list",
+      "input": {
+        "table": "Order items",
+        "options": { "sort": "-created_at", "limit": 2, "skip": 4, "fields": ["id", "status"] }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Order%20items/records",
+        "params": { "sort": "-created_at", "limit": 2, "skip": 4, "fields": "id,status" }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            { "id": "order-5", "status": "active" },
+            { "id": "order-6", "status": "pending" }
+          ],
+          "limit": 2,
+          "skip": 4,
+          "total": 8,
+          "hasMore": true
+        }
+      },
+      "expectedResult": [
+        { "id": "order-5", "status": "active" },
+        { "id": "order-6", "status": "pending" }
+      ]
+    },
+    {
+      "id": "entities.filter.success",
+      "kind": "success",
+      "operation": "entities.filter",
+      "input": {
+        "table": "Orders",
+        "query": { "status": "active" },
+        "sort": "name",
+        "limit": 5,
+        "skip": 0,
+        "fields": ["id", "status"]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Orders/records",
+        "params": {
+          "q": "{\"status\":\"active\"}",
+          "sort": "name",
+          "limit": 5,
+          "skip": 0,
+          "fields": "id,status"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [{ "id": "order-1", "status": "active" }],
+          "limit": 5,
+          "skip": 0,
+          "total": 1,
+          "hasMore": false
+        }
+      },
+      "expectedResult": [{ "id": "order-1", "status": "active" }]
+    },
+    {
+      "id": "entities.get.success",
+      "kind": "success",
+      "operation": "entities.get",
+      "input": { "table": "Orders", "id": "order/1" },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Orders/records/order%2F1"
+      },
+      "response": { "status": 200, "body": { "id": "order/1", "status": "active" } },
+      "expectedResult": { "id": "order/1", "status": "active" }
+    },
+    {
+      "id": "entities.create.success",
+      "kind": "success",
+      "operation": "entities.create",
+      "input": { "table": "Orders", "data": { "status": "draft" } },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/tables/Orders/records",
+        "body": { "status": "draft" }
+      },
+      "response": { "status": 201, "body": { "id": "order-2", "status": "draft" } },
+      "expectedResult": { "id": "order-2", "status": "draft" }
+    },
+    {
+      "id": "entities.bulk-create.success",
+      "kind": "success",
+      "operation": "entities.bulkCreate",
+      "input": { "table": "Orders", "data": [{ "status": "draft" }, { "status": "active" }] },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/tables/Orders/records/bulk",
+        "body": [{ "status": "draft" }, { "status": "active" }]
+      },
+      "response": {
+        "status": 201,
+        "body": [
+          { "id": "order-3", "status": "draft" },
+          { "id": "order-4", "status": "active" }
+        ]
+      },
+      "expectedResult": [
+        { "id": "order-3", "status": "draft" },
+        { "id": "order-4", "status": "active" }
+      ]
+    },
+    {
+      "id": "entities.update.success",
+      "kind": "success",
+      "operation": "entities.update",
+      "input": { "table": "Orders", "id": "order-2", "data": { "status": "active" } },
+      "request": {
+        "service": "dataManager",
+        "method": "PUT",
+        "path": "/api/v1/tables/Orders/records/order-2",
+        "body": { "status": "active" }
+      },
+      "response": { "status": 200, "body": { "id": "order-2", "status": "active" } },
+      "expectedResult": { "id": "order-2", "status": "active" }
+    },
+    {
+      "id": "entities.delete.success",
+      "kind": "success",
+      "operation": "entities.delete",
+      "input": { "table": "Orders", "id": "order-2" },
+      "request": {
+        "service": "dataManager",
+        "method": "DELETE",
+        "path": "/api/v1/tables/Orders/records/order-2"
+      },
+      "response": { "status": 204, "empty": true }
+    },
+    {
+      "id": "entities.delete-many.success",
+      "kind": "success",
+      "operation": "entities.deleteMany",
+      "input": { "table": "Orders", "query": { "status": "archived" } },
+      "request": {
+        "service": "dataManager",
+        "method": "DELETE",
+        "path": "/api/v1/tables/Orders/records",
+        "params": { "q": "{\"status\":\"archived\"}" }
+      },
+      "response": { "status": 200, "body": { "deleted": 2 } },
+      "expectedResult": { "deleted": 2 }
+    },
+    {
+      "id": "queries.execute.success",
+      "kind": "success",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "dataSourceId": "00000000-0000-4000-8000-000000000001",
+        "parameters": { "status": "active" }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": {
+          "dataSourceId": "00000000-0000-4000-8000-000000000001",
+          "parameters": { "status": "active" }
+        }
+      },
+      "response": { "status": 200, "body": { "rows": [{ "total": 2 }], "durationMs": 7 } },
+      "expectedResult": { "rows": [{ "total": 2 }], "durationMs": 7 }
+    },
+    {
+      "id": "functions.execute.success",
+      "kind": "success",
+      "operation": "functions.execute",
+      "input": { "id": "00000000-0000-4000-8000-000000000201", "body": { "orderId": "order-1" } },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/00000000-0000-4000-8000-000000000201/execute",
+        "headers": { "X-Invocation-Type": "sync" },
+        "body": { "input": { "orderId": "order-1" } }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000301",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "SUCCESS",
+          "input": { "orderId": "order-1" },
+          "output": { "ok": true },
+          "errorMessage": null,
+          "logs": null,
+          "durationMs": 10,
+          "startedAt": "2026-08-14T20:00:00Z",
+          "finishedAt": "2026-08-14T20:00:01Z",
+          "createdAt": "2026-08-14T20:00:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000301",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "SUCCESS",
+        "input": { "orderId": "order-1" },
+        "output": { "ok": true },
+        "errorMessage": null,
+        "logs": null,
+        "durationMs": 10,
+        "startedAt": "2026-08-14T20:00:00Z",
+        "finishedAt": "2026-08-14T20:00:01Z",
+        "createdAt": "2026-08-14T20:00:00Z"
+      }
+    },
+    {
+      "id": "functions.execute-async.success",
+      "kind": "success",
+      "operation": "functions.executeAsync",
+      "input": { "id": "00000000-0000-4000-8000-000000000201", "body": { "orderId": "order-2" } },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/00000000-0000-4000-8000-000000000201/execute",
+        "headers": { "X-Invocation-Type": "async" },
+        "body": { "input": { "orderId": "order-2" } }
+      },
+      "response": {
+        "status": 202,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000302",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "PENDING",
+          "input": { "orderId": "order-2" },
+          "output": null,
+          "errorMessage": null,
+          "logs": null,
+          "durationMs": null,
+          "startedAt": null,
+          "finishedAt": null,
+          "createdAt": "2026-08-14T20:01:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000302",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "PENDING",
+        "input": { "orderId": "order-2" },
+        "output": null,
+        "errorMessage": null,
+        "logs": null,
+        "durationMs": null,
+        "startedAt": null,
+        "finishedAt": null,
+        "createdAt": "2026-08-14T20:01:00Z"
+      }
+    },
+    {
+      "id": "functions.get-execution.success",
+      "kind": "success",
+      "operation": "functions.getExecution",
+      "input": { "id": "00000000-0000-4000-8000-000000000302" },
+      "request": {
+        "service": "functions",
+        "method": "GET",
+        "path": "/api/v1/executions/00000000-0000-4000-8000-000000000302"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000302",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "SUCCESS",
+          "input": { "orderId": "order-2" },
+          "output": { "ok": true },
+          "errorMessage": null,
+          "logs": "done",
+          "durationMs": 12,
+          "startedAt": "2026-08-14T20:01:00Z",
+          "finishedAt": "2026-08-14T20:01:01Z",
+          "createdAt": "2026-08-14T20:01:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000302",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "SUCCESS",
+        "input": { "orderId": "order-2" },
+        "output": { "ok": true },
+        "errorMessage": null,
+        "logs": "done",
+        "durationMs": 12,
+        "startedAt": "2026-08-14T20:01:00Z",
+        "finishedAt": "2026-08-14T20:01:01Z",
+        "createdAt": "2026-08-14T20:01:00Z"
+      }
+    },
+    {
+      "id": "functions.cancel-execution.success",
+      "kind": "success",
+      "operation": "functions.cancelExecution",
+      "input": { "id": "00000000-0000-4000-8000-000000000302" },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/executions/00000000-0000-4000-8000-000000000302/cancel"
+      },
+      "response": { "status": 204, "empty": true }
+    },
+    {
+      "id": "integration.execute.success",
+      "kind": "success",
+      "operation": "integration.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000401",
+        "proxyRequest": {
+          "method": "POST",
+          "endpoint": "/orders",
+          "headers": { "x-client": "sdk" },
+          "body": { "id": "order-1" },
+          "queryParams": { "dryRun": true }
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/proxy/template-configs/00000000-0000-4000-8000-000000000401/execute",
+        "body": {
+          "method": "POST",
+          "endpoint": "/orders",
+          "headers": { "x-client": "sdk" },
+          "body": { "id": "order-1" },
+          "queryParams": { "dryRun": true },
+          "source": "SDK"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": 201,
+          "headers": { "content-type": "application/json" },
+          "body": { "id": "remote-order-1" },
+          "durationMs": 18,
+          "executionId": "integration-execution-1"
+        }
+      },
+      "expectedResult": {
+        "status": 201,
+        "headers": { "content-type": "application/json" },
+        "body": { "id": "remote-order-1" },
+        "durationMs": 18,
+        "executionId": "integration-execution-1"
+      }
+    },
+    {
+      "id": "integration.execute-resource.success",
+      "kind": "success",
+      "operation": "integration.executeResource",
+      "input": { "id": "00000000-0000-4000-8000-000000000402", "parameters": { "limit": 10 } },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/proxy/resources/00000000-0000-4000-8000-000000000402/execute",
+        "body": { "params": { "limit": 10 } }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": 200,
+          "headers": { "content-type": "application/json" },
+          "body": { "ok": true },
+          "durationMs": 20,
+          "executionId": "integration-execution-2"
+        }
+      },
+      "expectedResult": {
+        "status": 200,
+        "headers": { "content-type": "application/json" },
+        "body": { "ok": true },
+        "durationMs": 20,
+        "executionId": "integration-execution-2"
+      }
+    }
+  ],
+  "responseValidationCases": [
+    {
+      "id": "queries.execute.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "dataSourceId": "00000000-0000-4000-8000-000000000001",
+        "parameters": {}
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": { "dataSourceId": "00000000-0000-4000-8000-000000000001", "parameters": {} }
+      },
+      "response": { "status": 200, "body": { "rows": [{ "total": 2 }], "durationMs": "7" } },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Query execution response has an invalid durationMs field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    }
+  ],
+  "httpAdapterCases": [
+    {
+      "id": "queries.execute.data-source-not-found",
+      "kind": "api-4xx",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000103",
+        "dataSourceId": "00000000-0000-4000-8000-000000000001",
+        "parameters": {}
+      },
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "source": {
+        "service": "mitra-data-manager",
+        "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+        "handler": "GlobalExceptionHandler.handleNotFound",
+        "useCase": "ExecuteSqlUseCase.execute",
+        "integrationTest": "CustomQueryControllerTest.Execute.execute_withDataSourceAssociatedToAnotherApp_shouldFailClosed"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000103/execute",
+        "body": { "dataSourceId": "00000000-0000-4000-8000-000000000001", "parameters": {} }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error_code": "NOT_FOUND",
+          "message": "The Custom Query data source was not found for the authenticated app"
+        }
+      },
+      "expectedError": {
+        "type": "api",
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "The Custom Query data source was not found for the authenticated app",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "queries.execute.database-unavailable",
+      "kind": "api-5xx",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "dataSourceId": "00000000-0000-4000-8000-000000000001",
+        "parameters": {}
+      },
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "source": {
+        "service": "mitra-data-manager",
+        "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+        "handler": "GlobalExceptionHandler.handleDatabaseException"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": { "dataSourceId": "00000000-0000-4000-8000-000000000001", "parameters": {} }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error_code": "DATABASE_ERROR",
+          "message": "Failed to connect to database. Please check your connection settings.",
+          "details": "Connection refused"
+        }
+      },
+      "expectedError": {
+        "type": "api",
+        "status": 503,
+        "code": "DATABASE_ERROR",
+        "message": "Failed to connect to database. Please check your connection settings.",
+        "details": "Connection refused",
+        "requestId": null,
+        "retryable": true
+      }
+    },
+    {
+      "id": "auth.me.timeout",
+      "kind": "timeout",
+      "operation": "auth.me",
+      "input": {},
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "request": { "service": "auth", "method": "GET", "path": "/api/v1/auth/me" },
+      "failure": { "type": "timeout" },
+      "expectedError": {
+        "type": "network",
+        "status": 0,
+        "code": "REQUEST_TIMEOUT",
+        "message": "Mitra request timed out",
+        "details": null,
+        "requestId": null,
+        "retryable": true
+      }
+    }
+  ]
+}

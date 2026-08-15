@@ -21,6 +21,7 @@
   },
   "files": [
     "dist",
+    "contracts",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -38,9 +39,10 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "check:exports": "node scripts/check-exports.mjs",
+    "check:contracts": "node scripts/check-contracts.mjs",
     "pack:check": "npm pack --dry-run",
     "smoke:package": "node scripts/smoke-package.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run check:exports && npm run pack:check && npm run smoke:package",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run check:exports && npm run check:contracts && npm run pack:check && npm run smoke:package",
     "prepublishOnly": "npm run check"
   },
   "keywords": [
