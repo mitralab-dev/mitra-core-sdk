@@ -38,7 +38,7 @@ jobs:
       - name: Require valid PR title
         if: ${{ needs.pr-convention.result != 'success' && needs.pr-convention.result != 'skipped' }}
         run: exit 1
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -60,7 +60,7 @@ jobs:
       - name: Require successful build and compatibility
         if: ${{ needs.build.result != 'success' || needs.compatibility.result != 'success' }}
         run: exit 1
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -76,7 +76,7 @@ jobs:
       matrix:
         node-version: [18, 22]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
