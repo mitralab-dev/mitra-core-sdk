@@ -5,7 +5,7 @@ import { join } from "node:path"
 import process from "node:process"
 import { validateContractCorpus } from "./contract-manifest.mjs"
 
-const consumerDirectory = mkdtempSync(join(tmpdir(), "mitra-sdk-core-smoke-"))
+const consumerDirectory = mkdtempSync(join(tmpdir(), "mitra-core-sdk-smoke-"))
 const typeScriptCompiler = join(process.cwd(), "node_modules", "typescript", "bin", "tsc")
 
 try {
