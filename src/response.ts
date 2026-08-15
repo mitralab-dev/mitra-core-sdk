@@ -24,7 +24,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 function hasOwn(value: JsonObject, property: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, property)
+  return Object.hasOwn(value, property)
 }
 
 function invalidField(context: string, field: string, errors: SdkCoreErrorFactory): never {
