@@ -2,9 +2,9 @@ name: Build & Test
 
 on:
   push:
-    branches: [alpha, main]
+    branches: [main]
   pull_request:
-    branches: [alpha, main]
+    branches: [main]
     types: [opened, edited, synchronize, reopened]
 
 permissions:
