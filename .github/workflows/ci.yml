@@ -1,0 +1,107 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [alpha, main]
+  pull_request:
+    branches: [alpha, main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-convention:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if echo "$PR_TITLE" | grep -qP "^(feat|fix|refactor|chore|docs)(\(.+\))?: .+ \(#[0-9]+\)$"; then
+            echo "PR title is valid: $PR_TITLE"
+          else
+            echo "PR title must follow: type(scope): description (#issue)"
+            exit 1
+          fi
+
+  build:
+    needs: pr-convention
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require valid PR title
+        if: ${{ needs.pr-convention.result != 'success' && needs.pr-convention.result != 'skipped' }}
+        run: exit 1
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run check:exports
+      - run: npm run pack:check
+      - run: npm run smoke:package
+
+  test:
+    needs: [build, compatibility]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful build and compatibility
+        if: ${{ needs.build.result != 'success' || needs.compatibility.result != 'success' }}
+        run: exit 1
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage/
+
+  compatibility:
+    needs: build
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 22]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  sonar:
+    needs: test
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-report
+          path: coverage/
+      - uses: SonarSource/sonarqube-scan-action@v7
+        with:
+          args: -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

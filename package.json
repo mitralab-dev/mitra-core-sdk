@@ -1,0 +1,80 @@
+{
+  "name": "@mitralab.io/sdk-core",
+  "version": "0.1.0",
+  "description": "Environment-neutral contracts and modules shared by Mitra JavaScript SDKs",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "check:exports": "node scripts/check-exports.mjs",
+    "pack:check": "npm pack --dry-run",
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run check:exports && npm run pack:check && npm run smoke:package",
+    "prepublishOnly": "npm run check"
+  },
+  "keywords": [
+    "mitra",
+    "sdk",
+    "core",
+    "typescript"
+  ],
+  "author": "Mitra Platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mitralab-dev/mitra-sdk-core"
+  },
+  "homepage": "https://github.com/mitralab-dev/mitra-sdk-core#readme",
+  "bugs": {
+    "url": "https://github.com/mitralab-dev/mitra-sdk-core/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.8.1",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "esbuild": "^0.25.0"
+  }
+}
