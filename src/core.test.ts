@@ -99,14 +99,20 @@ function omitField(value: object, field: string): Record<string, unknown> {
 
 describe("createSdkCore", () => {
   it("composes every module with its service transport", async () => {
-    const auth = new QueueTransport([currentUser()])
+    const auth = new QueueTransport([currentUser(), []])
     const dataManager = new QueueTransport([
       { data: [], limit: 100, skip: 0, total: 0, hasMore: false },
       { rows: [], affectedRows: null, durationMs: 1 },
+      { results: [], executedCount: 0, totalDurationMs: 1 },
+      { results: [], processedCount: 0, succeededCount: 0, failedCount: 0 },
     ])
-    const functions = new QueueTransport([execution()])
+    const functions = new QueueTransport([
+      execution(),
+      { deleted: [], notFound: [], deletedCount: 0 },
+    ])
     const integration = new QueueTransport([
       { status: 200, headers: {}, body: {}, durationMs: 1, executionId: "integration-1" },
+      { content: [], totalElements: 0 },
     ])
     const core = createSdkCore({
       transports: { auth, dataManager, functions, integration },
@@ -123,11 +129,27 @@ describe("createSdkCore", () => {
     await expect(core.integration.executeResource("resource-1")).resolves.toMatchObject({
       executionId: "integration-1",
     })
+    await expect(core.sql.executeDml([{ sql: "SELECT 1" }])).resolves.toMatchObject({
+      executedCount: 0,
+    })
+    await expect(core.dataSources.bulkDelete(["data-source-1"])).resolves.toMatchObject({
+      processedCount: 0,
+    })
+    await expect(core.functionsAdmin.bulkDelete({ allInApp: true })).resolves.toMatchObject({
+      deletedCount: 0,
+    })
+    await expect(core.integrationAdmin.list()).resolves.toMatchObject({ totalElements: 0 })
+    await expect(core.members.list()).resolves.toEqual([])
 
-    expect(auth.requests[0]?.path).toBe("/api/v1/auth/me")
-    expect(dataManager.requests).toHaveLength(2)
+    expect(auth.requests.map(({ path }) => path)).toEqual([
+      "/api/v1/auth/me",
+      "/api/v1/members/current-app",
+    ])
+    expect(dataManager.requests).toHaveLength(4)
     expect(functions.requests[0]?.options.headers).toEqual({ "X-Invocation-Type": "sync" })
+    expect(functions.requests[1]?.path).toBe("/api/v1/functions/bulk-delete")
     expect(integration.requests[0]?.path).toContain("/resources/resource-1/execute")
+    expect(integration.requests[1]?.path).toBe("/api/v1/template-configs")
   })
 })
 
