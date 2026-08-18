@@ -10,6 +10,22 @@ change requires a new version directory. Consumers may vendor the exact bytes
 and pin their copy with a SHA-256 digest so their tests never depend on network
 access.
 
+A released version directory is immutable. Adding operations means publishing a
+new version and moving `current`, never editing bytes another consumer already
+pinned. Every declared version keeps its digest verified, so a consumer that has
+not migrated stays on the version it vendored.
+
+## Versions
+
+- `0.1.0` covers the runtime surface: current user, entities, custom queries,
+  Function execution, and integration proxying.
+- `0.2.0` adds the builder tier: SQL batches and table listing, Data Source
+  batches, Function administration batches, integration template config
+  batches with connection tests and listing, and app members. Its `sources`
+  entries carry `status: "unmerged-pull-request"` because those service
+  contracts were recorded from open pull requests. Re-record the commits and
+  reverify the cases once the pull requests merge.
+
 Core executes one success case for every operation plus Core-owned response
 validation cases. Functions JavaScript inherits those checks from Core and must
 consume every HTTP adapter case itself. Python does not depend on Core, so it

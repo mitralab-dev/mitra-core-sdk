@@ -5,15 +5,31 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import {
   createAuthModule,
+  createDataSourcesModule,
   createEntitiesModule,
+  createFunctionsAdminModule,
   createFunctionsModule,
+  createIntegrationAdminModule,
   createIntegrationModule,
+  createMembersModule,
   createQueriesModule,
+  createSqlModule,
 } from "./index"
 import type {
+  DataSourceCreateInput,
+  DataSourceUpdateInput,
+  DmlStatement,
   EntityListOptions,
+  FunctionBulkDeleteInput,
+  FunctionBulkUpdateItem,
+  FunctionCreateInput,
+  ListTablesOptions,
+  ListTemplateConfigsOptions,
   ProxyInput,
   SdkCoreErrorFactory,
+  TemplateConfigCreateInput,
+  TemplateConfigUpdateInput,
+  TestCredentialsInput,
   Transport,
   TransportRequestOptions,
 } from "./index"
@@ -57,6 +73,17 @@ interface ContractCase {
     data?: JsonObject | JsonObject[]
     body?: JsonObject
     proxyRequest?: ProxyInput
+    statements?: DmlStatement[]
+    listTablesOptions?: ListTablesOptions
+    dataSources?: JsonObject[]
+    dataSourceIds?: string[]
+    functions?: JsonObject[]
+    functionUpdates?: FunctionBulkUpdateItem[]
+    functionDeleteSelector?: FunctionBulkDeleteInput
+    configs?: JsonObject[]
+    configIds?: string[]
+    testCredentials?: TestCredentialsInput
+    listConfigsOptions?: ListTemplateConfigsOptions
   }
   request: ContractRequest
   response?: {
@@ -166,7 +193,37 @@ const operations = [
   "functions.cancelExecution",
   "integration.execute",
   "integration.executeResource",
+  "sql.executeDdl",
+  "sql.executeDml",
+  "sql.listTables",
+  "dataSources.bulkCreate",
+  "dataSources.bulkUpdate",
+  "dataSources.bulkDelete",
+  "functionsAdmin.bulkCreate",
+  "functionsAdmin.bulkUpdate",
+  "functionsAdmin.bulkDelete",
+  "integrationAdmin.bulkCreate",
+  "integrationAdmin.bulkUpdate",
+  "integrationAdmin.bulkDelete",
+  "integrationAdmin.testCredentials",
+  "integrationAdmin.testConfig",
+  "integrationAdmin.list",
+  "members.list",
 ]
+
+// The service that owns each operation namespace, asserted against every fixture request.
+const serviceByNamespace: Record<string, ContractRequest["service"]> = {
+  auth: "auth",
+  members: "auth",
+  entities: "dataManager",
+  queries: "dataManager",
+  sql: "dataManager",
+  dataSources: "dataManager",
+  functions: "functions",
+  functionsAdmin: "functions",
+  integration: "integration",
+  integrationAdmin: "integration",
+}
 
 function errorsFor(testCase: ContractCase): SdkCoreErrorFactory {
   return {
@@ -261,6 +318,68 @@ async function executeCase(testCase: ContractCase, transport: FixtureTransport):
         requireString(testCase, "id"),
         testCase.input.parameters,
       )
+    case "sql.executeDdl":
+      return createSqlModule(transport, errorsFor(testCase)).executeDdl(
+        testCase.input.statements ?? [],
+      )
+    case "sql.executeDml":
+      return createSqlModule(transport, errorsFor(testCase)).executeDml(
+        testCase.input.statements ?? [],
+      )
+    case "sql.listTables":
+      return createSqlModule(transport, errorsFor(testCase)).listTables(
+        testCase.input.listTablesOptions,
+      )
+    case "dataSources.bulkCreate":
+      return createDataSourcesModule(transport, errorsFor(testCase)).bulkCreate(
+        (testCase.input.dataSources ?? []) as unknown as DataSourceCreateInput[],
+      )
+    case "dataSources.bulkUpdate":
+      return createDataSourcesModule(transport, errorsFor(testCase)).bulkUpdate(
+        (testCase.input.dataSources ?? []) as unknown as DataSourceUpdateInput[],
+      )
+    case "dataSources.bulkDelete":
+      return createDataSourcesModule(transport, errorsFor(testCase)).bulkDelete(
+        testCase.input.dataSourceIds ?? [],
+      )
+    case "functionsAdmin.bulkCreate":
+      return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkCreate(
+        (testCase.input.functions ?? []) as unknown as FunctionCreateInput[],
+      )
+    case "functionsAdmin.bulkUpdate":
+      return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkUpdate(
+        testCase.input.functionUpdates ?? [],
+      )
+    case "functionsAdmin.bulkDelete":
+      return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkDelete(
+        testCase.input.functionDeleteSelector ?? { allInApp: true },
+      )
+    case "integrationAdmin.bulkCreate":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).bulkCreate(
+        (testCase.input.configs ?? []) as unknown as TemplateConfigCreateInput[],
+      )
+    case "integrationAdmin.bulkUpdate":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).bulkUpdate(
+        (testCase.input.configs ?? []) as unknown as TemplateConfigUpdateInput[],
+      )
+    case "integrationAdmin.bulkDelete":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).bulkDelete(
+        testCase.input.configIds ?? [],
+      )
+    case "integrationAdmin.testCredentials":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).testCredentials(
+        testCase.input.testCredentials ?? { templateId: "", values: {} },
+      )
+    case "integrationAdmin.testConfig":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).testConfig(
+        requireString(testCase, "id"),
+      )
+    case "integrationAdmin.list":
+      return createIntegrationAdminModule(transport, errorsFor(testCase)).list(
+        testCase.input.listConfigsOptions,
+      )
+    case "members.list":
+      return createMembersModule(transport, errorsFor(testCase)).list()
     default:
       throw new Error(`Unsupported executable fixture operation ${testCase.operation}`)
   }
@@ -322,15 +441,7 @@ describe("SDK-PARITY-001 contract fixture", () => {
   })
 
   it.each(fixture.cases)("executes canonical success case $id", async (testCase) => {
-    expect(testCase.request.service).toBe(
-      testCase.operation === "auth.me"
-        ? "auth"
-        : testCase.operation.startsWith("entities.") || testCase.operation === "queries.execute"
-          ? "dataManager"
-          : testCase.operation.startsWith("functions.")
-            ? "functions"
-            : "integration",
-    )
+    expect(testCase.request.service).toBe(serviceByNamespace[testCase.operation.split(".")[0]!])
     expect(testCase.response?.status).toBeGreaterThanOrEqual(200)
     expect(testCase.response?.status).toBeLessThan(300)
     const transport = new FixtureTransport(testCase)
