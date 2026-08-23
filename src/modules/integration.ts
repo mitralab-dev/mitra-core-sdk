@@ -7,6 +7,7 @@ import type { ProxyInput, ProxyResult } from "../types"
 export interface IntegrationModule {
   executeResource(resourceId: string, params?: Record<string, unknown>): Promise<ProxyResult>
   execute(configId: string, request: ProxyInput): Promise<ProxyResult>
+  executeByAlias(alias: string, request: ProxyInput): Promise<ProxyResult>
 }
 
 export function createIntegrationModule(
@@ -29,6 +30,17 @@ export function createIntegrationModule(
       return expectProxyResult(
         await transport.request<unknown>(
           `/api/v1/proxy/template-configs/${encodePathSegment(configId, "config id", errors)}/execute`,
+          { method: "POST", body: { ...request, source: "SDK" } },
+        ),
+        "Integration proxy response",
+        errors,
+      )
+    },
+
+    async executeByAlias(alias, request): Promise<ProxyResult> {
+      return expectProxyResult(
+        await transport.request<unknown>(
+          `/api/v1/proxy/template-configs/by-alias/${encodePathSegment(alias, "alias", errors)}/execute`,
           { method: "POST", body: { ...request, source: "SDK" } },
         ),
         "Integration proxy response",

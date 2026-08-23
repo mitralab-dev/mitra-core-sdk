@@ -3,15 +3,22 @@ import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
 import {
   expectConnectionTestResult,
+  expectEmpty,
+  expectIntegrationExecution,
+  expectPage,
+  expectTemplateConfig,
   expectTemplateConfigBulkResult,
   expectTemplateConfigPage,
 } from "../response"
 import type { QueryParamValue, Transport } from "../transport"
 import type {
   ConnectionTestResult,
+  IntegrationExecution,
   ListTemplateConfigsOptions,
+  Page,
   TemplateConfigBulkResult,
   TemplateConfigCreateInput,
+  TemplateConfig,
   TemplateConfigPage,
   TemplateConfigUpdateInput,
   TestCredentialsInput,
@@ -20,6 +27,12 @@ import type {
 const MAX_CONFIGS = 100
 
 export interface IntegrationAdminModule {
+  /** Creates one integration config. Secret values are write-only. */
+  create(input: TemplateConfigCreateInput): Promise<TemplateConfig>
+  /** Updates one config. Omitting `values` preserves stored credentials. */
+  update(id: string, input: Omit<TemplateConfigUpdateInput, "configId">): Promise<TemplateConfig>
+  /** Permanently deletes one config and its stored credentials. */
+  delete(id: string): Promise<void>
   /**
    * Creates 1 to 100 integration template configs.
    *
@@ -43,13 +56,48 @@ export interface IntegrationAdminModule {
   testConfig(configId: string): Promise<ConnectionTestResult>
   /** Lists the app's template configs, one page at a time. Credentials are never included. */
   list(options?: ListTemplateConfigsOptions): Promise<TemplateConfigPage>
+  /** Lists proxy executions for one config. Defaults: page 0, size 20, newest first. */
+  listExecutions(
+    configId: string,
+    options?: ListTemplateConfigsOptions,
+  ): Promise<Page<IntegrationExecution>>
+  getExecution(configId: string, executionId: string): Promise<IntegrationExecution>
 }
 
 export function createIntegrationAdminModule(
   transport: Transport,
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): IntegrationAdminModule {
+  const path = (id: string) =>
+    `/api/v1/template-configs/${encodePathSegment(id, "config id", errors)}`
   return {
+    async create(input) {
+      return expectTemplateConfig(
+        await transport.request<unknown>("/api/v1/template-configs", {
+          method: "POST",
+          body: input,
+        }),
+        "Create integration config response",
+        errors,
+      )
+    },
+
+    async update(id, input) {
+      return expectTemplateConfig(
+        await transport.request<unknown>(path(id), { method: "PUT", body: input }),
+        "Update integration config response",
+        errors,
+      )
+    },
+
+    async delete(id) {
+      expectEmpty(
+        await transport.request<unknown>(path(id), { method: "DELETE" }),
+        "Delete integration config response",
+        errors,
+      )
+    },
+
     async bulkCreate(configs): Promise<TemplateConfigBulkResult> {
       requireBatchSize(configs, "configs", MAX_CONFIGS, errors)
       return expectTemplateConfigBulkResult(
@@ -100,10 +148,7 @@ export function createIntegrationAdminModule(
 
     async testConfig(configId): Promise<ConnectionTestResult> {
       return expectConnectionTestResult(
-        await transport.request<unknown>(
-          `/api/v1/template-configs/${encodePathSegment(configId, "config id", errors)}/test`,
-          { method: "POST" },
-        ),
+        await transport.request<unknown>(`${path(configId)}/test`, { method: "POST" }),
         "Integration config test response",
         errors,
       )
@@ -118,6 +163,33 @@ export function createIntegrationAdminModule(
       return expectTemplateConfigPage(
         await transport.request<unknown>("/api/v1/template-configs", { method: "GET", params }),
         "Template config page response",
+        errors,
+      )
+    },
+
+    async listExecutions(configId, options = {}) {
+      return expectPage<IntegrationExecution>(
+        await transport.request<unknown>(`${path(configId)}/executions`, {
+          method: "GET",
+          params: {
+            page: options.page,
+            size: options.size,
+            sort: options.sort ?? "createdAt,desc",
+          },
+        }),
+        "Integration execution page response",
+        errors,
+        expectIntegrationExecution,
+      )
+    },
+
+    async getExecution(configId, executionId) {
+      return expectIntegrationExecution(
+        await transport.request<unknown>(
+          `${path(configId)}/executions/${encodePathSegment(executionId, "execution id", errors)}`,
+          { method: "GET" },
+        ),
+        "Integration execution response",
         errors,
       )
     },

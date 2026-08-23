@@ -1,18 +1,24 @@
 import { requireBatchSize } from "../batch"
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
-import { expectBatchExecution, expectSchemaTables } from "../response"
+import { expectBatchExecution, expectQueryResult, expectSchemaTables } from "../response"
 import type { QueryParamValue, Transport } from "../transport"
 import type {
   BatchExecution,
   DdlStatement,
   DmlStatement,
   ListTablesOptions,
+  QueryResult,
   SchemaTables,
 } from "../types"
 
 const MAX_STATEMENTS = 20
 
 export interface SqlModule {
+  /**
+   * Executes one parameterized SELECT, INSERT, UPDATE, or DELETE statement.
+   * Values must use named parameters and must not be interpolated into SQL.
+   */
+  executeQuery(sql: string, parameters?: Record<string, unknown>): Promise<QueryResult>
   /**
    * Runs 1 to 20 DDL statements in one transaction, in order, on the app's managed data source.
    *
@@ -36,6 +42,17 @@ export function createSqlModule(
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): SqlModule {
   return {
+    async executeQuery(sql, parameters = {}): Promise<QueryResult> {
+      return expectQueryResult(
+        await transport.request<unknown>("/api/v1/sql/execute", {
+          method: "POST",
+          body: { sql, parameters },
+        }),
+        "SQL execution response",
+        errors,
+      )
+    },
+
     async executeDdl(statements): Promise<BatchExecution> {
       requireBatchSize(statements, "statements", MAX_STATEMENTS, errors)
       return expectBatchExecution(

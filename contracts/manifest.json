@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "current": "0.2.0",
+  "current": "0.2.0-beta.0",
   "versions": [
     {
       "version": "0.1.0",
@@ -8,9 +8,13 @@
       "sha256": "600be3688cea7cfef16a8cf347516e87949b8e4151efb2c4136a2345557dde70"
     },
     {
-      "version": "0.2.0",
-      "path": "v0.2.0/sdk-parity.json",
-      "sha256": "acf78efb44e2ebcaa6fe5fd94efe626c6b73528e506ce6f24f6017a5ea9f4a86"
+      "version": "0.2.0-beta.0",
+      "path": "v0.2.0-beta.0/sdk-parity.json",
+      "sha256": "5c924d7eafc66e1618b243cd2979519736690699e70dfcce9198642fe2aad2bb",
+      "mcpToolsPath": "v0.2.0-beta.0/mcp-tool-parity.json",
+      "mcpToolsSha256": "2de14c63f5b6b0392fc7503ab33ccbcc0d95976335611d8cc67da7dd5cb88cee",
+      "mcpSourcePath": "v0.2.0-beta.0/mcp-alpha-tools.json",
+      "mcpSourceSha256": "480d27eed75f2604da07fadd10f236a0ca971cf6a3c003434a1fb62c4255178f"
     }
   ]
 }

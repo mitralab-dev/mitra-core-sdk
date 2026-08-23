@@ -1,12 +1,37 @@
 import { requireBatchSize } from "../batch"
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
-import { expectDataSourceBulkResult } from "../response"
-import type { Transport } from "../transport"
-import type { DataSourceBulkResult, DataSourceCreateInput, DataSourceUpdateInput } from "../types"
+import {
+  expectDataSourceBulkResult,
+  expectDataSourceDefinition,
+  expectEmpty,
+  expectPage,
+} from "../response"
+import { encodePathSegment } from "../path"
+import type { QueryParamValue, Transport } from "../transport"
+import type {
+  DataSourceBulkResult,
+  DataSourceCreateInput,
+  DataSourceDefinition,
+  DataSourceUpdateInput,
+  Page,
+  PageOptions,
+} from "../types"
 
 const MAX_DATA_SOURCES = 100
 
 export interface DataSourcesModule {
+  /** Lists safe Data Source metadata. Stored credentials are never returned. */
+  list(options?: PageOptions): Promise<Page<DataSourceDefinition>>
+  get(id: string): Promise<DataSourceDefinition>
+  /** Creates one external Data Source. */
+  create(input: DataSourceCreateInput): Promise<DataSourceDefinition>
+  /** Updates one external Data Source. Omitting credentials preserves stored values. */
+  update(
+    id: string,
+    input: Omit<DataSourceUpdateInput, "dataSourceId">,
+  ): Promise<DataSourceDefinition>
+  /** Permanently deletes one external Data Source. */
+  delete(id: string): Promise<void>
   /**
    * Registers 1 to 100 `EXTERNAL` data sources. Mitra-managed instance types are rejected.
    *
@@ -30,7 +55,55 @@ export function createDataSourcesModule(
   transport: Transport,
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): DataSourcesModule {
+  const path = (id: string) =>
+    `/api/v1/data-sources/${encodePathSegment(id, "data source id", errors)}`
   return {
+    async list(options = {}) {
+      const params: Record<string, QueryParamValue> = {
+        page: options.page,
+        size: options.size,
+        sort: options.sort,
+      }
+      return expectPage<DataSourceDefinition>(
+        await transport.request<unknown>("/api/v1/data-sources", { method: "GET", params }),
+        "Data Source page response",
+        errors,
+        expectDataSourceDefinition,
+      )
+    },
+
+    async get(id) {
+      return expectDataSourceDefinition(
+        await transport.request<unknown>(path(id), { method: "GET" }),
+        "Data Source response",
+        errors,
+      )
+    },
+
+    async create(input) {
+      return expectDataSourceDefinition(
+        await transport.request<unknown>("/api/v1/data-sources", { method: "POST", body: input }),
+        "Create Data Source response",
+        errors,
+      )
+    },
+
+    async update(id, input) {
+      return expectDataSourceDefinition(
+        await transport.request<unknown>(path(id), { method: "PUT", body: input }),
+        "Update Data Source response",
+        errors,
+      )
+    },
+
+    async delete(id) {
+      expectEmpty(
+        await transport.request<unknown>(path(id), { method: "DELETE" }),
+        "Delete Data Source response",
+        errors,
+      )
+    },
+
     async bulkCreate(dataSources): Promise<DataSourceBulkResult> {
       requireBatchSize(dataSources, "dataSources", MAX_DATA_SOURCES, errors)
       return expectDataSourceBulkResult(

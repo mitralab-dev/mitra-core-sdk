@@ -21,6 +21,7 @@ import type {
   DmlStatement,
   EntityListOptions,
   FunctionBulkDeleteInput,
+  FunctionBulkPatchItem,
   FunctionBulkUpdateItem,
   FunctionCreateInput,
   ListTablesOptions,
@@ -38,7 +39,7 @@ type JsonObject = Record<string, unknown>
 
 interface ContractRequest {
   service: "auth" | "dataManager" | "functions" | "integration"
-  method: "GET" | "POST" | "PUT" | "DELETE"
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
   path: string
   params?: Record<string, string | number | boolean>
   headers?: Record<string, string>
@@ -79,6 +80,7 @@ interface ContractCase {
     dataSourceIds?: string[]
     functions?: JsonObject[]
     functionUpdates?: FunctionBulkUpdateItem[]
+    functionPatches?: FunctionBulkPatchItem[]
     functionDeleteSelector?: FunctionBulkDeleteInput
     configs?: JsonObject[]
     configIds?: string[]
@@ -201,6 +203,7 @@ const operations = [
   "dataSources.bulkDelete",
   "functionsAdmin.bulkCreate",
   "functionsAdmin.bulkUpdate",
+  "functionsAdmin.bulkPatch",
   "functionsAdmin.bulkDelete",
   "integrationAdmin.bulkCreate",
   "integrationAdmin.bulkUpdate",
@@ -350,6 +353,10 @@ async function executeCase(testCase: ContractCase, transport: FixtureTransport):
       return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkUpdate(
         testCase.input.functionUpdates ?? [],
       )
+    case "functionsAdmin.bulkPatch":
+      return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkPatch(
+        testCase.input.functionPatches ?? [],
+      )
     case "functionsAdmin.bulkDelete":
       return createFunctionsAdminModule(transport, errorsFor(testCase)).bulkDelete(
         testCase.input.functionDeleteSelector ?? { allInApp: true },
@@ -403,7 +410,10 @@ describe("SDK-PARITY-001 contract fixture", () => {
     expect(manifest.contract).toBe("SDK-PARITY-001")
     const declaredPaths = manifest.versions.map(({ path }) => path).sort()
     const packagedPaths = readdirSync(contractsDirectory, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && /^v\d+\.\d+\.\d+$/.test(entry.name))
+      .filter(
+        (entry) =>
+          entry.isDirectory() && /^v\d+\.\d+\.\d+(?:-beta\.(?:0|[1-9]\d*))?$/.test(entry.name),
+      )
       .map((entry) => `${entry.name}/sdk-parity.json`)
       .sort()
     expect(declaredPaths).toEqual(packagedPaths)
@@ -426,7 +436,7 @@ describe("SDK-PARITY-001 contract fixture", () => {
     for (const row of fixture.matrix) {
       expect(row.javascript).not.toBe("")
       expect(row.python).not.toBe("")
-      expect(row.endpoint).toMatch(/^(GET|POST|PUT|DELETE) \/[a-z-]+\/api\/v1\//)
+      expect(row.endpoint).toMatch(/^(GET|POST|PUT|PATCH|DELETE) \/[a-z-]+\/api\/v1\//)
       expect(row.mcpTransportParity).toMatch(
         /^(exact|semantic-only|main-request-compatible|sdk-only)$/,
       )

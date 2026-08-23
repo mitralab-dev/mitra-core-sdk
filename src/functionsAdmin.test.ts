@@ -5,6 +5,8 @@ import {
   createFunctionsAdminModule,
 } from "./index"
 import type {
+  FunctionBulkCreateInput,
+  FunctionBulkPatchItem,
   FunctionCreateInput,
   FunctionDefinition,
   Transport,
@@ -31,7 +33,22 @@ class QueueTransport implements Transport {
 }
 
 function createInput(): FunctionCreateInput {
-  return { name: "sync orders", runtime: "JAVASCRIPT", code: "export default () => {}" }
+  return {
+    name: "sync orders",
+    runtime: "JAVASCRIPT",
+    code: "export default () => {}",
+    cronExpression: "0 0 9 * * *",
+    cronInputJson: { source: "create" },
+    cronEnabled: true,
+  }
+}
+
+function bulkCreateInput(): FunctionBulkCreateInput {
+  return {
+    name: "sync orders",
+    runtime: "JAVASCRIPT",
+    code: "export default () => {}",
+  }
 }
 
 function definition(): FunctionDefinition {
@@ -55,9 +72,18 @@ function definition(): FunctionDefinition {
       secrets: null,
       createdAt: "2026-01-01T00:00:00Z",
     },
+    cronExpression: "0 0 9 * * *",
+    cronInputJson: { source: "response" },
+    cronEnabled: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   }
+}
+
+function summary(): Omit<FunctionDefinition, "currentVersion"> {
+  const { currentVersion, ...value } = definition()
+  void currentVersion
+  return value
 }
 
 function omitField(value: object, field: string): Record<string, unknown> {
@@ -67,18 +93,159 @@ function omitField(value: object, field: string): Record<string, unknown> {
 }
 
 describe("functionsAdmin", () => {
-  it("builds create and update batch requests on the same path", async () => {
-    const transport = new QueueTransport([[definition()], [definition()]])
+  it("keeps composed schedule fields out of bulk create and bulk patch types", () => {
+    const createWithCronExpression: FunctionBulkCreateInput = {
+      ...bulkCreateInput(),
+      // @ts-expect-error Bulk create ignores embedded schedule fields in the pinned producer.
+      cronExpression: "0 0 9 * * *",
+    }
+    const createWithCronInput: FunctionBulkCreateInput = {
+      ...bulkCreateInput(),
+      // @ts-expect-error Bulk create ignores embedded schedule fields in the pinned producer.
+      cronInputJson: { source: "bulk" },
+    }
+    const createWithCronEnabled: FunctionBulkCreateInput = {
+      ...bulkCreateInput(),
+      // @ts-expect-error Bulk create ignores embedded schedule fields in the pinned producer.
+      cronEnabled: true,
+    }
+    const patchWithCronExpression: FunctionBulkPatchItem = {
+      id: "function-1",
+      update: {
+        // @ts-expect-error Bulk patch ignores embedded schedule fields in the pinned producer.
+        cronExpression: "",
+      },
+    }
+    const patchWithCronInput: FunctionBulkPatchItem = {
+      id: "function-1",
+      update: {
+        // @ts-expect-error Bulk patch ignores embedded schedule fields in the pinned producer.
+        cronInputJson: { source: "bulk" },
+      },
+    }
+    const patchWithCronEnabled: FunctionBulkPatchItem = {
+      id: "function-1",
+      update: {
+        // @ts-expect-error Bulk patch ignores embedded schedule fields in the pinned producer.
+        cronEnabled: false,
+      },
+    }
+
+    expect([
+      createWithCronExpression,
+      createWithCronInput,
+      createWithCronEnabled,
+      patchWithCronExpression,
+      patchWithCronInput,
+      patchWithCronEnabled,
+    ]).toHaveLength(6)
+  })
+
+  it.each([
+    ["cronExpression", "0 0 9 * * *"],
+    ["cronInputJson", { source: "bulk" }],
+    ["cronEnabled", true],
+  ] as const)(
+    "rejects own bulk create %s from a structural JavaScript value",
+    async (field, value) => {
+      const transport = new QueueTransport()
+      const functionsAdmin = createFunctionsAdminModule(transport)
+      const structuralInput = { ...bulkCreateInput(), [field]: value }
+
+      await expect(functionsAdmin.bulkCreate([structuralInput])).rejects.toEqual(
+        expect.objectContaining({
+          name: "SdkCoreConfigurationError",
+          message: `functionsAdmin.bulkCreate does not support ${field}; composed scheduling is supported only by single-Function create and patch`,
+        }),
+      )
+      expect(transport.requests).toHaveLength(0)
+    },
+  )
+
+  it.each([
+    ["cronExpression", ""],
+    ["cronInputJson", { source: "bulk" }],
+    ["cronEnabled", false],
+  ] as const)(
+    "rejects own bulk patch %s from a structural JavaScript value",
+    async (field, value) => {
+      const transport = new QueueTransport()
+      const functionsAdmin = createFunctionsAdminModule(transport)
+      const structuralItem = {
+        id: "function-1",
+        update: { description: "kept", [field]: value },
+      }
+
+      await expect(functionsAdmin.bulkPatch([structuralItem])).rejects.toEqual(
+        expect.objectContaining({
+          name: "SdkCoreConfigurationError",
+          message: `functionsAdmin.bulkPatch does not support ${field}; composed scheduling is supported only by single-Function create and patch`,
+        }),
+      )
+      expect(transport.requests).toHaveLength(0)
+    },
+  )
+
+  it("preserves schedule fields across create, patch, list, and get", async () => {
+    const created = definition()
+    const patched = {
+      ...definition(),
+      cronExpression: null,
+      cronInputJson: {},
+      cronEnabled: null,
+    }
+    const listed = summary()
+    const transport = new QueueTransport([
+      created,
+      patched,
+      { content: [listed], totalElements: 1 },
+      created,
+    ])
+    const functionsAdmin = createFunctionsAdminModule(transport)
+    const patch = { cronExpression: "", cronInputJson: {}, cronEnabled: null }
+
+    await expect(functionsAdmin.create(createInput())).resolves.toEqual(created)
+    await expect(functionsAdmin.patch("function/1", patch)).resolves.toEqual(patched)
+    await expect(functionsAdmin.list()).resolves.toMatchObject({ content: [listed] })
+    await expect(functionsAdmin.get("function/1")).resolves.toEqual(created)
+
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/functions",
+        options: { method: "POST", body: createInput() },
+      },
+      {
+        path: "/api/v1/functions/function%2F1",
+        options: { method: "PATCH", body: patch },
+      },
+      {
+        path: "/api/v1/functions",
+        options: {
+          method: "GET",
+          params: { page: undefined, size: undefined, sort: undefined, search: undefined },
+        },
+      },
+      {
+        path: "/api/v1/functions/function%2F1",
+        options: { method: "GET" },
+      },
+    ])
+  })
+
+  it("keeps full bulk PUT separate from partial bulk PATCH", async () => {
+    const transport = new QueueTransport([[definition()], [definition()], [definition()]])
     const functionsAdmin = createFunctionsAdminModule(transport)
 
-    await functionsAdmin.bulkCreate([createInput()])
+    await functionsAdmin.bulkCreate([bulkCreateInput()])
     await functionsAdmin.bulkUpdate([
       { id: "function-1", update: { name: "sync orders", code: "export default () => 1" } },
     ])
+    const patches = [{ id: "function-1", update: { description: null, secrets: [] } }]
+    await expect(functionsAdmin.bulkPatch(patches)).resolves.toEqual([definition()])
 
     expect(transport.requests[0]).toEqual({
       path: "/api/v1/functions/bulk",
-      options: { method: "POST", body: { functions: [createInput()] } },
+      options: { method: "POST", body: { functions: [bulkCreateInput()] } },
     })
     expect(transport.requests[1]).toEqual({
       path: "/api/v1/functions/bulk",
@@ -90,6 +257,10 @@ describe("functionsAdmin", () => {
           ],
         },
       },
+    })
+    expect(transport.requests[2]).toEqual({
+      path: "/api/v1/functions/bulk",
+      options: { method: "PATCH", body: { functions: patches } },
     })
   })
 
@@ -128,13 +299,14 @@ describe("functionsAdmin", () => {
   it("rejects empty and oversized batches before reaching the transport", async () => {
     const unused = new QueueTransport()
     const functionsAdmin = createFunctionsAdminModule(unused)
-    const oversized = Array.from({ length: 101 }, () => createInput())
+    const oversized = Array.from({ length: 101 }, () => bulkCreateInput())
 
     await expect(functionsAdmin.bulkCreate([])).rejects.toBeInstanceOf(SdkCoreConfigurationError)
     await expect(functionsAdmin.bulkCreate(oversized)).rejects.toThrow(
       "functions must contain between 1 and 100 items",
     )
     await expect(functionsAdmin.bulkUpdate([])).rejects.toBeInstanceOf(SdkCoreConfigurationError)
+    await expect(functionsAdmin.bulkPatch([])).rejects.toBeInstanceOf(SdkCoreConfigurationError)
     expect(unused.requests).toHaveLength(0)
   })
 
@@ -144,7 +316,7 @@ describe("functionsAdmin", () => {
     ]
     const functionsAdmin = createFunctionsAdminModule(new QueueTransport([response]))
 
-    await expect(functionsAdmin.bulkCreate([createInput()])).resolves.toEqual(response)
+    await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).resolves.toEqual(response)
   })
 
   it.each([
@@ -158,6 +330,9 @@ describe("functionsAdmin", () => {
     "dataSourceId",
     "visibility",
     "currentVersion",
+    "cronExpression",
+    "cronInputJson",
+    "cronEnabled",
     "createdAt",
     "updatedAt",
   ])("rejects a returned Function without %s", async (field) => {
@@ -165,9 +340,29 @@ describe("functionsAdmin", () => {
       new QueueTransport([[omitField(definition(), field)]]),
     )
 
-    await expect(functionsAdmin.bulkCreate([createInput()])).rejects.toBeInstanceOf(
+    await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).rejects.toBeInstanceOf(
       SdkCoreResponseError,
     )
+  })
+
+  it.each([
+    ["create", { ...definition(), cronExpression: 1 }],
+    ["patch", { ...definition(), cronInputJson: [] }],
+    ["get", { ...definition(), cronEnabled: "yes" }],
+    ["list", { ...summary(), cronInputJson: { invalid: Number.NaN } }],
+  ])("rejects invalid schedule fields from %s responses", async (operation, response) => {
+    const transportResponse =
+      operation === "list" ? { content: [response], totalElements: 1 } : response
+    const functionsAdmin = createFunctionsAdminModule(new QueueTransport([transportResponse]))
+
+    const request = {
+      create: () => functionsAdmin.create(createInput()),
+      patch: () => functionsAdmin.patch("function-1", { cronEnabled: false }),
+      get: () => functionsAdmin.get("function-1"),
+      list: () => functionsAdmin.list(),
+    }[operation]!
+
+    await expect(request()).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 
   it.each(["id", "functionId", "status", "code", "createdAt"])(
@@ -180,7 +375,7 @@ describe("functionsAdmin", () => {
         ]),
       )
 
-      await expect(functionsAdmin.bulkCreate([createInput()])).rejects.toBeInstanceOf(
+      await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).rejects.toBeInstanceOf(
         SdkCoreResponseError,
       )
     },
@@ -196,7 +391,7 @@ describe("functionsAdmin", () => {
         ]),
       )
 
-      await expect(functionsAdmin.bulkCreate([createInput()])).rejects.toBeInstanceOf(
+      await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).rejects.toBeInstanceOf(
         SdkCoreResponseError,
       )
     },
@@ -221,7 +416,9 @@ describe("functionsAdmin", () => {
       new QueueTransport([[{ ...definition(), name: { value: sensitiveValue } }]]),
     )
 
-    const error = await functionsAdmin.bulkCreate([createInput()]).catch((cause: unknown) => cause)
+    const error = await functionsAdmin
+      .bulkCreate([bulkCreateInput()])
+      .catch((cause: unknown) => cause)
 
     expect(error).toMatchObject({
       message: "Function bulk create response item 0 has an invalid name field",

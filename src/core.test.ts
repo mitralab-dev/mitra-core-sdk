@@ -512,6 +512,47 @@ describe("integration", () => {
     })
   })
 
+  it("executes a config by alias with an encoded path and SDK source", async () => {
+    const transport = new QueueTransport([result])
+    const integration = createIntegrationModule(transport)
+
+    await expect(
+      integration.executeByAlias("primary/crm", {
+        method: "POST",
+        endpoint: "/orders",
+        headers: { "x-client": "agent-minimal" },
+        body: { id: "order-1" },
+      }),
+    ).resolves.toEqual(result)
+
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/proxy/template-configs/by-alias/primary%2Fcrm/execute",
+        options: {
+          method: "POST",
+          body: {
+            method: "POST",
+            endpoint: "/orders",
+            headers: { "x-client": "agent-minimal" },
+            body: { id: "order-1" },
+            source: "SDK",
+          },
+        },
+      },
+    ])
+  })
+
+  it("rejects unsafe aliases and invalid alias execution results", async () => {
+    const integration = createIntegrationModule(new QueueTransport([null]))
+
+    await expect(
+      integration.executeByAlias("..", { method: "GET", endpoint: "/" }),
+    ).rejects.toThrow("alias must not be a dot segment")
+    await expect(
+      integration.executeByAlias("primary", { method: "GET", endpoint: "/" }),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+
   it("uses empty resource params and rejects unsafe IDs or invalid results", async () => {
     const transport = new QueueTransport([result, null])
     const integration = createIntegrationModule(transport)

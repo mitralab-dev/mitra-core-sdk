@@ -55,7 +55,7 @@ function summary(): TemplateConfigSummary {
     legacyId: null,
     templateId: "template-1",
     alias: "crm",
-    status: "ok",
+    status: "connected",
     lastCheckedAt: null,
   }
 }

@@ -1,11 +1,12 @@
 {
   "contract": "SDK-PARITY-001",
-  "version": "0.2.0",
+  "version": "0.2.0-beta.0",
   "description": "Canonical semantic and HTTP contract fixtures for the Mitra runtime SDKs.",
   "sources": {
     "mcp": {
       "repository": "mitralab-dev/mitra-mcp-server",
-      "commit": "12f33cceb94eaf6ed69f9ed9127f6a5260a7c2e9",
+      "ref": "origin/alpha",
+      "commit": "4034ae9086d7599ff1767af0845803f616132b9d",
       "paths": [
         "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerRecordTools.java",
         "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerCustomQueryTools.java",
@@ -17,14 +18,16 @@
     },
     "dataManagerMain": {
       "repository": "mitralab-dev/mitra-data-manager",
-      "commit": "4ec85ceac720da5d056cc85fecd6b27104e13396",
+      "ref": "origin/main",
+      "commit": "89b5de10659d49284d963e744484ee118eaf66c3",
       "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
       "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
       "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java"
     },
     "dataManagerAlpha": {
       "repository": "mitralab-dev/mitra-data-manager",
-      "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+      "ref": "origin/alpha",
+      "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
       "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
       "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
       "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java",
@@ -33,10 +36,8 @@
     },
     "dataManagerBuilder": {
       "repository": "mitralab-dev/mitra-data-manager",
-      "status": "unmerged-pull-request",
-      "pullRequests": [226, 234],
-      "commit": "0850ac84004290e408c1b7581a1a9414414afe57",
-      "stackedCommit": "3f1886c67f462b4c31d957502af50bad9fbbd4e6",
+      "ref": "origin/alpha",
+      "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
       "paths": [
         "api/src/main/java/io/mitralab/datamanager/infrastructure/api/SqlBatchController.java",
         "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/BatchExecuteResponse.java",
@@ -51,22 +52,25 @@
     },
     "functionsBuilder": {
       "repository": "mitralab-dev/mitra-functions",
-      "status": "unmerged-pull-request",
-      "pullRequests": [275],
-      "commit": "204b53dd04a2b722979f3b3926399b5cf6bf3d33",
+      "ref": "origin/alpha",
+      "commit": "77ffe97d9398686ea6cf575e1d04d9cfb782d274",
       "paths": [
         "src/main/java/io/mitralab/functions/infrastructure/api/FunctionController.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionCreateRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionPatchRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionResponse.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionShortResponse.java",
         "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkCreateRequest.java",
         "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkUpdateRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkPatchRequest.java",
         "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkDeleteRequest.java",
         "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkDeleteResponse.java"
       ]
     },
     "integrationBuilder": {
       "repository": "mitralab-dev/mitra-integration",
-      "status": "unmerged-pull-request",
-      "pullRequests": [160],
-      "commit": "7312ab028bce22a05bb4ca5595d0fe6cf1a05c3c",
+      "ref": "origin/alpha",
+      "commit": "fcb78ce52dd132953f5a4ead8613bac4233812af",
       "paths": [
         "src/main/java/io/mitralab/integration/infrastructure/api/TemplateConfigController.java",
         "src/main/java/io/mitralab/integration/infrastructure/api/dto/BulkCreateTemplateConfigsRequest.java",
@@ -78,9 +82,8 @@
     },
     "iamBuilder": {
       "repository": "mitralab-dev/mitra-iam",
-      "status": "unmerged-pull-request",
-      "pullRequests": [294],
-      "commit": "a3dec0f31ef9a9b299f94abceee46f2517a8fc5e",
+      "ref": "origin/alpha",
+      "commit": "342f16e523c866371a60a25ffde811de346c5391",
       "paths": [
         "src/main/java/io/mitralab/iam/infrastructure/api/MemberController.java",
         "src/main/java/io/mitralab/iam/infrastructure/api/dto/EffectiveAppUserResponse.java"
@@ -88,9 +91,8 @@
     },
     "mcpBuilder": {
       "repository": "mitralab-dev/mitra-mcp-server",
-      "status": "unmerged-pull-request",
-      "pullRequests": [106],
-      "commit": "f43a0ea0160c8674596bfe731629fcebde78af21",
+      "ref": "origin/alpha",
+      "commit": "4034ae9086d7599ff1767af0845803f616132b9d",
       "paths": [
         "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerQueryTools.java",
         "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerSchemaTools.java",
@@ -287,10 +289,18 @@
     },
     {
       "operation": "functionsAdmin.bulkUpdate",
-      "mcpTool": "bulkUpdateFunctions",
+      "mcpTool": null,
       "javascript": "functionsAdmin.bulkUpdate(functions)",
       "python": "functions_admin.bulk_update(functions)",
       "endpoint": "PUT /functions/api/v1/functions/bulk",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "functionsAdmin.bulkPatch",
+      "mcpTool": "bulkUpdateFunctions",
+      "javascript": "functionsAdmin.bulkPatch(functions)",
+      "python": "functions_admin.bulk_patch(functions)",
+      "endpoint": "PATCH /functions/api/v1/functions/bulk",
       "mcpTransportParity": "exact"
     },
     {
@@ -1534,6 +1544,9 @@
               "secrets": ["ORDERS_TOKEN"],
               "createdAt": "2026-08-18T12:00:00Z"
             },
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
             "createdAt": "2026-08-18T12:00:00Z",
             "updatedAt": "2026-08-18T12:00:00Z"
           }
@@ -1564,6 +1577,9 @@
             "secrets": ["ORDERS_TOKEN"],
             "createdAt": "2026-08-18T12:00:00Z"
           },
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
           "createdAt": "2026-08-18T12:00:00Z",
           "updatedAt": "2026-08-18T12:00:00Z"
         }
@@ -1623,6 +1639,9 @@
               "secrets": null,
               "createdAt": "2026-08-18T12:05:00Z"
             },
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
             "createdAt": "2026-08-18T12:00:00Z",
             "updatedAt": "2026-08-18T12:05:00Z"
           }
@@ -1649,8 +1668,84 @@
             "secrets": null,
             "createdAt": "2026-08-18T12:05:00Z"
           },
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
           "createdAt": "2026-08-18T12:00:00Z",
           "updatedAt": "2026-08-18T12:05:00Z"
+        }
+      ]
+    },
+    {
+      "id": "functions-admin.bulk-patch.success",
+      "kind": "success",
+      "operation": "functionsAdmin.bulkPatch",
+      "input": {
+        "functionPatches": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "update": {
+              "description": "Preserved patch semantics",
+              "secrets": []
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "functions",
+        "method": "PATCH",
+        "path": "/api/v1/functions/bulk",
+        "body": {
+          "functions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000601",
+              "update": {
+                "description": "Preserved patch semantics",
+                "secrets": []
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "tenantId": "00000000-0000-4000-8000-000000000011",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "name": "sync orders",
+            "description": "Preserved patch semantics",
+            "runtime": "JAVASCRIPT",
+            "dataSourceId": null,
+            "visibility": "PRIVATE",
+            "currentVersion": null,
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
+            "createdAt": "2026-08-18T12:00:00Z",
+            "updatedAt": "2026-08-18T12:06:00Z"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "id": "00000000-0000-4000-8000-000000000601",
+          "tenantId": "00000000-0000-4000-8000-000000000011",
+          "appId": "00000000-0000-4000-8000-000000000012",
+          "legacyId": null,
+          "name": "sync orders",
+          "description": "Preserved patch semantics",
+          "runtime": "JAVASCRIPT",
+          "dataSourceId": null,
+          "visibility": "PRIVATE",
+          "currentVersion": null,
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
+          "createdAt": "2026-08-18T12:00:00Z",
+          "updatedAt": "2026-08-18T12:06:00Z"
         }
       ]
     },
@@ -2403,7 +2498,7 @@
       },
       "source": {
         "service": "mitra-data-manager",
-        "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+        "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
         "handler": "GlobalExceptionHandler.handleNotFound",
         "useCase": "ExecuteSqlUseCase.execute",
         "integrationTest": "CustomQueryControllerTest.Execute.execute_withDataSourceAssociatedToAnotherApp_shouldFailClosed"
@@ -2450,7 +2545,7 @@
       },
       "source": {
         "service": "mitra-data-manager",
-        "commit": "ee49949c362f87ac9a8dbb38117236cee842f2ed",
+        "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
         "handler": "GlobalExceptionHandler.handleDatabaseException"
       },
       "request": {

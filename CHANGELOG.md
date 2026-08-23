@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0-beta.0
+
+This working tree prepares the `0.2.0-beta.0` package. Publication provenance remains
+unreleased until the final source commit and registry artifact exist.
+
+- Map all 120 tools exposed by the MCP alpha catalog to direct, split, alias, or
+  composition-based typed Core capabilities in a versioned parity artifact.
+- Add Code Studio app, file, build, deploy, version, and rollback operations.
+- Include the producer-supported app icon in create inputs and document Code
+  Studio deploy and version pagination defaults.
+- Add schema, custom query, import, full Data Source, Function administration,
+  agent, workflow, integration resource/template, Copilot, Messenger, member,
+  and app context operations.
+- Add synchronous and asynchronous anonymous public Function execution through
+  a dedicated optional transport with no authenticated-transport fallback.
+- Add structural page and nullable response helpers while preserving the
+  dependency-free injected transport architecture.
+- Preserve full Function batch replacement over PUT while mapping the MCP
+  `bulkUpdateFunctions` patch semantics to a separate PATCH operation.
+- Add embedded cron fields to single-Function create and patch inputs and
+  validate those fields in detail and list responses. Dedicated bulk input
+  types exclude the schedule fields discarded by the producer's bulk paths.
+- Keep scheduling on the composed Function contract and omit the duplicate
+  schedule lifecycle facade and single-Function full-replacement PUT.
+- Map MCP Function execution lookup to the nested administration route that
+  requires both Function and execution identifiers.
+- Separate producer summary and detail DTOs for apps, integration templates,
+  template configs, and integration resources, and validate their complete
+  response shapes together with app versions and Workflow executions.
+- Apply newest-first Code Studio deploy and version sorting by default while
+  preserving an explicit caller sort.
+- Execute integration template configs by app-scoped alias with the same proxy
+  request and response contract used for config identifiers.
+- Keep resource execution on `integration.executeResource()` and omit the
+  duplicate authoring-module method. Document `integrationAdmin.list()` as the
+  direct app-scoped integration listing contract.
+- Forward optional Virtual Table and connection settings when creating Custom
+  Queries.
+- Forward each Agent session's transport preference to the concrete event
+  source without coupling Core to HTTP or WebSocket.
+
 ## 0.1.0
 
 - Add environment-neutral transport and error interfaces.

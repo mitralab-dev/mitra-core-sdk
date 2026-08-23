@@ -7,12 +7,14 @@ import { validateContractCorpus } from "./contract-manifest.mjs"
 
 const consumerDirectory = mkdtempSync(join(tmpdir(), "mitra-core-sdk-smoke-"))
 const typeScriptCompiler = join(process.cwd(), "node_modules", "typescript", "bin", "tsc")
+const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm"
+const npmShell = process.platform === "win32"
 
 try {
   const packOutput = execFileSync(
-    "npm",
+    npmExecutable,
     ["pack", "--json", "--pack-destination", consumerDirectory],
-    { encoding: "utf8" },
+    { encoding: "utf8", shell: npmShell },
   )
   const [{ filename }] = JSON.parse(packOutput)
   const tarball = join(consumerDirectory, filename)
@@ -21,21 +23,48 @@ try {
     join(consumerDirectory, "package.json"),
     JSON.stringify({ name: "sdk-core-smoke-consumer", private: true, type: "module" }),
   )
-  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+  execFileSync(npmExecutable, ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
     cwd: consumerDirectory,
+    shell: npmShell,
     stdio: "inherit",
   })
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createSdkCore, type Plan, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type CustomQueryInput, type FunctionCreateInput, type Plan, type Transport } from "@mitralab.io/sdk-core"
 const plan: Plan = { id: "plan-1", name: "Free" }
+const customQuery: CustomQueryInput = {
+  name: "external_orders",
+  sql: "SELECT 1",
+  isVirtualTable: true,
+  connectionId: "connection-1",
+}
 const transport: Transport = { request: async <T,>() => ({}) as T }
+const scheduledFunction: FunctionCreateInput = {
+  name: "Nightly sync",
+  runtime: "JAVASCRIPT",
+  code: "export default () => ({})",
+  cronExpression: "0 0 9 * * *",
+  cronInputJson: { source: "cron" },
+  cronEnabled: true,
+}
 const core = createSdkCore({
   transports: { auth: transport, dataManager: transport, functions: transport, integration: transport },
   getDataSourceId: () => "data-source",
 })
+const eventSource: AgentTaskEventSource = {
+  open: async () => ({ close() {} }),
+}
+const agentTasks = withAgentTaskSessions(
+  core.agentTasks,
+  createAgentTaskSessionManager({ tasks: core.agentTasks, eventSource }),
+)
+void agentTasks.session
+void core.integration.executeByAlias
+void core.integrationAdmin.list
 void core
+void scheduledFunction
+void customQuery
 void plan
 `
   writeFileSync(join(consumerDirectory, "consumer.mts"), source)
@@ -44,11 +73,37 @@ void plan
     `import core = require("@mitralab.io/sdk-core")
 const transport: core.Transport = { request: async <T,>() => ({}) as T }
 const plan: core.Plan = { id: "plan-1", name: "Free" }
+const customQuery: core.CustomQueryInput = {
+  name: "external_orders",
+  sql: "SELECT 1",
+  isVirtualTable: true,
+  connectionId: "connection-1",
+}
+const scheduledFunction: core.FunctionCreateInput = {
+  name: "Nightly sync",
+  runtime: "JAVASCRIPT",
+  code: "export default () => ({})",
+  cronExpression: "0 0 9 * * *",
+  cronInputJson: { source: "cron" },
+  cronEnabled: true,
+}
 const client: core.SdkCore = core.createSdkCore({
   transports: { auth: transport, dataManager: transport, functions: transport, integration: transport },
   getDataSourceId: () => "data-source",
 })
+const eventSource: core.AgentTaskEventSource = {
+  open: async () => ({ close() {} }),
+}
+const agentTasks = core.withAgentTaskSessions(
+  client.agentTasks,
+  core.createAgentTaskSessionManager({ tasks: client.agentTasks, eventSource }),
+)
+void agentTasks.session
+void client.integration.executeByAlias
+void client.integrationAdmin.list
 void client
+void scheduledFunction
+void customQuery
 void plan
 `,
   )
@@ -75,7 +130,7 @@ void plan
     [
       "--input-type=module",
       "--eval",
-      'import { createSdkCore, encodePathSegment } from "@mitralab.io/sdk-core"; if (![createSdkCore, encodePathSegment].every((value) => typeof value === "function")) process.exit(1)',
+      'import { createAgentTaskSessionManager, createSdkCore, encodePathSegment, withAgentTaskSessions } from "@mitralab.io/sdk-core"; if (![createAgentTaskSessionManager, createSdkCore, encodePathSegment, withAgentTaskSessions].every((value) => typeof value === "function")) process.exit(1)',
     ],
     { cwd: consumerDirectory, stdio: "inherit" },
   )
@@ -83,7 +138,7 @@ void plan
     process.execPath,
     [
       "--eval",
-      'const sdk = require("@mitralab.io/sdk-core"); if (![sdk.createSdkCore, sdk.encodePathSegment].every((value) => typeof value === "function")) process.exit(1)',
+      'const sdk = require("@mitralab.io/sdk-core"); if (![sdk.createAgentTaskSessionManager, sdk.createSdkCore, sdk.encodePathSegment, sdk.withAgentTaskSessions].every((value) => typeof value === "function")) process.exit(1)',
     ],
     { cwd: consumerDirectory, stdio: "inherit" },
   )
