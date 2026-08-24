@@ -216,9 +216,9 @@ export function expectTenant(
   if (typeof tenant.shortId !== "string") invalidField(context, "shortId", errors)
   if (!isNullableInteger(tenant.legacyId)) invalidField(context, "legacyId", errors)
   if (typeof tenant.slug !== "string") invalidField(context, "slug", errors)
-  if (!isObject(tenant.plan)) invalidField(context, "plan", errors)
-  if (typeof tenant.plan.id !== "string") invalidField(`${context} plan`, "id", errors)
-  if (typeof tenant.plan.name !== "string") invalidField(`${context} plan`, "name", errors)
+  if (!isOneOf(tenant.clusterType, ["SHARED", "DEDICATED"] as const)) {
+    invalidField(context, "clusterType", errors)
+  }
   if (typeof tenant.name !== "string") invalidField(context, "name", errors)
   if (!isNullableString(tenant.description)) invalidField(context, "description", errors)
   if (!isNullableString(tenant.hexColor)) invalidField(context, "hexColor", errors)

@@ -1,9 +1,3 @@
-export interface Plan {
-  id: string
-  name: string
-  [key: string]: unknown
-}
-
 export interface PlanPrice {
   currency: string
   amountMinorUnits: number
@@ -23,7 +17,7 @@ export interface Tenant {
   shortId: string
   legacyId: number | null
   slug: string
-  plan: Plan
+  clusterType: "SHARED" | "DEDICATED"
   name: string
   description: string | null
   hexColor: string | null

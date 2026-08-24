@@ -205,7 +205,6 @@ export type {
   OAuthStartResult,
   Page,
   PageOptions,
-  Plan,
   PlanPrice,
   ProxyInput,
   ProxyResult,

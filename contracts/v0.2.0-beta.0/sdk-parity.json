@@ -77,7 +77,11 @@
       "ref": "origin/alpha",
       "commit": "6337ced228bfd0c2244a23a09142a34ac7e87aad",
       "paths": [
+        "src/main/java/io/mitralab/iam/domain/entity/ClusterType.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/AuthController.java",
         "src/main/java/io/mitralab/iam/infrastructure/api/MemberController.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/dto/CurrentUserResponse.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/dto/TenantResponse.java",
         "src/main/java/io/mitralab/iam/infrastructure/api/dto/EffectiveAppUserResponse.java"
       ]
     },
@@ -405,10 +409,7 @@
             "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
             "legacyId": null,
             "slug": "tenant-one",
-            "plan": {
-              "id": "plan-1",
-              "name": "Free"
-            },
+            "clusterType": "SHARED",
             "name": "Tenant One",
             "description": null,
             "hexColor": null,
@@ -431,10 +432,7 @@
           "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
           "legacyId": null,
           "slug": "tenant-one",
-          "plan": {
-            "id": "plan-1",
-            "name": "Free"
-          },
+          "clusterType": "SHARED",
           "name": "Tenant One",
           "description": null,
           "hexColor": null,
@@ -2088,6 +2086,51 @@
     }
   ],
   "responseValidationCases": [
+    {
+      "id": "auth.me.invalid-cluster-type",
+      "kind": "invalid-payload",
+      "operation": "auth.me",
+      "input": {},
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "user-1",
+          "tenant": {
+            "id": "tenant-1",
+            "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+            "legacyId": null,
+            "slug": "tenant-one",
+            "clusterType": "UNKNOWN",
+            "name": "Tenant One",
+            "description": null,
+            "hexColor": null,
+            "icon": null,
+            "infraStatus": "ACTIVE",
+            "active": true
+          },
+          "name": "Test User",
+          "email": "user@example.com",
+          "imageUrl": null,
+          "planId": "plan-1",
+          "onboardingCompleted": false,
+          "language": "pt-BR"
+        }
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Current user response tenant has an invalid clusterType field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
     {
       "id": "queries.execute.invalid-payload",
       "kind": "invalid-payload",

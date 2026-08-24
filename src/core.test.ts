@@ -66,7 +66,7 @@ function currentUser(): User {
       shortId: "AAAAAAAAAAAAAAAAAAAAEA",
       legacyId: null,
       slug: "tenant-one",
-      plan: { id: "plan-1", name: "Free" },
+      clusterType: "SHARED",
       name: "Tenant One",
       description: null,
       hexColor: null,
@@ -155,17 +155,24 @@ describe("createSdkCore", () => {
 })
 
 describe("auth", () => {
-  it("accepts the canonical user and nested tenant, including nullable fields", async () => {
-    const user = currentUser()
-    const auth = createAuthModule(new QueueTransport([{ ...user, futureField: true }]))
+  it.each(["SHARED", "DEDICATED"] as const)(
+    "accepts the canonical user and nested tenant with %s cluster type, including nullable fields",
+    async (clusterType) => {
+      const canonicalUser = currentUser()
+      const user = {
+        ...canonicalUser,
+        tenant: { ...canonicalUser.tenant, clusterType },
+      }
+      const auth = createAuthModule(new QueueTransport([{ ...user, futureField: true }]))
 
-    await expect(auth.me()).resolves.toMatchObject({
-      id: "user-1",
-      tenant: { id: "tenant-1", legacyId: null },
-      name: "Test User",
-      imageUrl: null,
-    })
-  })
+      await expect(auth.me()).resolves.toMatchObject({
+        id: "user-1",
+        tenant: { id: "tenant-1", legacyId: null, clusterType },
+        name: "Test User",
+        imageUrl: null,
+      })
+    },
+  )
 
   it.each([
     "id",
@@ -187,7 +194,7 @@ describe("auth", () => {
     "shortId",
     "legacyId",
     "slug",
-    "plan",
+    "clusterType",
     "name",
     "description",
     "hexColor",
@@ -205,8 +212,7 @@ describe("auth", () => {
 
   it.each([
     { ...currentUser(), tenant: { ...currentUser().tenant, legacyId: 1.5 } },
-    { ...currentUser(), tenant: { ...currentUser().tenant, plan: {} } },
-    { ...currentUser(), tenant: { ...currentUser().tenant, plan: { id: "plan-1", name: 1 } } },
+    { ...currentUser(), tenant: { ...currentUser().tenant, clusterType: "UNKNOWN" } },
   ])("rejects invalid nested tenant values %#", async (response) => {
     const auth = createAuthModule(new QueueTransport([response]))
 

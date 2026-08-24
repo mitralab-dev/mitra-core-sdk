@@ -494,7 +494,9 @@ describe("SDK-PARITY-001 contract fixture", () => {
   })
 
   it("does not let fixture data overwrite a validator error message", async () => {
-    const canonicalCase = fixture.responseValidationCases[0]
+    const canonicalCase = fixture.responseValidationCases.find(
+      ({ id }) => id === "queries.execute.invalid-payload",
+    )
     if (!canonicalCase?.expectedError) throw new Error("Missing response validation fixture")
     const mutatedCase: ContractCase = {
       ...canonicalCase,

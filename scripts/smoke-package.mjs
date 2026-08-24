@@ -31,8 +31,20 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type CustomQueryInput, type FunctionCreateInput, type Plan, type Transport } from "@mitralab.io/sdk-core"
-const plan: Plan = { id: "plan-1", name: "Free" }
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+const tenant: Tenant = {
+  id: "tenant-1",
+  shortId: "AAAAAAAAAAAAAAAAAAAAEA",
+  legacyId: null,
+  slug: "tenant-one",
+  clusterType: "SHARED",
+  name: "Tenant One",
+  description: null,
+  hexColor: null,
+  icon: null,
+  infraStatus: "ACTIVE",
+  active: true,
+}
 const customQuery: CustomQueryInput = {
   name: "external_orders",
   sql: "SELECT 1",
@@ -64,14 +76,26 @@ void core.integrationAdmin.list
 void core
 void scheduledFunction
 void customQuery
-void plan
+void tenant
 `
   writeFileSync(join(consumerDirectory, "consumer.mts"), source)
   writeFileSync(
     join(consumerDirectory, "consumer.cts"),
     `import core = require("@mitralab.io/sdk-core")
 const transport: core.Transport = { request: async <T,>() => ({}) as T }
-const plan: core.Plan = { id: "plan-1", name: "Free" }
+const tenant: core.Tenant = {
+  id: "tenant-1",
+  shortId: "AAAAAAAAAAAAAAAAAAAAEA",
+  legacyId: null,
+  slug: "tenant-one",
+  clusterType: "SHARED",
+  name: "Tenant One",
+  description: null,
+  hexColor: null,
+  icon: null,
+  infraStatus: "ACTIVE",
+  active: true,
+}
 const customQuery: core.CustomQueryInput = {
   name: "external_orders",
   sql: "SELECT 1",
@@ -102,7 +126,7 @@ void client.integrationAdmin.list
 void client
 void scheduledFunction
 void customQuery
-void plan
+void tenant
 `,
   )
   execFileSync(
