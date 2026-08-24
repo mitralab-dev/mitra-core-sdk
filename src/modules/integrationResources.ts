@@ -4,7 +4,7 @@ import {
   expectEmpty,
   expectIntegrationResource,
   expectIntegrationResourceSummary,
-  expectPage,
+  expectLegacyPage,
 } from "../response"
 import type { QueryParamValue, Transport } from "../transport"
 import type {
@@ -12,13 +12,13 @@ import type {
   IntegrationResourceInput,
   IntegrationResourceSummary,
   IntegrationResourceUpdateInput,
-  Page,
+  LegacyPage,
   PageOptions,
 } from "../types"
 
 export interface IntegrationResourcesModule {
   /** Lists resources. Defaults: page 0, size 20, sort name ascending. */
-  list(options?: PageOptions): Promise<Page<IntegrationResourceSummary>>
+  list(options?: PageOptions): Promise<LegacyPage<IntegrationResourceSummary>>
   /** Gets one complete resource, including body, parameter schema, owner, and timestamps. */
   get(id: string): Promise<IntegrationResource>
   create(input: IntegrationResourceInput): Promise<IntegrationResource>
@@ -40,7 +40,7 @@ export function createIntegrationResourcesModule(
         size: options.size,
         sort: options.sort,
       }
-      return expectPage<IntegrationResourceSummary>(
+      return expectLegacyPage<IntegrationResourceSummary>(
         await transport.request<unknown>("/api/v1/integration-resources", {
           method: "GET",
           params,

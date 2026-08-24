@@ -69,7 +69,6 @@ interface ContractCase {
     skip?: number
     fields?: string[]
     id?: string
-    dataSourceId?: string
     parameters?: JsonObject
     data?: JsonObject | JsonObject[]
     body?: JsonObject
@@ -116,24 +115,12 @@ interface ContractFixture {
     endpoint: string
     mcpTransportParity: string
   }>
-  customQueryTransition: {
-    currentSdkTarget: "main"
-    sharedRequestBody: JsonObject
-    main: {
-      acceptsSharedRequestBody: boolean
-      dataSourceIdTransportBehavior: "consumed"
-      dataSourceResolution: "request-body"
-    }
-    alpha: {
-      acceptsSharedRequestBody: boolean
-      dataSourceIdTransportBehavior: "ignored"
-      dataSourceResolution: "authenticated-app"
-      semanticCompatibility: string
-    }
-    singlePayloadTransportCompatibility: boolean
-    automaticFallbackAllowed: boolean
-    automaticFallbackReason: string
-    removeDataSourceIdGate: string[]
+  customQueryExecution: {
+    sdkTarget: "alpha"
+    requestBody: JsonObject
+    dataSourceResolution: "authenticated-app"
+    declaresDataSourceId: false
+    adapterRequirement: string
   }
   consumerRequirements: Record<string, Record<string, "all">>
   cases: ContractCase[]
@@ -248,7 +235,7 @@ function errorsFor(testCase: ContractCase): SdkCoreErrorFactory {
   }
 }
 
-function requireString(testCase: ContractCase, field: "id" | "table" | "dataSourceId"): string {
+function requireString(testCase: ContractCase, field: "id" | "table"): string {
   const value = testCase.input[field]
   if (!value) throw new Error(`Fixture ${testCase.id} has no ${field}`)
   return value
@@ -286,8 +273,7 @@ async function executeCase(testCase: ContractCase, transport: FixtureTransport):
     case "entities.deleteMany":
       return table?.deleteMany(testCase.input.query ?? {})
     case "queries.execute": {
-      const dataSourceId = requireString(testCase, "dataSourceId")
-      return createQueriesModule(transport, () => dataSourceId, errorsFor(testCase)).execute(
+      return createQueriesModule(transport, errorsFor(testCase)).execute(
         requireString(testCase, "id"),
         testCase.input.parameters,
       )
@@ -523,27 +509,15 @@ describe("SDK-PARITY-001 contract fixture", () => {
     })
   })
 
-  it("records real main and alpha custom query transport behavior", () => {
-    const transition = fixture.customQueryTransition
+  it("records the alpha custom query execution contract", () => {
+    const execution = fixture.customQueryExecution
     const queryCase = fixture.cases.find(({ operation }) => operation === "queries.execute")
 
-    expect(transition.currentSdkTarget).toBe("main")
-    expect(transition.sharedRequestBody).toEqual(queryCase?.request.body)
-    expect(transition.main).toMatchObject({
-      acceptsSharedRequestBody: true,
-      dataSourceIdTransportBehavior: "consumed",
-      dataSourceResolution: "request-body",
-    })
-    expect(transition.alpha).toMatchObject({
-      acceptsSharedRequestBody: true,
-      dataSourceIdTransportBehavior: "ignored",
-      dataSourceResolution: "authenticated-app",
-    })
-    expect(transition.alpha.semanticCompatibility).not.toBe("")
-    expect(transition.singlePayloadTransportCompatibility).toBe(true)
-    expect(transition.automaticFallbackAllowed).toBe(false)
-    expect(transition.automaticFallbackReason).toContain("execute a query twice")
-    expect(transition.removeDataSourceIdGate.length).toBeGreaterThan(0)
+    expect(execution.sdkTarget).toBe("alpha")
+    expect(execution.requestBody).toEqual(queryCase?.request.body)
+    expect(execution.dataSourceResolution).toBe("authenticated-app")
+    expect(execution.declaresDataSourceId).toBe(false)
+    expect(execution.adapterRequirement).toContain("app-scoped")
   })
 
   it("uses valid UUIDs for every custom query fixture", () => {

@@ -42,6 +42,12 @@ unreleased until the final source commit and registry artifact exist.
   Queries.
 - Forward each Agent session's transport preference to the concrete event
   source without coupling Core to HTTP or WebSocket.
+- Match stable producer pagination while preserving Integration's legacy flat
+  page shape, and return the complete Data Manager records envelope.
+- Align IAM current-user, Data Source, Import, Integration connection, Custom
+  Query execution, and Messenger notification DTOs with their alpha producers.
+- Build app context only from capabilities authorized to an app-scoped token;
+  member access remains an explicit IAM operation requiring `MEMBER_READ`.
 
 ## 0.1.0
 

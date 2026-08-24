@@ -34,6 +34,8 @@ import type {
   IntegrationTemplate,
   IntegrationTemplateSummary,
   JsonValue,
+  LegacyPage,
+  MessageAccepted,
   OAuthStartResult,
   UserPlan,
   ProviderCredentialStatus,
@@ -168,6 +170,31 @@ export function expectPage<T extends object>(
   if (!Array.isArray(page.content) || page.content.some((item) => !isObject(item))) {
     invalidField(context, "content", errors)
   }
+  const metadata = expectObject<JsonObject>(page.page, `${context} page`, errors)
+  for (const field of ["size", "totalElements", "totalPages", "number"] as const) {
+    if (!isInteger(metadata[field])) invalidField(`${context} page`, field, errors)
+  }
+  if ((metadata.totalElements as number) < page.content.length) {
+    invalidField(`${context} page`, "totalElements", errors)
+  }
+  if (validateItem) {
+    page.content.forEach((item, position) =>
+      validateItem(item, `${context} item ${position}`, errors),
+    )
+  }
+  return page as unknown as Page<T>
+}
+
+export function expectLegacyPage<T extends object>(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+  validateItem?: (value: unknown, context: string, errors: SdkCoreErrorFactory) => T,
+): LegacyPage<T> {
+  const page = expectObject<JsonObject>(value, context, errors)
+  if (!Array.isArray(page.content) || page.content.some((item) => !isObject(item))) {
+    invalidField(context, "content", errors)
+  }
   if (!isInteger(page.totalElements) || page.totalElements < page.content.length) {
     invalidField(context, "totalElements", errors)
   }
@@ -176,7 +203,7 @@ export function expectPage<T extends object>(
       validateItem(item, `${context} item ${position}`, errors),
     )
   }
-  return page as unknown as Page<T>
+  return page as unknown as LegacyPage<T>
 }
 
 export function expectTenant(
@@ -215,9 +242,11 @@ export function expectUser(
   if (typeof user.name !== "string") invalidField(context, "name", errors)
   if (typeof user.email !== "string") invalidField(context, "email", errors)
   if (!isNullableString(user.imageUrl)) invalidField(context, "imageUrl", errors)
+  if (typeof user.planId !== "string") invalidField(context, "planId", errors)
   if (typeof user.onboardingCompleted !== "boolean") {
     invalidField(context, "onboardingCompleted", errors)
   }
+  if (typeof user.language !== "string") invalidField(context, "language", errors)
 
   return user as unknown as User
 }
@@ -522,25 +551,7 @@ export function expectTemplateConfigPage(
   context: string,
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): TemplateConfigPage {
-  const page = expectObject<JsonObject>(value, context, errors)
-
-  expectObjectArray<JsonObject>(page.content, `${context} content`, errors).forEach(
-    (config, position) => {
-      const configContext = `${context} item ${position}`
-      if (typeof config.id !== "string") invalidField(configContext, "id", errors)
-      if (!isNullableString(config.appId)) invalidField(configContext, "appId", errors)
-      if (!isNullableInteger(config.legacyId)) invalidField(configContext, "legacyId", errors)
-      if (typeof config.templateId !== "string") invalidField(configContext, "templateId", errors)
-      if (typeof config.alias !== "string") invalidField(configContext, "alias", errors)
-      if (!isNullableString(config.status)) invalidField(configContext, "status", errors)
-      if (!isNullableString(config.lastCheckedAt)) {
-        invalidField(configContext, "lastCheckedAt", errors)
-      }
-    },
-  )
-  if (!isInteger(page.totalElements)) invalidField(context, "totalElements", errors)
-
-  return page as unknown as TemplateConfigPage
+  return expectLegacyPage(value, context, errors, expectTemplateConfigSummary)
 }
 
 export function expectConnectionTestResult(
@@ -550,7 +561,9 @@ export function expectConnectionTestResult(
 ): ConnectionTestResult {
   const result = expectObject<JsonObject>(value, context, errors)
 
-  if (typeof result.status !== "string") invalidField(context, "status", errors)
+  if (!isOneOf(result.status, ["unchecked", "connected", "error"] as const)) {
+    invalidField(context, "status", errors)
+  }
   if (!isInteger(result.durationMs)) invalidField(context, "durationMs", errors)
   if (typeof result.checkedAt !== "string") invalidField(context, "checkedAt", errors)
   if (!isNullableString(result.message)) invalidField(context, "message", errors)
@@ -730,13 +743,10 @@ function expectConnectionConfig(
   errors: SdkCoreErrorFactory,
 ): void {
   const config = expectObject<JsonObject>(value, context, errors)
-  if (typeof config.host !== "string") invalidField(context, "host", errors)
-  if (!isInteger(config.port)) invalidField(context, "port", errors)
-  if (typeof config.databaseName !== "string") invalidField(context, "databaseName", errors)
-  if (typeof config.username !== "string") invalidField(context, "username", errors)
-  if (hasOwn(config, "schema") && !isNullableString(config.schema)) {
-    invalidField(context, "schema", errors)
+  for (const field of ["host", "schema", "databaseName", "username"] as const) {
+    if (!isNullableString(config[field])) invalidField(context, field, errors)
   }
+  if (!isNullableInteger(config.port)) invalidField(context, "port", errors)
   for (const field of [
     "maxPoolSize",
     "connectionTimeoutMs",
@@ -744,12 +754,12 @@ function expectConnectionConfig(
     "minimumIdle",
     "maxLifetimeMs",
   ] as const) {
-    if (hasOwn(config, field) && !isInteger(config[field])) invalidField(context, field, errors)
+    if (!isNullableInteger(config[field])) invalidField(context, field, errors)
   }
-  if (hasOwn(config, "additionalParams") && !isStringRecord(config.additionalParams)) {
+  if (config.additionalParams !== null && !isStringRecord(config.additionalParams)) {
     invalidField(context, "additionalParams", errors)
   }
-  if (hasOwn(config, "credential")) invalidField(context, "credential", errors)
+  if (config.credential !== null) invalidField(context, "credential", errors)
 }
 
 export function expectDataSourceDefinition(
@@ -759,22 +769,49 @@ export function expectDataSourceDefinition(
 ): DataSourceDefinition {
   const dataSource = expectObject<JsonObject>(value, context, errors)
   if (typeof dataSource.id !== "string") invalidField(context, "id", errors)
+  if (!isNullableInteger(dataSource.legacyId)) invalidField(context, "legacyId", errors)
+  if (!isNullableString(dataSource.appId)) invalidField(context, "appId", errors)
   if (typeof dataSource.name !== "string") invalidField(context, "name", errors)
-  if (typeof dataSource.instanceType !== "string") invalidField(context, "instanceType", errors)
-  if (typeof dataSource.dbType !== "string") invalidField(context, "dbType", errors)
-  if (hasOwn(dataSource, "writeConnectionConfig")) {
-    expectConnectionConfig(
-      dataSource.writeConnectionConfig,
-      `${context} writeConnectionConfig`,
-      errors,
-    )
+  if (!isOneOf(dataSource.instanceType, ["MITRA_SHARED", "MITRA_DEDICATED", "EXTERNAL"] as const)) {
+    invalidField(context, "instanceType", errors)
   }
-  if (hasOwn(dataSource, "readConnectionConfig") && dataSource.readConnectionConfig !== null) {
+  if (!isOneOf(dataSource.dbType, ["POSTGRES", "MYSQL", "SQLSERVER", "ORACLE"] as const)) {
+    invalidField(context, "dbType", errors)
+  }
+  expectConnectionConfig(
+    dataSource.writeConnectionConfig,
+    `${context} writeConnectionConfig`,
+    errors,
+  )
+  if (dataSource.readConnectionConfig !== null) {
     expectConnectionConfig(
       dataSource.readConnectionConfig,
       `${context} readConnectionConfig`,
       errors,
     )
+  }
+  if (
+    dataSource.connectionStatus !== null &&
+    !isOneOf(dataSource.connectionStatus, ["CONNECTED", "ERROR"] as const)
+  ) {
+    invalidField(context, "connectionStatus", errors)
+  }
+  if (!isNullableString(dataSource.lastCheckedAt)) invalidField(context, "lastCheckedAt", errors)
+  if (dataSource.storageQuota !== null) {
+    const quota = expectObject<JsonObject>(
+      dataSource.storageQuota,
+      `${context} storageQuota`,
+      errors,
+    )
+    if (quota.status !== null && !isOneOf(quota.status, ["NORMAL", "WATCH", "BLOCKED"] as const)) {
+      invalidField(`${context} storageQuota`, "status", errors)
+    }
+    for (const field of ["usedBytes", "limitBytes", "measurementVersion"] as const) {
+      if (!isNullableInteger(quota[field])) invalidField(`${context} storageQuota`, field, errors)
+    }
+    if (!isNullableString(quota.measuredAt)) {
+      invalidField(`${context} storageQuota`, "measuredAt", errors)
+    }
   }
   return dataSource as unknown as DataSourceDefinition
 }
@@ -787,9 +824,7 @@ function expectImportSource(value: unknown, context: string, errors: SdkCoreErro
   }
   if (source.type === "CSV") {
     if (typeof source.fileKey !== "string") invalidField(context, "fileKey", errors)
-    if (hasOwn(source, "separator") && typeof source.separator !== "string") {
-      invalidField(context, "separator", errors)
-    }
+    if (typeof source.separator !== "string") invalidField(context, "separator", errors)
     return
   }
   invalidField(context, "type", errors)
@@ -802,11 +837,48 @@ export function expectImportDefinition(
 ): ImportDefinition {
   const definition = expectObject<JsonObject>(value, context, errors)
   if (typeof definition.id !== "string") invalidField(context, "id", errors)
+  if (!isNullableInteger(definition.legacyId)) invalidField(context, "legacyId", errors)
   if (typeof definition.name !== "string") invalidField(context, "name", errors)
   expectImportSource(definition.source, `${context} source`, errors)
   const target = expectObject<JsonObject>(definition.target, `${context} target`, errors)
   if (typeof target.tableName !== "string") invalidField(`${context} target`, "tableName", errors)
-  if (typeof target.mode !== "string") invalidField(`${context} target`, "mode", errors)
+  if (!isOneOf(target.mode, ["REPLACE", "APPEND", "UPSERT"] as const)) {
+    invalidField(`${context} target`, "mode", errors)
+  }
+  if (target.upsertKeyColumns !== null && !isStringArray(target.upsertKeyColumns)) {
+    invalidField(`${context} target`, "upsertKeyColumns", errors)
+  }
+  const processing = expectObject<JsonObject>(
+    definition.processing,
+    `${context} processing`,
+    errors,
+  )
+  if (!isOneOf(processing.mode, ["CHUNKED", "STREAMING"] as const)) {
+    invalidField(`${context} processing`, "mode", errors)
+  }
+  if (!isNullableString(processing.orderColumn)) {
+    invalidField(`${context} processing`, "orderColumn", errors)
+  }
+  if (!isInteger(processing.chunkSize)) invalidField(`${context} processing`, "chunkSize", errors)
+  const schedule = expectObject<JsonObject>(definition.schedule, `${context} schedule`, errors)
+  if (!isNullableString(schedule.cron)) invalidField(`${context} schedule`, "cron", errors)
+  if (typeof schedule.enabled !== "boolean") invalidField(`${context} schedule`, "enabled", errors)
+  if (definition.columnMappings !== null) {
+    expectObjectArray<JsonObject>(
+      definition.columnMappings,
+      `${context} columnMappings`,
+      errors,
+    ).forEach((mapping, position) => {
+      const mappingContext = `${context} columnMapping ${position}`
+      if (typeof mapping.source !== "string") invalidField(mappingContext, "source", errors)
+      if (typeof mapping.target !== "string") invalidField(mappingContext, "target", errors)
+      if (hasOwn(mapping, "type") && !isNullableString(mapping.type)) {
+        invalidField(mappingContext, "type", errors)
+      }
+    })
+  }
+  if (typeof definition.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (typeof definition.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return definition as unknown as ImportDefinition
 }
 
@@ -817,8 +889,47 @@ export function expectImportExecution(
 ): ImportExecution {
   const execution = expectObject<JsonObject>(value, context, errors)
   if (typeof execution.id !== "string") invalidField(context, "id", errors)
-  if (typeof execution.status !== "string") invalidField(context, "status", errors)
+  if (typeof execution.importDefinitionId !== "string") {
+    invalidField(context, "importDefinitionId", errors)
+  }
+  if (!isNullableString(execution.importName)) invalidField(context, "importName", errors)
+  if (
+    !isOneOf(execution.status, [
+      "PENDING",
+      "PREPARING",
+      "RUNNING",
+      "COMPLETED",
+      "PARTIALLY_COMPLETED",
+      "FAILED",
+      "CANCELLED",
+    ] as const)
+  ) {
+    invalidField(context, "status", errors)
+  }
+  if (!isOneOf(execution.triggerType, ["MANUAL", "SCHEDULED", "API"] as const)) {
+    invalidField(context, "triggerType", errors)
+  }
+  for (const field of ["totalChunks", "progressPercent", "rowsTotal", "durationSeconds"] as const) {
+    if (!isNullableInteger(execution[field])) invalidField(context, field, errors)
+  }
+  for (const field of ["completedChunks", "failedChunks", "rowsProcessed"] as const) {
+    if (!isInteger(execution[field])) invalidField(context, field, errors)
+  }
+  if (typeof execution.queuedAt !== "string") invalidField(context, "queuedAt", errors)
+  if (!isNullableString(execution.startedAt)) invalidField(context, "startedAt", errors)
+  if (!isNullableString(execution.completedAt)) invalidField(context, "completedAt", errors)
+  if (!isNullableString(execution.errorMessage)) invalidField(context, "errorMessage", errors)
   return execution as unknown as ImportExecution
+}
+
+export function expectMessageAccepted(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): MessageAccepted {
+  const response = expectObject<JsonObject>(value, context, errors)
+  if (typeof response.messageId !== "string") invalidField(context, "messageId", errors)
+  return response as unknown as MessageAccepted
 }
 
 export function expectAgentDefinition(

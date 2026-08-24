@@ -4,7 +4,6 @@ import type { AgentsModule } from "./agents"
 import type { AppsModule } from "./apps"
 import type { FunctionsAdminModule } from "./functionsAdmin"
 import type { IntegrationAdminModule } from "./integrationAdmin"
-import type { MembersModule } from "./members"
 import type { SchemaModule } from "./schema"
 import type { AppContext } from "../types"
 
@@ -17,7 +16,7 @@ export interface ContextModule {
    * Function code, file contents, integration secrets, and connection credentials are excluded.
    * Summary lists are capped at 2000 and report total and truncation metadata.
    */
-  getAppContext(appId?: string): Promise<AppContext>
+  getAppContext(): Promise<AppContext>
 }
 
 export interface ContextModuleDependencies {
@@ -27,7 +26,6 @@ export interface ContextModuleDependencies {
   agents: AgentsModule
   integrationAdmin: IntegrationAdminModule
   agentConnections: AgentConnectionsModule
-  members: MembersModule
   getAppId?: (() => string | undefined) | undefined
 }
 
@@ -36,8 +34,8 @@ export function createContextModule(
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): ContextModule {
   return {
-    async getAppContext(requestedAppId) {
-      const appId = requestedAppId ?? dependencies.getAppId?.()
+    async getAppContext() {
+      const appId = dependencies.getAppId?.()
       if (!appId) {
         configurationError("An appId is required for app context", errors)
       }
@@ -61,24 +59,22 @@ export function createContextModule(
         sort: "alias",
       })
       const connections = await dependencies.agentConnections.list()
-      const users = await dependencies.members.list()
 
       return {
         appId,
         app,
         tables,
         functions: functionsPage.content,
-        functionsTotal: functionsPage.totalElements,
-        functionsTruncated: functionsPage.content.length < functionsPage.totalElements,
+        functionsTotal: functionsPage.page.totalElements,
+        functionsTruncated: functionsPage.content.length < functionsPage.page.totalElements,
         agents: agentsPage.content,
-        agentsTotal: agentsPage.totalElements,
-        agentsTruncated: agentsPage.content.length < agentsPage.totalElements,
+        agentsTotal: agentsPage.page.totalElements,
+        agentsTruncated: agentsPage.content.length < agentsPage.page.totalElements,
         files: Object.keys(fileResponse.files).sort(),
         integrations: integrationsPage.content,
         integrationsTotal: integrationsPage.totalElements,
         integrationsTruncated: integrationsPage.content.length < integrationsPage.totalElements,
         connections,
-        users,
       }
     },
   }

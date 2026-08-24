@@ -198,7 +198,10 @@ describe("functionsAdmin", () => {
     const transport = new QueueTransport([
       created,
       patched,
-      { content: [listed], totalElements: 1 },
+      {
+        content: [listed],
+        page: { size: 20, totalElements: 1, totalPages: 1, number: 0 },
+      },
       created,
     ])
     const functionsAdmin = createFunctionsAdminModule(transport)
@@ -352,7 +355,12 @@ describe("functionsAdmin", () => {
     ["list", { ...summary(), cronInputJson: { invalid: Number.NaN } }],
   ])("rejects invalid schedule fields from %s responses", async (operation, response) => {
     const transportResponse =
-      operation === "list" ? { content: [response], totalElements: 1 } : response
+      operation === "list"
+        ? {
+            content: [response],
+            page: { size: 20, totalElements: 1, totalPages: 1, number: 0 },
+          }
+        : response
     const functionsAdmin = createFunctionsAdminModule(new QueueTransport([transportResponse]))
 
     const request = {

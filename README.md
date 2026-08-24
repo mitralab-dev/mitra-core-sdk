@@ -101,7 +101,6 @@ declare const copilot: Transport
 declare const messenger: Transport
 declare const publicFunctions: Transport
 
-let dataSourceId: string | undefined
 let appId: string | undefined
 
 const core = createSdkCore({
@@ -115,7 +114,6 @@ const core = createSdkCore({
     messenger,
     publicFunctions,
   },
-  getDataSourceId: () => dataSourceId,
   getAppId: () => appId,
   functions: {
     executeInvocationType: "sync",
@@ -123,7 +121,7 @@ const core = createSdkCore({
   },
 })
 
-const tasks = await core.entities.getTable("Task").list({ limit: 20 })
+const { data: tasks } = await core.entities.getTable("Task").list({ limit: 20 })
 const context = await core.context.getAppContext()
 ```
 
@@ -135,6 +133,12 @@ response. Custom Query summaries omit `sql`, Workflow summaries omit
 `method`, and `endpoint`. App, integration template, and template config lists
 likewise expose their producer summary DTOs, while their `get` methods return
 the complete detail DTOs.
+
+Record list and filter methods preserve the Data Manager envelope with `data`,
+`limit`, `skip`, `total`, and `hasMore`. Spring list endpoints from Code Studio,
+Functions, Data Manager, and Copilot use stable pagination metadata under
+`page`. Integration still returns its legacy flat Spring page metadata, so its
+list methods expose `totalElements` at the top level.
 
 The complete DTOs preserve producer field names and nullability. This includes
 Code Studio app routing, domains, color, plan, version, and timestamps;
@@ -170,7 +174,9 @@ base URL and must not attach `Authorization` or `X-App-Id`. It calls
 `POST /public/v1/functions/{id}/execute` with `X-Invocation-Type: sync` or
 `async`. Async results are read with
 `GET /public/v1/functions/executions/{executionId}`. The service only exposes
-executions that were created through the public async route.
+executions that were created through the public async route. Public polling
+requires the corresponding Functions producer from issue #325 and Kong route
+from issue #91 to be deployed.
 
 ## App scope and permissions
 
@@ -181,25 +187,25 @@ especially important for Code Studio because its alpha endpoints do not enforce
 an app claim in every path. `apps.list()` and `apps.create()` are tenant-wide and
 are not available to app-scoped tokens.
 
-The alpha Server Function token authorizes 106 of the 120 MCP capabilities.
-Current service policy rejects app context and app-user listing without
-`MEMBER_READ`, Function secret operations without the corresponding secret
-permission, and the three Data Source bulk operations because of a temporary
-permission-name drift. Agent tools that resolve a business `agent_id` and the
-two tenant-wide app collection operations are not applicable to an app-scoped
-token. Messenger delivery also depends on a configured channel. These are
-service authorization constraints, not changes to the Core contracts.
+`context.getAppContext()` always uses the trusted current app and deliberately
+excludes app members. The Server Function token does not have `MEMBER_READ`, so
+the composed context must not call IAM's member endpoint. `members` remains a
+separate Core module for callers whose token has that permission. Function
+secret operations still require their dedicated permissions. Agent tools that
+resolve a business `agent_id` and the two tenant-wide app collection operations
+are not applicable to an app-scoped token. Messenger delivery also depends on
+a configured channel. These are service authorization constraints, not changes
+to the remaining Core contracts.
 
 Custom Query creation accepts optional `isVirtualTable` and `connectionId`
 fields and forwards them unchanged to the Data Manager. Omitting
 `isVirtualTable` preserves the producer default of `false`; `connectionId` only
 selects an external connection for a Virtual Table.
 
-Custom query execution currently targets the Data Manager `main` contract and
-send both `dataSourceId` and `parameters`. The recorded `alpha` contract accepts
-that body but ignores `dataSourceId`, resolving the data source from the
-authenticated app instead. The SDK does not retry this POST with another body
-because the first request can already execute.
+Custom query execution targets the Data Manager alpha contract and sends only
+`parameters`. Data Manager resolves the Data Source from the authenticated app,
+so the concrete adapter must use the app-scoped JWT and must not accept a caller
+selected Data Source for this operation.
 
 ## MCP capability coverage
 

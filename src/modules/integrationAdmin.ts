@@ -5,7 +5,7 @@ import {
   expectConnectionTestResult,
   expectEmpty,
   expectIntegrationExecution,
-  expectPage,
+  expectLegacyPage,
   expectTemplateConfig,
   expectTemplateConfigBulkResult,
   expectTemplateConfigPage,
@@ -15,7 +15,7 @@ import type {
   ConnectionTestResult,
   IntegrationExecution,
   ListTemplateConfigsOptions,
-  Page,
+  LegacyPage,
   TemplateConfigBulkResult,
   TemplateConfigCreateInput,
   TemplateConfig,
@@ -60,7 +60,7 @@ export interface IntegrationAdminModule {
   listExecutions(
     configId: string,
     options?: ListTemplateConfigsOptions,
-  ): Promise<Page<IntegrationExecution>>
+  ): Promise<LegacyPage<IntegrationExecution>>
   getExecution(configId: string, executionId: string): Promise<IntegrationExecution>
 }
 
@@ -168,7 +168,7 @@ export function createIntegrationAdminModule(
     },
 
     async listExecutions(configId, options = {}) {
-      return expectPage<IntegrationExecution>(
+      return expectLegacyPage<IntegrationExecution>(
         await transport.request<unknown>(`${path(configId)}/executions`, {
           method: "GET",
           params: {

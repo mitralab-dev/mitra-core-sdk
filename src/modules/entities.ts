@@ -7,15 +7,7 @@ import {
 import { encodePathSegment } from "../path"
 import { expectEmpty, expectObject, expectObjectArray } from "../response"
 import type { QueryParamValue, Transport } from "../transport"
-import type { EntityTable } from "../types"
-
-interface EntityListResponse<T> {
-  data: T[]
-  limit: number
-  skip: number
-  total: number
-  hasMore: boolean
-}
+import type { EntityListResponse, EntityTable } from "../types"
 
 export interface EntitiesModule {
   getTable<T = Record<string, unknown>>(tableName: string): EntityTable<T>
@@ -52,15 +44,14 @@ class DefaultEntitiesModule implements EntitiesModule {
           skip: options?.skip ?? skip,
           fields: (options?.fields ?? fields)?.join(","),
         }
-        const response = expectObject<EntityListResponse<T>>(
+        return expectEntityListResponse<T>(
           await this.transport.request<unknown>(basePath, { method: "GET", params }),
           "Entity list response",
           this.errors,
         )
-        return expectObjectArray<T & object>(response.data, "Entity list data", this.errors) as T[]
       },
       filter: async (query, sort, limit, skip, fields) => {
-        const response = expectObject<EntityListResponse<T>>(
+        return expectEntityListResponse<T>(
           await this.transport.request<unknown>(basePath, {
             method: "GET",
             params: {
@@ -74,7 +65,6 @@ class DefaultEntitiesModule implements EntitiesModule {
           "Entity list response",
           this.errors,
         )
-        return expectObjectArray<T & object>(response.data, "Entity list data", this.errors) as T[]
       },
       get: async (id) =>
         expectObject<T & object>(
@@ -137,6 +127,25 @@ class DefaultEntitiesModule implements EntitiesModule {
       },
     }
   }
+}
+
+function expectEntityListResponse<T>(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory,
+): EntityListResponse<T> {
+  const response = expectObject<EntityListResponse<T>>(value, context, errors)
+  expectObjectArray<T & object>(response.data, `${context} data`, errors)
+  if (!Number.isInteger(response.limit))
+    invalidResponse(`${context} has an invalid limit field`, errors)
+  if (!Number.isInteger(response.skip))
+    invalidResponse(`${context} has an invalid skip field`, errors)
+  if (!Number.isInteger(response.total))
+    invalidResponse(`${context} has an invalid total field`, errors)
+  if (typeof response.hasMore !== "boolean") {
+    invalidResponse(`${context} has an invalid hasMore field`, errors)
+  }
+  return response
 }
 
 export function createEntitiesModule(

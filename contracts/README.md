@@ -51,17 +51,10 @@ The executable Function batch cases keep two different contracts: full
 replacement through `bulkUpdate` and PUT, and partial preservation through
 `bulkPatch` and PATCH. The MCP `bulkUpdateFunctions` tool maps only to the latter.
 
-## Custom query transition
+## Custom query execution
 
-The `customQueryTransition` section intentionally models two different server
-contracts:
-
-- Data Manager `main` consumes `dataSourceId` and `parameters`.
-- Data Manager `alpha` accepts that same body, ignores `dataSourceId` during
-  deserialization, and resolves the data source from the authenticated app.
-
-The 0.2.0-beta.0 contract records the producer behavior pinned from `origin/alpha`.
-Its custom query body remains transport-compatible with `main`, but the semantics
-differ because alpha ignores the supplied identifier. Do not add an automatic POST
-fallback because the first request can already execute and a retry could execute
-the query twice.
+The `customQueryExecution` section records the Data Manager `origin/alpha`
+contract used by this beta. The request body contains only `parameters`, and the
+producer resolves the Data Source from the authenticated app. Concrete adapters
+therefore supply the app-scoped JWT instead of accepting a caller-selected Data
+Source identifier.

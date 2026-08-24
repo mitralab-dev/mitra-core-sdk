@@ -38,6 +38,7 @@ const expectedRuntimeExports = {
   defaultSdkCoreErrorFactory: "object",
   encodePathSegment: "function",
   expectEmpty: "function",
+  expectLegacyPage: "function",
   expectNullableObject: "function",
   expectObject: "function",
   expectObjectArray: "function",

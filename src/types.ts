@@ -39,7 +39,11 @@ export interface User {
   name: string
   email: string
   imageUrl: string | null
+  /** Plan selected for the authenticated user in the current tenant. */
+  planId: string
   onboardingCompleted: boolean
+  /** User language preference returned by IAM. */
+  language: string
 }
 
 export interface EntityListOptions {
@@ -55,20 +59,33 @@ export interface EntityTable<T = Record<string, unknown>> {
     limit?: number,
     skip?: number,
     fields?: string[],
-  ): Promise<T[]>
+  ): Promise<EntityListResponse<T>>
   filter(
     query: Record<string, unknown>,
     sort?: string,
     limit?: number,
     skip?: number,
     fields?: string[],
-  ): Promise<T[]>
+  ): Promise<EntityListResponse<T>>
   get(id: string | number): Promise<T>
   create(data: Partial<T>): Promise<T>
   bulkCreate(data: Partial<T>[]): Promise<T[]>
   update(id: string | number, data: Partial<T>): Promise<T>
   delete(id: string | number): Promise<void>
   deleteMany(query: Record<string, unknown>): Promise<{ deleted: number }>
+}
+
+export interface EntityListResponse<T> {
+  /** Records in the requested window. */
+  data: T[]
+  /** Effective maximum number of records returned. */
+  limit: number
+  /** Effective number of records skipped. */
+  skip: number
+  /** Total records matching the request. */
+  total: number
+  /** Whether another window is available after this one. */
+  hasMore: boolean
 }
 
 export interface QueryResult {
@@ -230,13 +247,44 @@ export interface DataSourceBulkResult {
 
 export interface DataSourceDefinition {
   id: string
+  /** Legacy identifier when the Data Source was migrated from the previous platform. */
+  legacyId: number | null
+  /** Owning app, or null for a tenant-level Data Source. */
+  appId: string | null
   name: string
   instanceType: DataSourceInstanceType
   dbType: DataSourceDbType
-  /** Connection metadata is safe and never contains the stored credential. */
-  writeConnectionConfig?: Omit<ConnectionConfig, "credential">
-  readConnectionConfig?: Omit<ConnectionConfig, "credential"> | null
-  [key: string]: unknown
+  /** Write connection metadata. Stored credentials are always returned as null. */
+  writeConnectionConfig: ConnectionConfigResponse
+  /** Read connection metadata when a separate read connection is configured. */
+  readConnectionConfig: ConnectionConfigResponse | null
+  /** Result of the most recent connection check. */
+  connectionStatus: "CONNECTED" | "ERROR" | null
+  lastCheckedAt: string | null
+  /** Latest measured storage usage, or null when no measurement exists. */
+  storageQuota: {
+    status: "NORMAL" | "WATCH" | "BLOCKED" | null
+    usedBytes: number | null
+    limitBytes: number | null
+    measuredAt: string | null
+    measurementVersion: number | null
+  } | null
+}
+
+export interface ConnectionConfigResponse {
+  host: string | null
+  port: number | null
+  schema: string | null
+  databaseName: string | null
+  username: string | null
+  /** Write-only in requests. Producer responses serialize it as null. */
+  credential: null
+  maxPoolSize: number | null
+  connectionTimeoutMs: number | null
+  idleTimeoutMs: number | null
+  minimumIdle: number | null
+  maxLifetimeMs: number | null
+  additionalParams: Record<string, string> | null
 }
 
 export type FunctionRuntime = "JAVASCRIPT" | "PYTHON" | "SQL" | "API"
@@ -422,10 +470,7 @@ export interface TemplateConfig extends TemplateConfigSummary {
   updatedAt: string
 }
 
-export interface TemplateConfigPage {
-  content: TemplateConfigSummary[]
-  totalElements: number
-}
+export type TemplateConfigPage = LegacyPage<TemplateConfigSummary>
 
 export interface ListTemplateConfigsOptions {
   page?: number
@@ -439,7 +484,7 @@ export interface TestCredentialsInput {
 }
 
 export interface ConnectionTestResult {
-  status: string
+  status: IntegrationConnectionStatus
   durationMs: number
   checkedAt: string
   message: string | null
@@ -466,8 +511,20 @@ export interface BulkUnsubscribeResult {
   revokedCount: number
 }
 
-/** A Spring-style page returned by list endpoints. */
+/** Stable Spring page returned by services using VIA_DTO serialization. */
 export interface Page<T> {
+  content: T[]
+  /** Pagination metadata nested by Spring's stable DTO representation. */
+  page: {
+    size: number
+    totalElements: number
+    totalPages: number
+    number: number
+  }
+}
+
+/** Legacy Spring PageImpl shape still returned by mitra-integration. */
+export interface LegacyPage<T> {
   content: T[]
   totalElements: number
   totalPages?: number
@@ -704,9 +761,12 @@ export interface CustomQueryInput {
   connectionId?: string
 }
 
-export interface CustomQueryUpdateInput extends CustomQueryInput {
-  /** Whether the query is exposed as a Virtual Table. */
-  isVirtualTable: boolean
+export interface CustomQueryUpdateInput {
+  name: string
+  sql: string
+  /** Defaults to false when omitted by the Data Manager producer. */
+  isVirtualTable?: boolean
+  connectionId?: string
 }
 
 export interface CustomQuerySummary {
@@ -784,18 +844,60 @@ export interface ImportColumnMapping {
   /** Column name in the target table. */
   target: string
   /** Optional conversion type applied while importing. */
-  type?: string
+  type?: string | null
 }
 
-export interface ImportDefinition extends ImportInput {
+export interface ImportDefinition {
   id: string
-  [key: string]: unknown
+  /** Legacy identifier when the import was migrated from the previous platform. */
+  legacyId: number | null
+  name: string
+  source: ImportSourceResponse
+  target: Required<Pick<ImportTarget, "tableName" | "mode">> & {
+    upsertKeyColumns: string[] | null
+  }
+  processing: {
+    mode: "CHUNKED" | "STREAMING"
+    orderColumn: string | null
+    chunkSize: number
+  }
+  schedule: {
+    cron: string | null
+    enabled: boolean
+  }
+  columnMappings: ImportColumnMapping[] | null
+  createdAt: string
+  updatedAt: string
 }
+
+export type ImportSourceResponse =
+  { type: "SQL"; query: string } | { type: "CSV"; fileKey: string; separator: string }
 
 export interface ImportExecution {
   id: string
-  status: string
-  [key: string]: unknown
+  importDefinitionId: string
+  /** Definition name captured for display, when available. */
+  importName: string | null
+  status:
+    | "PENDING"
+    | "PREPARING"
+    | "RUNNING"
+    | "COMPLETED"
+    | "PARTIALLY_COMPLETED"
+    | "FAILED"
+    | "CANCELLED"
+  triggerType: "MANUAL" | "SCHEDULED" | "API"
+  totalChunks: number | null
+  completedChunks: number
+  failedChunks: number
+  progressPercent: number | null
+  rowsTotal: number | null
+  rowsProcessed: number
+  queuedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  durationSeconds: number | null
+  errorMessage: string | null
 }
 
 export interface AgentInput {
@@ -1116,6 +1218,11 @@ export interface AgentConnection {
   credentials: ProviderCredentialStatus[]
 }
 
+export interface MessageAccepted {
+  /** Identifier assigned by Messenger to the accepted notification. */
+  messageId: string
+}
+
 export interface AppContext {
   appId: string
   app: AppDefinition
@@ -1131,5 +1238,4 @@ export interface AppContext {
   integrationsTotal: number
   integrationsTruncated: boolean
   connections: AgentConnection[]
-  users: AppMember[]
 }

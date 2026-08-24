@@ -3,7 +3,7 @@ import { encodePathSegment } from "../path"
 import {
   expectIntegrationTemplate,
   expectIntegrationTemplateSummary,
-  expectPage,
+  expectLegacyPage,
   expectTemplateConfig,
   expectTemplateConfigSummary,
 } from "../response"
@@ -11,7 +11,7 @@ import type { QueryParamValue, Transport } from "../transport"
 import type {
   IntegrationTemplate,
   IntegrationTemplateSummary,
-  Page,
+  LegacyPage,
   PageOptions,
   TemplateConfig,
   TemplateConfigPage,
@@ -20,7 +20,7 @@ import type {
 
 export interface IntegrationTemplatesModule {
   /** Lists template summaries. Defaults: page 0, size 20, sort name. */
-  list(options?: PageOptions): Promise<Page<IntegrationTemplateSummary>>
+  list(options?: PageOptions): Promise<LegacyPage<IntegrationTemplateSummary>>
   /** Gets the complete login, request, and credential field schema for one template. */
   get(id: string): Promise<IntegrationTemplate>
   /** Lists saved config summaries. Credentials and secret values are never returned. */
@@ -40,7 +40,7 @@ export function createIntegrationTemplatesModule(
   })
   return {
     async list(options = {}) {
-      return expectPage<IntegrationTemplateSummary>(
+      return expectLegacyPage<IntegrationTemplateSummary>(
         await transport.request<unknown>("/api/v1/templates", {
           method: "GET",
           params: params(options, "name"),
@@ -61,7 +61,7 @@ export function createIntegrationTemplatesModule(
       )
     },
     async listConfigs(options = {}) {
-      return expectPage<TemplateConfigSummary>(
+      return expectLegacyPage<TemplateConfigSummary>(
         await transport.request<unknown>("/api/v1/template-configs", {
           method: "GET",
           params: params(options, "alias"),

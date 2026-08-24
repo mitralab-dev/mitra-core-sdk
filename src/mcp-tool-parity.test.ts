@@ -199,7 +199,6 @@ describe("MCP alpha tool parity", () => {
         messenger: unused,
         publicFunctions: unused,
       },
-      getDataSourceId: () => "data-source-1",
       getAppId: () => "app-1",
     })
 

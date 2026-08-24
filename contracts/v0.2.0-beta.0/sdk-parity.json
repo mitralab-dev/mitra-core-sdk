@@ -16,18 +16,10 @@
         "src/main/java/io/mitralab/mcp/tools/integration/IntegrationResourceTools.java"
       ]
     },
-    "dataManagerMain": {
-      "repository": "mitralab-dev/mitra-data-manager",
-      "ref": "origin/main",
-      "commit": "89b5de10659d49284d963e744484ee118eaf66c3",
-      "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
-      "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
-      "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java"
-    },
     "dataManagerAlpha": {
       "repository": "mitralab-dev/mitra-data-manager",
       "ref": "origin/alpha",
-      "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
+      "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
       "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
       "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
       "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java",
@@ -37,7 +29,7 @@
     "dataManagerBuilder": {
       "repository": "mitralab-dev/mitra-data-manager",
       "ref": "origin/alpha",
-      "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
+      "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
       "paths": [
         "api/src/main/java/io/mitralab/datamanager/infrastructure/api/SqlBatchController.java",
         "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/BatchExecuteResponse.java",
@@ -53,7 +45,7 @@
     "functionsBuilder": {
       "repository": "mitralab-dev/mitra-functions",
       "ref": "origin/alpha",
-      "commit": "77ffe97d9398686ea6cf575e1d04d9cfb782d274",
+      "commit": "d9921f620afff62ea8a047d2f301b41c725b35cb",
       "paths": [
         "src/main/java/io/mitralab/functions/infrastructure/api/FunctionController.java",
         "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionCreateRequest.java",
@@ -70,7 +62,7 @@
     "integrationBuilder": {
       "repository": "mitralab-dev/mitra-integration",
       "ref": "origin/alpha",
-      "commit": "fcb78ce52dd132953f5a4ead8613bac4233812af",
+      "commit": "cfd4b1ce6e36c07b88de7e67e0fa3b9adb9f158b",
       "paths": [
         "src/main/java/io/mitralab/integration/infrastructure/api/TemplateConfigController.java",
         "src/main/java/io/mitralab/integration/infrastructure/api/dto/BulkCreateTemplateConfigsRequest.java",
@@ -83,7 +75,7 @@
     "iamBuilder": {
       "repository": "mitralab-dev/mitra-iam",
       "ref": "origin/alpha",
-      "commit": "342f16e523c866371a60a25ffde811de346c5391",
+      "commit": "6337ced228bfd0c2244a23a09142a34ac7e87aad",
       "paths": [
         "src/main/java/io/mitralab/iam/infrastructure/api/MemberController.java",
         "src/main/java/io/mitralab/iam/infrastructure/api/dto/EffectiveAppUserResponse.java"
@@ -181,7 +173,7 @@
       "javascript": "queries.execute(id, parameters)",
       "python": "queries.execute(id, parameters)",
       "endpoint": "POST /data-manager/api/v1/custom-queries/{id}/execute",
-      "mcpTransportParity": "main-request-compatible"
+      "mcpTransportParity": "exact"
     },
     {
       "operation": "functions.execute",
@@ -368,34 +360,16 @@
       "mcpTransportParity": "sdk-only"
     }
   ],
-  "customQueryTransition": {
-    "currentSdkTarget": "main",
-    "sharedRequestBody": {
-      "dataSourceId": "00000000-0000-4000-8000-000000000001",
+  "customQueryExecution": {
+    "sdkTarget": "alpha",
+    "requestBody": {
       "parameters": {
         "status": "active"
       }
     },
-    "main": {
-      "acceptsSharedRequestBody": true,
-      "dataSourceIdTransportBehavior": "consumed",
-      "dataSourceResolution": "request-body"
-    },
-    "alpha": {
-      "acceptsSharedRequestBody": true,
-      "dataSourceIdTransportBehavior": "ignored",
-      "dataSourceResolution": "authenticated-app",
-      "semanticCompatibility": "The request is accepted, but alpha resolves the data source from the authenticated app rather than dataSourceId."
-    },
-    "singlePayloadTransportCompatibility": true,
-    "automaticFallbackAllowed": false,
-    "automaticFallbackReason": "The main request is already accepted by both recorded contracts, and retrying a POST could execute a query twice.",
-    "removeDataSourceIdGate": [
-      "The parameters-only request is present on Data Manager main.",
-      "A Data Manager integration test proves authenticated app and data source resolution on main.",
-      "The canonical fixture version is bumped and both SDK suites pass the parameters-only request.",
-      "MITRA_DATA_SOURCE_ID and init-time data source resolution are deprecated before removal."
-    ]
+    "dataSourceResolution": "authenticated-app",
+    "declaresDataSourceId": false,
+    "adapterRequirement": "Use the app-scoped JWT so Data Manager resolves the current app Data Source."
   },
   "consumerRequirements": {
     "@mitralab.io/sdk-core": {
@@ -445,7 +419,9 @@
           "name": "Test User",
           "email": "user@example.com",
           "imageUrl": null,
-          "onboardingCompleted": false
+          "planId": "plan-1",
+          "onboardingCompleted": false,
+          "language": "pt-BR"
         }
       },
       "expectedResult": {
@@ -469,7 +445,9 @@
         "name": "Test User",
         "email": "user@example.com",
         "imageUrl": null,
-        "onboardingCompleted": false
+        "planId": "plan-1",
+        "onboardingCompleted": false,
+        "language": "pt-BR"
       }
     },
     {
@@ -515,16 +493,22 @@
           "hasMore": true
         }
       },
-      "expectedResult": [
-        {
-          "id": "order-5",
-          "status": "active"
-        },
-        {
-          "id": "order-6",
-          "status": "pending"
-        }
-      ]
+      "expectedResult": {
+        "data": [
+          {
+            "id": "order-5",
+            "status": "active"
+          },
+          {
+            "id": "order-6",
+            "status": "pending"
+          }
+        ],
+        "limit": 2,
+        "skip": 4,
+        "total": 8,
+        "hasMore": true
+      }
     },
     {
       "id": "entities.filter.success",
@@ -567,12 +551,18 @@
           "hasMore": false
         }
       },
-      "expectedResult": [
-        {
-          "id": "order-1",
-          "status": "active"
-        }
-      ]
+      "expectedResult": {
+        "data": [
+          {
+            "id": "order-1",
+            "status": "active"
+          }
+        ],
+        "limit": 5,
+        "skip": 0,
+        "total": 1,
+        "hasMore": false
+      }
     },
     {
       "id": "entities.get.success",
@@ -764,7 +754,6 @@
       "operation": "queries.execute",
       "input": {
         "id": "00000000-0000-4000-8000-000000000101",
-        "dataSourceId": "00000000-0000-4000-8000-000000000001",
         "parameters": {
           "status": "active"
         }
@@ -774,7 +763,6 @@
         "method": "POST",
         "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
         "body": {
-          "dataSourceId": "00000000-0000-4000-8000-000000000001",
           "parameters": {
             "status": "active"
           }
@@ -1973,14 +1961,14 @@
       "response": {
         "status": 200,
         "body": {
-          "status": "ok",
+          "status": "connected",
           "durationMs": 120,
           "checkedAt": "2026-08-18T12:00:00Z",
           "message": null
         }
       },
       "expectedResult": {
-        "status": "ok",
+        "status": "connected",
         "durationMs": 120,
         "checkedAt": "2026-08-18T12:00:00Z",
         "message": null
@@ -2045,7 +2033,7 @@
               "legacyId": null,
               "templateId": "00000000-0000-4000-8000-000000000801",
               "alias": "crm-production",
-              "status": "ok",
+              "status": "connected",
               "lastCheckedAt": "2026-08-18T12:00:00Z"
             }
           ],
@@ -2060,7 +2048,7 @@
             "legacyId": null,
             "templateId": "00000000-0000-4000-8000-000000000801",
             "alias": "crm-production",
-            "status": "ok",
+            "status": "connected",
             "lastCheckedAt": "2026-08-18T12:00:00Z"
           }
         ],
@@ -2107,7 +2095,6 @@
       "operation": "queries.execute",
       "input": {
         "id": "00000000-0000-4000-8000-000000000101",
-        "dataSourceId": "00000000-0000-4000-8000-000000000001",
         "parameters": {}
       },
       "request": {
@@ -2115,7 +2102,6 @@
         "method": "POST",
         "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
         "body": {
-          "dataSourceId": "00000000-0000-4000-8000-000000000001",
           "parameters": {}
         }
       },
@@ -2431,7 +2417,7 @@
               "legacyId": null,
               "templateId": "00000000-0000-4000-8000-000000000801",
               "alias": "crm-production",
-              "status": "ok",
+              "status": "connected",
               "lastCheckedAt": 0
             }
           ],
@@ -2488,7 +2474,6 @@
       "operation": "queries.execute",
       "input": {
         "id": "00000000-0000-4000-8000-000000000103",
-        "dataSourceId": "00000000-0000-4000-8000-000000000001",
         "parameters": {}
       },
       "verification": {
@@ -2498,7 +2483,7 @@
       },
       "source": {
         "service": "mitra-data-manager",
-        "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
+        "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
         "handler": "GlobalExceptionHandler.handleNotFound",
         "useCase": "ExecuteSqlUseCase.execute",
         "integrationTest": "CustomQueryControllerTest.Execute.execute_withDataSourceAssociatedToAnotherApp_shouldFailClosed"
@@ -2508,7 +2493,6 @@
         "method": "POST",
         "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000103/execute",
         "body": {
-          "dataSourceId": "00000000-0000-4000-8000-000000000001",
           "parameters": {}
         }
       },
@@ -2535,7 +2519,6 @@
       "operation": "queries.execute",
       "input": {
         "id": "00000000-0000-4000-8000-000000000101",
-        "dataSourceId": "00000000-0000-4000-8000-000000000001",
         "parameters": {}
       },
       "verification": {
@@ -2545,7 +2528,7 @@
       },
       "source": {
         "service": "mitra-data-manager",
-        "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e",
+        "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
         "handler": "GlobalExceptionHandler.handleDatabaseException"
       },
       "request": {
@@ -2553,7 +2536,6 @@
         "method": "POST",
         "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
         "body": {
-          "dataSourceId": "00000000-0000-4000-8000-000000000001",
           "parameters": {}
         }
       },

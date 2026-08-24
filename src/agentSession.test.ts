@@ -27,7 +27,15 @@ const TASK: AgentTask = {
 }
 
 function page<T>(content: T[]): Page<T> {
-  return { content, totalElements: content.length }
+  return {
+    content,
+    page: {
+      size: content.length,
+      totalElements: content.length,
+      totalPages: content.length === 0 ? 0 : 1,
+      number: 0,
+    },
+  }
 }
 
 function message(id: string, sender: string, content: string, type = "TEXT"): AgentMessage {

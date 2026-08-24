@@ -65,7 +65,6 @@ export interface SdkCoreTransports {
 
 export interface SdkCoreOptions {
   transports: SdkCoreTransports
-  getDataSourceId: () => string | undefined
   /** Resolves the app fixed by the concrete client without inspecting tokens in core. */
   getAppId?: () => string | undefined
   functions?: FunctionsModuleOptions
@@ -127,7 +126,6 @@ export function createSdkCore(options: SdkCoreOptions): SdkCore {
         agents,
         integrationAdmin,
         agentConnections,
-        members,
         getAppId: options.getAppId,
       },
       errors,
@@ -145,7 +143,7 @@ export function createSdkCore(options: SdkCoreOptions): SdkCore {
     members,
     messenger: createMessengerModule(messengerTransport, errors),
     publicFunctions: createPublicFunctionsModule(options.transports.publicFunctions, errors),
-    queries: createQueriesModule(options.transports.dataManager, options.getDataSourceId, errors),
+    queries: createQueriesModule(options.transports.dataManager, errors),
     sql: createSqlModule(options.transports.dataManager, errors),
     schema,
     workflows: createWorkflowsModule(options.transports.functions, errors),

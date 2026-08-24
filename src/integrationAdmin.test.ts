@@ -45,7 +45,7 @@ function bulkResult(): TemplateConfigBulkResult {
 }
 
 function testResult() {
-  return { status: "ok", durationMs: 120, checkedAt: "2026-01-01T00:00:00Z", message: null }
+  return { status: "connected", durationMs: 120, checkedAt: "2026-01-01T00:00:00Z", message: null }
 }
 
 function summary(): TemplateConfigSummary {
@@ -184,7 +184,7 @@ describe("integrationAdmin tests and listing", () => {
           legacyId: null,
           templateId: "template-1",
           alias: "crm",
-          status: "ok",
+          status: "connected",
           lastCheckedAt: null,
         },
       ],

@@ -50,7 +50,6 @@ const scheduledFunction: FunctionCreateInput = {
 }
 const core = createSdkCore({
   transports: { auth: transport, dataManager: transport, functions: transport, integration: transport },
-  getDataSourceId: () => "data-source",
 })
 const eventSource: AgentTaskEventSource = {
   open: async () => ({ close() {} }),
@@ -89,7 +88,6 @@ const scheduledFunction: core.FunctionCreateInput = {
 }
 const client: core.SdkCore = core.createSdkCore({
   transports: { auth: transport, dataManager: transport, functions: transport, integration: transport },
-  getDataSourceId: () => "data-source",
 })
 const eventSource: core.AgentTaskEventSource = {
   open: async () => ({ close() {} }),

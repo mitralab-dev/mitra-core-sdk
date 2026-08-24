@@ -10,11 +10,11 @@
   },
   "producers": {
     "codeStudio": { "ref": "origin/alpha", "commit": "f4ab596c7bd730e415c6b00b63921ae274cc8e45" },
-    "copilot": { "ref": "origin/alpha", "commit": "52f12f6e318ce9e36846232d1ab9165cc1302719" },
-    "dataManager": { "ref": "origin/alpha", "commit": "64b3671531b0ea8c3f044055da770c5dc84ebc1e" },
-    "functions": { "ref": "origin/alpha", "commit": "77ffe97d9398686ea6cf575e1d04d9cfb782d274" },
-    "iam": { "ref": "origin/alpha", "commit": "342f16e523c866371a60a25ffde811de346c5391" },
-    "integration": { "ref": "origin/alpha", "commit": "fcb78ce52dd132953f5a4ead8613bac4233812af" },
+    "copilot": { "ref": "origin/alpha", "commit": "cb3ea04e03ab0ea29f46388acff32d60fc018adb" },
+    "dataManager": { "ref": "origin/alpha", "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84" },
+    "functions": { "ref": "origin/alpha", "commit": "d9921f620afff62ea8a047d2f301b41c725b35cb" },
+    "iam": { "ref": "origin/alpha", "commit": "6337ced228bfd0c2244a23a09142a34ac7e87aad" },
+    "integration": { "ref": "origin/alpha", "commit": "cfd4b1ce6e36c07b88de7e67e0fa3b9adb9f158b" },
     "messenger": { "ref": "origin/alpha", "commit": "4edc479c2917bcfe79765cd977bd37ff4f1f294b" }
   },
   "total": 120,

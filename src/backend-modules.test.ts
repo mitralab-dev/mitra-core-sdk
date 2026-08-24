@@ -42,7 +42,14 @@ class QueueTransport implements Transport {
   }
 }
 
-const page = { content: [], totalElements: 0 }
+function springPage<T>(content: T[], totalElements = content.length) {
+  return {
+    content,
+    page: { size: 20, totalElements, totalPages: totalElements === 0 ? 0 : 1, number: 0 },
+  }
+}
+
+const page = springPage([])
 const query = { rows: [], affectedRows: null, durationMs: 1 }
 
 const functionExecution = {
@@ -184,16 +191,60 @@ const customQuerySummary = {
 }
 const importDefinition = {
   id: "import-1",
+  legacyId: null,
   name: "Import",
   source: { type: "SQL", query: "SELECT 1" },
-  target: { tableName: "users", mode: "APPEND" },
+  target: { tableName: "users", mode: "APPEND", upsertKeyColumns: null },
+  processing: { mode: "CHUNKED", orderColumn: null, chunkSize: 10_000 },
+  schedule: { cron: null, enabled: false },
+  columnMappings: null,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
 }
-const importExecution = { id: "import-execution-1", status: "PENDING" }
+const importExecution = {
+  id: "import-execution-1",
+  importDefinitionId: "import-1",
+  importName: "Import",
+  status: "PENDING",
+  triggerType: "MANUAL",
+  totalChunks: null,
+  completedChunks: 0,
+  failedChunks: 0,
+  progressPercent: null,
+  rowsTotal: null,
+  rowsProcessed: 0,
+  queuedAt: "2026-01-01T00:00:00Z",
+  startedAt: null,
+  completedAt: null,
+  durationSeconds: null,
+  errorMessage: null,
+}
+const dataSourceConnection = {
+  host: "db.example.com",
+  port: 5432,
+  schema: null,
+  databaseName: "app",
+  username: "app",
+  credential: null,
+  maxPoolSize: null,
+  connectionTimeoutMs: null,
+  idleTimeoutMs: null,
+  minimumIdle: null,
+  maxLifetimeMs: null,
+  additionalParams: null,
+}
 const dataSourceDefinition = {
   id: "source-1",
+  legacyId: null,
+  appId: "app-1",
   name: "Warehouse",
   instanceType: "EXTERNAL",
   dbType: "POSTGRES",
+  writeConnectionConfig: dataSourceConnection,
+  readConnectionConfig: null,
+  connectionStatus: null,
+  lastCheckedAt: null,
+  storageQuota: null,
 }
 const agentDefinition = {
   id: "agent-1",
@@ -367,7 +418,7 @@ const failedIntegrationExecution = {
 describe("apps and public Functions", () => {
   it("covers the Code Studio lifecycle with encoded paths and file semantics", async () => {
     const transport = new QueueTransport([
-      { content: [appSummary], totalElements: 1 },
+      springPage([appSummary]),
       appDefinition,
       appDefinition,
       undefined,
@@ -381,8 +432,8 @@ describe("apps and public Functions", () => {
       null,
       appDeploy,
       appDefinition,
-      { content: [appDeploy], totalElements: 1 },
-      { content: [appVersion], totalElements: 1 },
+      springPage([appDeploy]),
+      springPage([appVersion]),
     ])
     const apps = createAppsModule(transport)
 
@@ -512,7 +563,7 @@ describe("Data Manager authoring modules", () => {
     expect(schemaTransport.requests[7]?.path).toContain("columns/old%2Fname")
 
     const queryTransport = new QueueTransport([
-      { content: [customQuerySummary], totalElements: 1 },
+      springPage([customQuerySummary]),
       customQuery,
       customQuery,
       customQuery,
@@ -644,16 +695,16 @@ describe("Data Manager authoring modules", () => {
 describe("Function administration and app context", () => {
   it("covers Function CRUD, lifecycle, executions, visibility, and secret routes", async () => {
     const transport = new QueueTransport([
-      { content: [functionSummary], totalElements: 1 },
+      springPage([functionSummary]),
       functionDefinition,
       functionDefinition,
       functionDefinition,
       undefined,
       functionDefinition,
       functionDefinition,
-      { content: [functionVersion], totalElements: 1 },
+      springPage([functionVersion]),
       functionDefinition,
-      { content: [functionExecution], totalElements: 1 },
+      springPage([functionExecution]),
       functionExecution,
       { secrets: ["API_KEY"] },
       undefined,
@@ -688,18 +739,12 @@ describe("Function administration and app context", () => {
       new QueueTransport([appDefinition, { files: { "z.ts": "z", "a.ts": "a" } }]),
     )
     const schema = createSchemaModule(new QueueTransport([[]]))
-    const functionsAdmin = createFunctionsAdminModule(
-      new QueueTransport([{ content: [], totalElements: 1 }]),
-    )
-    const agents = createAgentsModule(
-      new QueueTransport([{ content: [], totalElements: 0 }]),
-      new QueueTransport(),
-    )
+    const functionsAdmin = createFunctionsAdminModule(new QueueTransport([springPage([], 1)]))
+    const agents = createAgentsModule(new QueueTransport([springPage([])]), new QueueTransport())
     const integrationAdmin = createIntegrationAdminModule(
       new QueueTransport([{ content: [], totalElements: 0 }]),
     )
     const connections = createAgentConnectionsModule(new QueueTransport([[]]))
-    const members = createMembersModule(new QueueTransport([[]]))
     const context = createContextModule({
       apps,
       schema,
@@ -707,7 +752,6 @@ describe("Function administration and app context", () => {
       agents,
       integrationAdmin,
       agentConnections: connections,
-      members,
       getAppId: () => "app/1",
     })
 
@@ -728,7 +772,6 @@ describe("Function administration and app context", () => {
       agents,
       integrationAdmin,
       agentConnections: connections,
-      members,
     })
     await expect(unavailable.getAppContext()).rejects.toBeInstanceOf(SdkCoreConfigurationError)
   })
@@ -829,7 +872,7 @@ describe("agent and workflow modules", () => {
     expect(connectionTransport.requests[10]?.path).toContain("device%2F1/poll")
 
     const workflowTransport = new QueueTransport([
-      { content: [workflowSummary], totalElements: 1 },
+      springPage([workflowSummary]),
       workflowDefinition,
       workflowDefinition,
       workflowDefinition,
@@ -905,8 +948,12 @@ describe("integration authoring and Messenger", () => {
       sort: "alias",
     })
 
-    const messengerTransport = new QueueTransport([undefined])
-    await createMessengerModule(messengerTransport).notify("Build completed")
+    const messengerTransport = new QueueTransport([{ messageId: "message-1" }])
+    await expect(
+      createMessengerModule(messengerTransport).notify("Build completed"),
+    ).resolves.toEqual({
+      messageId: "message-1",
+    })
     expect(messengerTransport.requests[0]?.options.body).toEqual({ content: "Build completed" })
   })
 
@@ -1045,6 +1092,64 @@ describe("specific response validators", () => {
         createWorkflowsModule(transport).getExecution("workflow-1", "execution-1"),
     },
     {
+      name: "Data Source detail",
+      value: dataSourceDefinition,
+      requiredFields: [
+        "id",
+        "legacyId",
+        "appId",
+        "name",
+        "instanceType",
+        "dbType",
+        "writeConnectionConfig",
+        "readConnectionConfig",
+        "connectionStatus",
+        "lastCheckedAt",
+        "storageQuota",
+      ],
+      execute: (transport) => createDataSourcesModule(transport).get("source-1"),
+    },
+    {
+      name: "Import definition",
+      value: importDefinition,
+      requiredFields: [
+        "id",
+        "legacyId",
+        "name",
+        "source",
+        "target",
+        "processing",
+        "schedule",
+        "columnMappings",
+        "createdAt",
+        "updatedAt",
+      ],
+      execute: (transport) => createImportsModule(transport).get("import-1"),
+    },
+    {
+      name: "Import execution",
+      value: importExecution,
+      requiredFields: [
+        "id",
+        "importDefinitionId",
+        "importName",
+        "status",
+        "triggerType",
+        "totalChunks",
+        "completedChunks",
+        "failedChunks",
+        "progressPercent",
+        "rowsTotal",
+        "rowsProcessed",
+        "queuedAt",
+        "startedAt",
+        "completedAt",
+        "durationSeconds",
+        "errorMessage",
+      ],
+      execute: (transport) => createImportsModule(transport).cancelExecution("execution-1"),
+    },
+    {
       name: "Integration template summary",
       value: integrationTemplateSummary,
       requiredFields: ["id", "name", "baseUrl", "proxyMode", "logoUrl", "templateType"],
@@ -1122,7 +1227,9 @@ describe("specific response validators", () => {
       const item = withoutField(contract.value, field)
       const response =
         contract.name.includes("summary") || contract.name === "App version"
-          ? { content: [item], totalElements: 1 }
+          ? contract.name.startsWith("Integration")
+            ? { content: [item], totalElements: 1 }
+            : springPage([item])
           : item
       await expect(contract.execute(new QueueTransport([response]))).rejects.toBeInstanceOf(
         SdkCoreResponseError,
@@ -1168,6 +1275,39 @@ describe("specific response validators", () => {
       execute: (transport: Transport) =>
         createIntegrationResourcesModule(transport).get("resource-1"),
     },
+    {
+      name: "Data Source write connection",
+      response: {
+        ...dataSourceDefinition,
+        writeConnectionConfig: { ...dataSourceConnection, credential: "secret" },
+      },
+      execute: (transport: Transport) => createDataSourcesModule(transport).get("source-1"),
+    },
+    {
+      name: "Data Source storage quota",
+      response: {
+        ...dataSourceDefinition,
+        storageQuota: {
+          status: "NORMAL",
+          usedBytes: 1,
+          limitBytes: 10,
+          measuredAt: "2026-01-01T00:00:00Z",
+          measurementVersion: "1",
+        },
+      },
+      execute: (transport: Transport) => createDataSourcesModule(transport).get("source-1"),
+    },
+    {
+      name: "Import target",
+      response: { ...importDefinition, target: { ...importDefinition.target, mode: "INVALID" } },
+      execute: (transport: Transport) => createImportsModule(transport).get("import-1"),
+    },
+    {
+      name: "Import execution status",
+      response: { ...importExecution, status: "UNKNOWN" },
+      execute: (transport: Transport) =>
+        createImportsModule(transport).cancelExecution("execution-1"),
+    },
   ])("rejects incomplete nested $name", async ({ response, execute }) => {
     await expect(execute(new QueueTransport([response]))).rejects.toBeInstanceOf(
       SdkCoreResponseError,
@@ -1187,7 +1327,7 @@ describe("specific response validators", () => {
   ]
 
   for (const [operation, execute] of pageOperations) {
-    it.each([{}, "wrong type", { content: [{}], totalElements: 1 }])(
+    it.each([{}, "wrong type", { content: [{}], page: { totalElements: 1 } }])(
       `rejects invalid ${operation} page %#`,
       async (response) => {
         await expect(execute(new QueueTransport([response]))).rejects.toBeInstanceOf(
@@ -1224,4 +1364,17 @@ describe("specific response validators", () => {
       )
     })
   }
+
+  it("rejects invalid Integration connection and Messenger acceptance responses", async () => {
+    await expect(
+      createIntegrationAdminModule(
+        new QueueTransport([
+          { status: "ok", durationMs: 1, checkedAt: "2026-01-01T00:00:00Z", message: null },
+        ]),
+      ).testConfig("config-1"),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+    await expect(
+      createMessengerModule(new QueueTransport([{}])).notify("Build completed"),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
 })
