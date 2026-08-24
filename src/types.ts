@@ -691,11 +691,6 @@ export interface PublicFunctionAsyncResult {
   status: string
 }
 
-export interface PublicFunctionExecutionResult extends PublicFunctionAsyncResult {
-  output: Record<string, unknown> | null
-  error: string | null
-}
-
 /**
  * Function list item. The three cron fields are populated only with `SCHEDULE_READ`; all three are
  * also null when no schedule exists.

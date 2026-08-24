@@ -1,15 +1,11 @@
 import { requireBatchSize } from "../batch"
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
-import {
-  expectDataSourceBulkResult,
-  expectDataSourceDefinition,
-  expectEmpty,
-  expectPage,
-} from "../response"
+import { expectDataSourceDefinition, expectEmpty, expectPage } from "../response"
 import { encodePathSegment } from "../path"
 import type { QueryParamValue, Transport } from "../transport"
 import type {
   DataSourceBulkResult,
+  DataSourceBulkItemResult,
   DataSourceCreateInput,
   DataSourceDefinition,
   DataSourceUpdateInput,
@@ -18,6 +14,34 @@ import type {
 } from "../types"
 
 const MAX_DATA_SOURCES = 100
+
+function bulkFailure(
+  index: number,
+  dataSourceId: string | null,
+  error: unknown,
+): DataSourceBulkItemResult {
+  const errorCode =
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : null
+  return {
+    index,
+    success: false,
+    dataSourceId,
+    errorCode,
+    message: error instanceof Error ? error.message : "Data Source operation failed",
+  }
+}
+
+function bulkResult(results: DataSourceBulkItemResult[]): DataSourceBulkResult {
+  const succeededCount = results.filter(({ success }) => success).length
+  return {
+    results,
+    processedCount: results.length,
+    succeededCount,
+    failedCount: results.length - succeededCount,
+  }
+}
 
 export interface DataSourcesModule {
   /** Lists safe Data Source metadata. Stored credentials are never returned. */
@@ -35,9 +59,9 @@ export interface DataSourcesModule {
   /**
    * Registers 1 to 100 `EXTERNAL` data sources. Mitra-managed instance types are rejected.
    *
-   * The whole batch is validated before the first write, then items run in order, best effort and
-   * NOT atomically: metadata and the credential land per item, so a later failure leaves earlier
-   * items created. Read `results` to find out what happened to each one.
+   * The SDK composes the existing singular API in order, best effort and NOT atomically: metadata
+   * and the credential land per item, so a later failure leaves earlier items created. Read
+   * `results` to find out what happened to each one.
    */
   bulkCreate(dataSources: DataSourceCreateInput[]): Promise<DataSourceBulkResult>
   /**
@@ -57,6 +81,25 @@ export function createDataSourcesModule(
 ): DataSourcesModule {
   const path = (id: string) =>
     `/api/v1/data-sources/${encodePathSegment(id, "data source id", errors)}`
+  const createOne = async (input: DataSourceCreateInput) =>
+    expectDataSourceDefinition(
+      await transport.request<unknown>("/api/v1/data-sources", { method: "POST", body: input }),
+      "Create Data Source response",
+      errors,
+    )
+  const updateOne = async (id: string, input: Omit<DataSourceUpdateInput, "dataSourceId">) =>
+    expectDataSourceDefinition(
+      await transport.request<unknown>(path(id), { method: "PUT", body: input }),
+      "Update Data Source response",
+      errors,
+    )
+  const deleteOne = async (id: string) => {
+    expectEmpty(
+      await transport.request<unknown>(path(id), { method: "DELETE" }),
+      "Delete Data Source response",
+      errors,
+    )
+  }
   return {
     async list(options = {}) {
       const params: Record<string, QueryParamValue> = {
@@ -81,64 +124,79 @@ export function createDataSourcesModule(
     },
 
     async create(input) {
-      return expectDataSourceDefinition(
-        await transport.request<unknown>("/api/v1/data-sources", { method: "POST", body: input }),
-        "Create Data Source response",
-        errors,
-      )
+      return createOne(input)
     },
 
     async update(id, input) {
-      return expectDataSourceDefinition(
-        await transport.request<unknown>(path(id), { method: "PUT", body: input }),
-        "Update Data Source response",
-        errors,
-      )
+      return updateOne(id, input)
     },
 
     async delete(id) {
-      expectEmpty(
-        await transport.request<unknown>(path(id), { method: "DELETE" }),
-        "Delete Data Source response",
-        errors,
-      )
+      return deleteOne(id)
     },
 
     async bulkCreate(dataSources): Promise<DataSourceBulkResult> {
       requireBatchSize(dataSources, "dataSources", MAX_DATA_SOURCES, errors)
-      return expectDataSourceBulkResult(
-        await transport.request<unknown>("/api/v1/data-sources/bulk", {
-          method: "POST",
-          body: { dataSources },
-        }),
-        "Data Source bulk create response",
-        errors,
-      )
+      const results: DataSourceBulkItemResult[] = []
+      for (const [index, input] of dataSources.entries()) {
+        try {
+          const created = await createOne(input)
+          results.push({
+            index,
+            success: true,
+            dataSourceId: created.id,
+            errorCode: null,
+            message: null,
+          })
+        } catch (error) {
+          results.push(bulkFailure(index, null, error))
+        }
+      }
+      return bulkResult(results)
     },
 
     async bulkUpdate(dataSources): Promise<DataSourceBulkResult> {
       requireBatchSize(dataSources, "dataSources", MAX_DATA_SOURCES, errors)
-      return expectDataSourceBulkResult(
-        await transport.request<unknown>("/api/v1/data-sources/bulk", {
-          method: "PUT",
-          body: { dataSources },
-        }),
-        "Data Source bulk update response",
-        errors,
-      )
+      const paths = dataSources.map(({ dataSourceId }) => path(dataSourceId))
+      const results: DataSourceBulkItemResult[] = []
+      for (const [index, { dataSourceId, ...input }] of dataSources.entries()) {
+        try {
+          const updated = expectDataSourceDefinition(
+            await transport.request<unknown>(paths[index]!, { method: "PUT", body: input }),
+            "Update Data Source response",
+            errors,
+          )
+          results.push({
+            index,
+            success: true,
+            dataSourceId: updated.id,
+            errorCode: null,
+            message: null,
+          })
+        } catch (error) {
+          results.push(bulkFailure(index, dataSourceId, error))
+        }
+      }
+      return bulkResult(results)
     },
 
-    // POST, not DELETE: the id list travels in a body, and some proxies drop a DELETE body.
     async bulkDelete(dataSourceIds): Promise<DataSourceBulkResult> {
       requireBatchSize(dataSourceIds, "dataSourceIds", MAX_DATA_SOURCES, errors)
-      return expectDataSourceBulkResult(
-        await transport.request<unknown>("/api/v1/data-sources/bulk-delete", {
-          method: "POST",
-          body: { dataSourceIds },
-        }),
-        "Data Source bulk delete response",
-        errors,
-      )
+      const paths = dataSourceIds.map((id) => path(id))
+      const results: DataSourceBulkItemResult[] = []
+      for (const [index, dataSourceId] of dataSourceIds.entries()) {
+        try {
+          expectEmpty(
+            await transport.request<unknown>(paths[index]!, { method: "DELETE" }),
+            "Delete Data Source response",
+            errors,
+          )
+          results.push({ index, success: true, dataSourceId, errorCode: null, message: null })
+        } catch (error) {
+          results.push(bulkFailure(index, dataSourceId, error))
+        }
+      }
+      return bulkResult(results)
     },
   }
 }

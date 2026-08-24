@@ -106,7 +106,7 @@ describe("createSdkCore", () => {
       { data: [], limit: 100, skip: 0, total: 0, hasMore: false },
       { rows: [], affectedRows: null, durationMs: 1 },
       { results: [], executedCount: 0, totalDurationMs: 1 },
-      { results: [], processedCount: 0, succeededCount: 0, failedCount: 0 },
+      undefined,
     ])
     const functions = new QueueTransport([
       execution(),
@@ -134,7 +134,7 @@ describe("createSdkCore", () => {
       executedCount: 0,
     })
     await expect(core.dataSources.bulkDelete(["data-source-1"])).resolves.toMatchObject({
-      processedCount: 0,
+      processedCount: 1,
     })
     await expect(core.functionsAdmin.bulkDelete({ allInApp: true })).resolves.toMatchObject({
       deletedCount: 0,

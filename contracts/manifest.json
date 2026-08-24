@@ -10,9 +10,9 @@
     {
       "version": "0.2.0-beta.0",
       "path": "v0.2.0-beta.0/sdk-parity.json",
-      "sha256": "1707cbd4ee7f4f314a9b7afac23a7194301f9281ceb93b619b711e21dd89b6a1",
+      "sha256": "2f6189db058c46c19c17a3b7d854ec476e9bbefbe33b974eba0aef4c9652e840",
       "mcpToolsPath": "v0.2.0-beta.0/mcp-tool-parity.json",
-      "mcpToolsSha256": "19b7bd30081905f3efe72bc64824102d36106977d4a5900c54568f063aac1e28",
+      "mcpToolsSha256": "77a115d39e2ee195b4e33a86766a6fdd75e89a7a35b6102f6f38f0eeb8c9d587",
       "mcpSourcePath": "v0.2.0-beta.0/mcp-alpha-tools.json",
       "mcpSourceSha256": "480d27eed75f2604da07fadd10f236a0ca971cf6a3c003434a1fb62c4255178f"
     }

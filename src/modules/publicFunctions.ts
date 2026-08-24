@@ -1,16 +1,8 @@
 import { configurationError, defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
-import {
-  expectPublicFunctionAsyncResult,
-  expectPublicFunctionExecutionResult,
-  expectPublicFunctionResult,
-} from "../response"
+import { expectPublicFunctionAsyncResult, expectPublicFunctionResult } from "../response"
 import type { Transport } from "../transport"
-import type {
-  PublicFunctionAsyncResult,
-  PublicFunctionExecutionResult,
-  PublicFunctionResult,
-} from "../types"
+import type { PublicFunctionAsyncResult, PublicFunctionResult } from "../types"
 
 export interface PublicFunctionsModule {
   /**
@@ -19,10 +11,8 @@ export interface PublicFunctionsModule {
    * The response deliberately excludes input, logs, version, and timing information.
    */
   execute(id: string, input?: Record<string, unknown>): Promise<PublicFunctionResult>
-  /** Queues a PUBLIC Function anonymously and returns its id and initial status. */
+  /** Queues a PUBLIC Function anonymously as fire-and-forget and returns its initial status. */
   executeAsync(id: string, input?: Record<string, unknown>): Promise<PublicFunctionAsyncResult>
-  /** Reads the safe result of an execution created through executeAsync. */
-  getExecution(id: string): Promise<PublicFunctionExecutionResult>
 }
 
 export function createPublicFunctionsModule(
@@ -61,22 +51,6 @@ export function createPublicFunctionsModule(
       return expectPublicFunctionAsyncResult(
         await execute(id, input, "async"),
         "Public async Function execution response",
-        errors,
-      )
-    },
-    async getExecution(id) {
-      if (!transport) {
-        configurationError(
-          "A separate publicFunctions transport is required so anonymous requests do not inherit authorization headers",
-          errors,
-        )
-      }
-      return expectPublicFunctionExecutionResult(
-        await transport.request<unknown>(
-          `/public/v1/functions/executions/${encodePathSegment(id, "execution id", errors)}`,
-          { method: "GET" },
-        ),
-        "Public Function execution status response",
         errors,
       )
     },

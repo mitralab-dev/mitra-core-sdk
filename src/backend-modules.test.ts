@@ -502,7 +502,6 @@ describe("apps and public Functions", () => {
     const transport = new QueueTransport([
       { success: true, output: { ok: true }, error: null },
       { id: "execution-1", status: "PENDING" },
-      { id: "execution-1", status: "SUCCESS", output: { ok: true }, error: null },
     ])
     const functions = createPublicFunctionsModule(transport)
 
@@ -513,12 +512,6 @@ describe("apps and public Functions", () => {
       id: "execution-1",
       status: "PENDING",
     })
-    await expect(functions.getExecution("execution/1")).resolves.toEqual({
-      id: "execution-1",
-      status: "SUCCESS",
-      output: { ok: true },
-      error: null,
-    })
     expect(transport.requests[0]).toEqual({
       path: "/public/v1/functions/function%2F1/execute",
       options: {
@@ -528,11 +521,6 @@ describe("apps and public Functions", () => {
       },
     })
     expect(transport.requests[1]?.options.headers).toEqual({ "X-Invocation-Type": "async" })
-    expect(transport.requests[2]).toEqual({
-      path: "/public/v1/functions/executions/execution%2F1",
-      options: { method: "GET" },
-    })
-
     await expect(createPublicFunctionsModule(undefined).execute("id")).rejects.toBeInstanceOf(
       SdkCoreConfigurationError,
     )
@@ -633,16 +621,15 @@ describe("Data Manager authoring modules", () => {
     expect(importTransport.requests[0]?.path).toBe("/api/v1/data-imports")
     expect(importTransport.requests[6]?.path).toBe("/api/v1/data-imports/executions")
 
-    const bulk = { results: [], processedCount: 0, succeededCount: 0, failedCount: 0 }
     const dataSourceTransport = new QueueTransport([
       page,
       dataSourceDefinition,
       dataSourceDefinition,
       dataSourceDefinition,
       undefined,
-      bulk,
-      bulk,
-      bulk,
+      dataSourceDefinition,
+      dataSourceDefinition,
+      undefined,
     ])
     const dataSources = createDataSourcesModule(dataSourceTransport)
     const connection = {

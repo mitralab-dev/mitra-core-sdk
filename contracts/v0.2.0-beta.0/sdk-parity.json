@@ -252,24 +252,24 @@
       "mcpTool": "bulkCreateDataSources",
       "javascript": "dataSources.bulkCreate(dataSources)",
       "python": "data_sources.bulk_create(data_sources)",
-      "endpoint": "POST /data-manager/api/v1/data-sources/bulk",
-      "mcpTransportParity": "exact"
+      "endpoint": "POST /data-manager/api/v1/data-sources",
+      "mcpTransportParity": "semantic-only"
     },
     {
       "operation": "dataSources.bulkUpdate",
       "mcpTool": "bulkUpdateDataSources",
       "javascript": "dataSources.bulkUpdate(dataSources)",
       "python": "data_sources.bulk_update(data_sources)",
-      "endpoint": "PUT /data-manager/api/v1/data-sources/bulk",
-      "mcpTransportParity": "exact"
+      "endpoint": "PUT /data-manager/api/v1/data-sources/{id}",
+      "mcpTransportParity": "semantic-only"
     },
     {
       "operation": "dataSources.bulkDelete",
       "mcpTool": "bulkDeleteDataSources",
       "javascript": "dataSources.bulkDelete(dataSourceIds)",
       "python": "data_sources.bulk_delete(data_source_ids)",
-      "endpoint": "POST /data-manager/api/v1/data-sources/bulk-delete",
-      "mcpTransportParity": "exact"
+      "endpoint": "DELETE /data-manager/api/v1/data-sources/{id}",
+      "mcpTransportParity": "semantic-only"
     },
     {
       "operation": "functionsAdmin.bulkCreate",
@@ -1292,39 +1292,47 @@
       "request": {
         "service": "dataManager",
         "method": "POST",
-        "path": "/api/v1/data-sources/bulk",
+        "path": "/api/v1/data-sources",
         "body": {
-          "dataSources": [
-            {
-              "name": "Reporting",
-              "instanceType": "EXTERNAL",
-              "dbType": "POSTGRES",
-              "writeConnectionConfig": {
-                "host": "db.example.com",
-                "port": 5432,
-                "databaseName": "reporting",
-                "username": "reader",
-                "credential": "write-only-credential"
-              }
-            }
-          ]
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": "write-only-credential"
+          }
         }
       },
       "response": {
         "status": 201,
         "body": {
-          "results": [
-            {
-              "index": 0,
-              "success": true,
-              "dataSourceId": "00000000-0000-4000-8000-000000000501",
-              "errorCode": null,
-              "message": null
-            }
-          ],
-          "processedCount": 1,
-          "succeededCount": 1,
-          "failedCount": 0
+          "id": "00000000-0000-4000-8000-000000000501",
+          "legacyId": null,
+          "appId": "00000000-0000-4000-8000-000000000500",
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "schema": null,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": null,
+            "maxPoolSize": null,
+            "connectionTimeoutMs": null,
+            "idleTimeoutMs": null,
+            "minimumIdle": null,
+            "maxLifetimeMs": null,
+            "additionalParams": null
+          },
+          "readConnectionConfig": null,
+          "connectionStatus": null,
+          "lastCheckedAt": null,
+          "storageQuota": null
         }
       },
       "expectedResult": {
@@ -1365,39 +1373,46 @@
       "request": {
         "service": "dataManager",
         "method": "PUT",
-        "path": "/api/v1/data-sources/bulk",
+        "path": "/api/v1/data-sources/00000000-0000-4000-8000-000000000501",
         "body": {
-          "dataSources": [
-            {
-              "dataSourceId": "00000000-0000-4000-8000-000000000501",
-              "name": "Reporting",
-              "instanceType": "EXTERNAL",
-              "dbType": "POSTGRES",
-              "writeConnectionConfig": {
-                "host": "db.example.com",
-                "port": 5432,
-                "databaseName": "reporting",
-                "username": "reader"
-              }
-            }
-          ]
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "databaseName": "reporting",
+            "username": "reader"
+          }
         }
       },
       "response": {
         "status": 200,
         "body": {
-          "results": [
-            {
-              "index": 0,
-              "success": true,
-              "dataSourceId": "00000000-0000-4000-8000-000000000501",
-              "errorCode": null,
-              "message": null
-            }
-          ],
-          "processedCount": 1,
-          "succeededCount": 1,
-          "failedCount": 0
+          "id": "00000000-0000-4000-8000-000000000501",
+          "legacyId": null,
+          "appId": "00000000-0000-4000-8000-000000000500",
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "schema": null,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": null,
+            "maxPoolSize": null,
+            "connectionTimeoutMs": null,
+            "idleTimeoutMs": null,
+            "minimumIdle": null,
+            "maxLifetimeMs": null,
+            "additionalParams": null
+          },
+          "readConnectionConfig": null,
+          "connectionStatus": null,
+          "lastCheckedAt": null,
+          "storageQuota": null
         }
       },
       "expectedResult": {
@@ -1424,28 +1439,12 @@
       },
       "request": {
         "service": "dataManager",
-        "method": "POST",
-        "path": "/api/v1/data-sources/bulk-delete",
-        "body": {
-          "dataSourceIds": ["00000000-0000-4000-8000-000000000502"]
-        }
+        "method": "DELETE",
+        "path": "/api/v1/data-sources/00000000-0000-4000-8000-000000000502"
       },
       "response": {
         "status": 200,
-        "body": {
-          "results": [
-            {
-              "index": 0,
-              "success": true,
-              "dataSourceId": "00000000-0000-4000-8000-000000000502",
-              "errorCode": null,
-              "message": null
-            }
-          ],
-          "processedCount": 1,
-          "succeededCount": 1,
-          "failedCount": 0
-        }
+        "empty": true
       },
       "expectedResult": {
         "results": [
@@ -2228,74 +2227,6 @@
         "status": 200,
         "code": "INVALID_RESPONSE",
         "message": "Schema tables response group 0 table 0 column 0 has an invalid primaryKey field",
-        "details": null,
-        "requestId": null,
-        "retryable": false
-      }
-    },
-    {
-      "id": "data-sources.bulk-create.invalid-payload",
-      "kind": "invalid-payload",
-      "operation": "dataSources.bulkCreate",
-      "input": {
-        "dataSources": [
-          {
-            "name": "Reporting",
-            "instanceType": "EXTERNAL",
-            "dbType": "POSTGRES",
-            "writeConnectionConfig": {
-              "host": "db.example.com",
-              "port": 5432,
-              "databaseName": "reporting",
-              "username": "reader",
-              "credential": "write-only-credential"
-            }
-          }
-        ]
-      },
-      "request": {
-        "service": "dataManager",
-        "method": "POST",
-        "path": "/api/v1/data-sources/bulk",
-        "body": {
-          "dataSources": [
-            {
-              "name": "Reporting",
-              "instanceType": "EXTERNAL",
-              "dbType": "POSTGRES",
-              "writeConnectionConfig": {
-                "host": "db.example.com",
-                "port": 5432,
-                "databaseName": "reporting",
-                "username": "reader",
-                "credential": "write-only-credential"
-              }
-            }
-          ]
-        }
-      },
-      "response": {
-        "status": 201,
-        "body": {
-          "results": [
-            {
-              "index": 0,
-              "success": true,
-              "dataSourceId": 501,
-              "errorCode": null,
-              "message": null
-            }
-          ],
-          "processedCount": 1,
-          "succeededCount": 1,
-          "failedCount": 0
-        }
-      },
-      "expectedError": {
-        "type": "response",
-        "status": 201,
-        "code": "INVALID_RESPONSE",
-        "message": "Data Source bulk create response result 0 has an invalid dataSourceId field",
         "details": null,
         "requestId": null,
         "retryable": false

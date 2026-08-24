@@ -211,7 +211,6 @@ export type {
   ProxyResult,
   ProviderCredentialStatus,
   PublicFunctionAsyncResult,
-  PublicFunctionExecutionResult,
   PublicFunctionResult,
   QueryResult,
   SchemaScope,

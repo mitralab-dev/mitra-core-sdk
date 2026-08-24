@@ -443,7 +443,8 @@ describe("SDK-PARITY-001 contract fixture", () => {
     const transport = new FixtureTransport(testCase)
     const result = await executeCase(testCase, transport)
 
-    if (testCase.response?.empty === true) expect(result).toBeUndefined()
+    if (testCase.response?.empty === true && testCase.expectedResult === undefined)
+      expect(result).toBeUndefined()
     else expect(result).toEqual(testCase.expectedResult)
     expectRequest(testCase, transport)
   })

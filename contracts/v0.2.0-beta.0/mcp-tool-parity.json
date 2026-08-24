@@ -205,19 +205,19 @@
       "class": "DataManagerDataSourceTools",
       "tool": "bulkCreateDataSources",
       "sdk": "dataSources.bulkCreate",
-      "kind": "direct"
+      "kind": "composition"
     },
     {
       "class": "DataManagerDataSourceTools",
       "tool": "bulkUpdateDataSources",
       "sdk": "dataSources.bulkUpdate",
-      "kind": "direct"
+      "kind": "composition"
     },
     {
       "class": "DataManagerDataSourceTools",
       "tool": "bulkDeleteDataSources",
       "sdk": "dataSources.bulkDelete",
-      "kind": "direct"
+      "kind": "composition"
     },
 
     {

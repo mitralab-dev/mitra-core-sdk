@@ -172,11 +172,9 @@ configuration error before making a request.
 authenticated Functions transport. Its adapter must target the Functions public
 base URL and must not attach `Authorization` or `X-App-Id`. It calls
 `POST /public/v1/functions/{id}/execute` with `X-Invocation-Type: sync` or
-`async`. Async results are read with
-`GET /public/v1/functions/executions/{executionId}`. The service only exposes
-executions that were created through the public async route. Public polling
-requires the corresponding Functions producer from issue #325 and Kong route
-from issue #91 to be deployed.
+`async`. Public async is fire-and-forget because the producer does not expose
+anonymous polling. Callers that need a result use public sync execution, or the
+authenticated `functions.executeAsync` and `functions.getExecution` methods.
 
 ## App scope and permissions
 

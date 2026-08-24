@@ -40,7 +40,6 @@ import type {
   UserPlan,
   ProviderCredentialStatus,
   PublicFunctionAsyncResult,
-  PublicFunctionExecutionResult,
   PublicFunctionResult,
   ProxyResult,
   QueryResult,
@@ -1428,17 +1427,6 @@ export function expectPublicFunctionAsyncResult(
   if (typeof result.id !== "string") invalidField(context, "id", errors)
   if (typeof result.status !== "string") invalidField(context, "status", errors)
   return result as unknown as PublicFunctionAsyncResult
-}
-
-export function expectPublicFunctionExecutionResult(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): PublicFunctionExecutionResult {
-  const result = expectPublicFunctionAsyncResult(value, context, errors) as unknown as JsonObject
-  if (result.output !== null && !isObject(result.output)) invalidField(context, "output", errors)
-  if (!isNullableString(result.error)) invalidField(context, "error", errors)
-  return result as unknown as PublicFunctionExecutionResult
 }
 
 export function expectEmpty(
