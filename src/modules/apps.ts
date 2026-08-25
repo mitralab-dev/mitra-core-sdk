@@ -176,7 +176,7 @@ export function createAppsModule(
       const response = await transport.request<unknown>(`${appPath(appId)}/deploys/current`, {
         method: "GET",
       })
-      return response === null
+      return response === null || response === undefined
         ? null
         : expectAppDeploy(response, "Current app deploy response", errors)
     },

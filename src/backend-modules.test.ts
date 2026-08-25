@@ -429,7 +429,7 @@ describe("apps and public Functions", () => {
       appDeploy,
       appDefinition,
       appDeploy,
-      null,
+      undefined,
       appDeploy,
       appDefinition,
       springPage([appDeploy]),
@@ -452,7 +452,7 @@ describe("apps and public Functions", () => {
     await apps.build("app/1")
     await apps.publish("app/1", { externalAccess: true })
     await expect(apps.getDeploy("app/1", "deploy/1")).resolves.toEqual(appDeploy)
-    await apps.getCurrentDeploy("app/1")
+    await expect(apps.getCurrentDeploy("app/1")).resolves.toBeNull()
     await apps.cancelBuild("app/1", "deploy/1")
     await apps.rollback("app/1", "version/1")
     await apps.listDeploys("app/1")
