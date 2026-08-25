@@ -21,6 +21,8 @@ unreleased until the final source commit and registry artifact exist.
   dependency-free injected transport architecture.
 - Preserve producer `createdAt: null` values in `FunctionExecution`,
   `FunctionDefinition`, and Custom Query summary and definition responses.
+- Preserve producer `createdAt: null` values in `AgentTask` responses, which the
+  Copilot rename mutation returns without the field.
 - Preserve full Function batch replacement over PUT while mapping the MCP
   `bulkUpdateFunctions` patch semantics to a separate PATCH operation.
 - Add embedded cron fields to single-Function create and patch inputs and

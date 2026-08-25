@@ -24,6 +24,7 @@ import {
   createWorkflowsModule,
 } from "./index"
 import type {
+  AgentTask,
   CustomQueryDefinition,
   CustomQuerySummary,
   Transport,
@@ -828,6 +829,20 @@ describe("agent and workflow modules", () => {
     await tasks.sendInput("task/1", { type: "message", content: "Hello" })
     await tasks.listMessages("task/1")
     expect(taskTransport.requests[3]?.options.method).toBe("PATCH")
+  })
+
+  it("preserves a nullable createdAt returned by rename", async () => {
+    const renamed: AgentTask = { ...agentTask, title: "New title", createdAt: null }
+    const transport = new QueueTransport([renamed])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(tasks.rename("task/1", "New title")).resolves.toEqual(renamed)
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/tasks/task%2F1",
+        options: { method: "PATCH", body: { title: "New title" } },
+      },
+    ])
   })
 
   it("covers credentials, connections, and workflows", async () => {

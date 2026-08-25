@@ -1106,7 +1106,7 @@ export interface AgentTask {
   agentType: string
   reasoningEffort: string | null
   archived: boolean
-  createdAt: string
+  createdAt: string | null
   updatedAt: string
 }
 

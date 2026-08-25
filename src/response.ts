@@ -1242,7 +1242,7 @@ export function expectAgentTask(
   }
   if (typeof task.agentType !== "string") invalidField(context, "agentType", errors)
   if (typeof task.archived !== "boolean") invalidField(context, "archived", errors)
-  if (typeof task.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof task.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return task as unknown as AgentTask
 }
