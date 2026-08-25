@@ -23,7 +23,12 @@ import {
   createSqlModule,
   createWorkflowsModule,
 } from "./index"
-import type { Transport, TransportRequestOptions } from "./index"
+import type {
+  CustomQueryDefinition,
+  CustomQuerySummary,
+  Transport,
+  TransportRequestOptions,
+} from "./index"
 
 interface CapturedRequest {
   path: string
@@ -528,6 +533,21 @@ describe("apps and public Functions", () => {
 })
 
 describe("Data Manager authoring modules", () => {
+  it("preserves nullable createdAt in Custom Query summaries and update responses", async () => {
+    const summary: CustomQuerySummary = { ...customQuerySummary, createdAt: null }
+    const definition: CustomQueryDefinition = { ...customQuery, createdAt: null }
+    const transport = new QueueTransport([springPage([summary]), definition])
+    const queries = createCustomQueriesModule(transport)
+    const update = { name: "active_users", sql: "SELECT 1", isVirtualTable: false }
+
+    await expect(queries.list()).resolves.toMatchObject({ content: [summary] })
+    await expect(queries.update("query/1", update)).resolves.toEqual(definition)
+    expect(transport.requests[1]).toEqual({
+      path: "/api/v1/custom-queries/query%2F1",
+      options: { method: "PUT", body: update },
+    })
+  })
+
   it("covers schema, custom query, imports, and Data Source CRUD routes", async () => {
     const schemaTransport = new QueueTransport([
       undefined,

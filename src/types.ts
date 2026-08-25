@@ -103,7 +103,7 @@ export interface FunctionExecution {
   durationMs: number | null
   startedAt: string | null
   finishedAt: string | null
-  createdAt: string
+  createdAt: string | null
 }
 
 export interface ProxyInput {
@@ -410,7 +410,7 @@ export interface FunctionDefinition {
   cronExpression: string | null
   cronInputJson: Record<string, JsonValue> | null
   cronEnabled: boolean | null
-  createdAt: string
+  createdAt: string | null
   updatedAt: string
 }
 
@@ -763,7 +763,7 @@ export interface CustomQuerySummary {
   name: string
   isVirtualTable: boolean
   connectionId: string | null
-  createdAt: string
+  createdAt: string | null
   updatedAt: string
 }
 

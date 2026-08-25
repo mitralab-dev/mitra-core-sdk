@@ -235,6 +235,20 @@ describe("functionsAdmin", () => {
     ])
   })
 
+  it("preserves a nullable createdAt returned by setVisibility", async () => {
+    const response: FunctionDefinition = { ...definition(), createdAt: null }
+    const transport = new QueueTransport([response])
+    const functionsAdmin = createFunctionsAdminModule(transport)
+
+    await expect(functionsAdmin.setVisibility("function/1", "PUBLIC")).resolves.toEqual(response)
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/functions/function%2F1/visibility",
+        options: { method: "PATCH", body: { visibility: "PUBLIC" } },
+      },
+    ])
+  })
+
   it("keeps full bulk PUT separate from partial bulk PATCH", async () => {
     const transport = new QueueTransport([[definition()], [definition()], [definition()]])
     const functionsAdmin = createFunctionsAdminModule(transport)

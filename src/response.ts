@@ -317,7 +317,7 @@ export function expectFunctionExecution(
   if (!isNullableInteger(execution.durationMs)) invalidField(context, "durationMs", errors)
   if (!isNullableString(execution.startedAt)) invalidField(context, "startedAt", errors)
   if (!isNullableString(execution.finishedAt)) invalidField(context, "finishedAt", errors)
-  if (typeof execution.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(execution.createdAt)) invalidField(context, "createdAt", errors)
 
   return execution as unknown as FunctionExecution
 }
@@ -515,7 +515,7 @@ export function expectFunctionDefinition(
     invalidField(context, "cronInputJson", errors)
   }
   if (!isNullableBoolean(definition.cronEnabled)) invalidField(context, "cronEnabled", errors)
-  if (typeof definition.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(definition.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof definition.updatedAt !== "string") invalidField(context, "updatedAt", errors)
 
   return definition as unknown as FunctionDefinition
@@ -731,7 +731,7 @@ export function expectCustomQuerySummary(
   if (typeof query.name !== "string") invalidField(context, "name", errors)
   if (typeof query.isVirtualTable !== "boolean") invalidField(context, "isVirtualTable", errors)
   if (!isNullableString(query.connectionId)) invalidField(context, "connectionId", errors)
-  if (typeof query.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(query.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof query.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return query as unknown as CustomQuerySummary
 }

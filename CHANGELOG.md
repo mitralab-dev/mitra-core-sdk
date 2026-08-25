@@ -19,6 +19,8 @@ unreleased until the final source commit and registry artifact exist.
   a dedicated optional transport with no authenticated-transport fallback.
 - Add structural page and nullable response helpers while preserving the
   dependency-free injected transport architecture.
+- Preserve producer `createdAt: null` values in `FunctionExecution`,
+  `FunctionDefinition`, and Custom Query summary and definition responses.
 - Preserve full Function batch replacement over PUT while mapping the MCP
   `bulkUpdateFunctions` patch semantics to a separate PATCH operation.
 - Add embedded cron fields to single-Function create and patch inputs and

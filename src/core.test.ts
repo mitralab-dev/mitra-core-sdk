@@ -471,6 +471,7 @@ describe("functions", () => {
       durationMs: null,
       startedAt: null,
       finishedAt: null,
+      createdAt: null,
     }
     const functions = createFunctionsModule(new QueueTransport([response]))
 
