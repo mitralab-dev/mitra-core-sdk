@@ -900,7 +900,10 @@ export interface AgentInput {
   functionIds?: string[]
   /** Shared provider connection used by the agent. */
   connectionId?: string
-  /** Autonomous agents require a connection. Omission is treated as false. */
+  /**
+   * @deprecated The platform ignores the agent-level flag: autonomy is asked per chat
+   * through `AgentTaskCreateInput.autonomous`. Accepted and stored for compatibility.
+   */
   autonomous?: boolean
 }
 
@@ -1095,6 +1098,11 @@ export interface AgentTaskCreateInput {
   reasoningEffort?: string
   /** Owner for an on-behalf chat. Requires AGENT_WRITE in the current app. */
   userId?: string
+  /**
+   * Opens an ownerless chat that belongs to the named agent. Requires AGENT_WRITE and an
+   * agent holding a connection; mutually exclusive with `userId`.
+   */
+  autonomous?: boolean
 }
 
 export interface AgentTask {

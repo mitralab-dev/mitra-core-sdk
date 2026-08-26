@@ -16,7 +16,7 @@ export interface AgentTasksModule {
   /** Lists chats newest first. `userId` on-behalf reads require AGENT_WRITE in the current app. */
   list(options?: AgentTaskListOptions): Promise<Page<AgentTask>>
   get(id: string): Promise<AgentTask>
-  /** Opens a chat. Autonomous business agents produce ownerless app-scoped chats. */
+  /** Opens a chat. `autonomous: true` produces an ownerless chat that belongs to the agent. */
   create(input: AgentTaskCreateInput): Promise<AgentTask>
   /** Renames a chat. Title is required and at most 255 characters. */
   rename(id: string, title: string): Promise<AgentTask>

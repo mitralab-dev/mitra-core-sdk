@@ -816,6 +816,7 @@ describe("agent and workflow modules", () => {
       agentTask,
       agentTask,
       agentTask,
+      agentTask,
       undefined,
       undefined,
       page,
@@ -824,11 +825,17 @@ describe("agent and workflow modules", () => {
     await tasks.list({ archived: true, agentId: "agent-1" })
     await tasks.get("task/1")
     await tasks.create({ agentType: "CODEX" })
+    await tasks.create({ agentType: "CODEX", agentId: "agent-1", autonomous: true })
     await tasks.rename("task/1", "New title")
     await tasks.archive("task/1")
     await tasks.sendInput("task/1", { type: "message", content: "Hello" })
     await tasks.listMessages("task/1")
-    expect(taskTransport.requests[3]?.options.method).toBe("PATCH")
+    expect(taskTransport.requests[3]?.options.body).toEqual({
+      agentType: "CODEX",
+      agentId: "agent-1",
+      autonomous: true,
+    })
+    expect(taskTransport.requests[4]?.options.method).toBe("PATCH")
   })
 
   it("preserves a nullable createdAt returned by rename", async () => {
