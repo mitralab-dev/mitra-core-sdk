@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish, for example 0.2.0"
+        description: "Version to publish, for example 0.2.0-beta.0 or 0.2.0"
         required: true
 
 permissions:
@@ -15,6 +15,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - name: Validate branch
         if: github.ref_name != 'main'
         run: |
@@ -24,8 +25,13 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::Version must use canonical semantic versioning, for example 0.2.0."
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::Version must be X.Y.Z or X.Y.Z-beta.N using canonical numeric components."
+            exit 1
+          fi
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "::error::Requested version $VERSION does not match package.json version $PACKAGE_VERSION."
             exit 1
           fi
 
@@ -84,6 +90,13 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
       - run: npm run build
-      - run: npm publish --access public
+      - name: Publish beta
+        if: contains(inputs.version, '-beta.')
+        run: npm publish --access public --tag beta
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish stable
+        if: ${{ !contains(inputs.version, '-beta.') }}
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

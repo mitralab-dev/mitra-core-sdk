@@ -1,0 +1,818 @@
+{
+  "contract": "MCP-TOOL-PARITY-001",
+  "version": "0.2.0-beta.0",
+  "source": {
+    "repository": "mitralab-dev/mitra-mcp-server",
+    "ref": "origin/alpha",
+    "commit": "4034ae9086d7599ff1767af0845803f616132b9d",
+    "snapshot": "mcp-alpha-tools.json",
+    "snapshotSha256": "f050db5487341b0e277db9af3b243760a4b96fe2330a92d0ffc7e6362a9d54fb"
+  },
+  "producers": {
+    "codeStudio": { "ref": "origin/alpha", "commit": "f4ab596c7bd730e415c6b00b63921ae274cc8e45" },
+    "copilot": { "ref": "origin/alpha", "commit": "cb3ea04e03ab0ea29f46388acff32d60fc018adb" },
+    "dataManager": { "ref": "origin/alpha", "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84" },
+    "functions": { "ref": "origin/alpha", "commit": "d9921f620afff62ea8a047d2f301b41c725b35cb" },
+    "iam": { "ref": "origin/alpha", "commit": "6337ced228bfd0c2244a23a09142a34ac7e87aad" },
+    "integration": { "ref": "origin/alpha", "commit": "cfd4b1ce6e36c07b88de7e67e0fa3b9adb9f158b" },
+    "messenger": { "ref": "origin/alpha", "commit": "4edc479c2917bcfe79765cd977bd37ff4f1f294b" }
+  },
+  "total": 120,
+  "classes": {
+    "AgentTools": 3,
+    "AgentManagementTools": 3,
+    "AppContextTools": 1,
+    "CodeStudioTools": 16,
+    "DataManagerCustomQueryTools": 6,
+    "DataManagerDataSourceTools": 8,
+    "DataManagerImportTools": 8,
+    "DataManagerQueryTools": 5,
+    "DataManagerRecordTools": 7,
+    "DataManagerSchemaTools": 8,
+    "FunctionTools": 17,
+    "AppUserTools": 5,
+    "IamTools": 2,
+    "IntegrationProxyTools": 11,
+    "IntegrationResourceTools": 6,
+    "IntegrationTemplateTools": 4,
+    "MessengerTools": 1,
+    "WorkflowTools": 9
+  },
+  "tools": [
+    {
+      "class": "AgentTools",
+      "tool": "listServerFunctions",
+      "sdk": "agents.get + functionsAdmin.get",
+      "kind": "composition"
+    },
+    {
+      "class": "AgentTools",
+      "tool": "executeServerFunction",
+      "sdk": "functions.execute",
+      "kind": "alias"
+    },
+    {
+      "class": "AgentTools",
+      "tool": "getServerFunctionExecution",
+      "sdk": "functions.getExecution",
+      "kind": "alias"
+    },
+    {
+      "class": "AgentManagementTools",
+      "tool": "manageAgents",
+      "sdk": "agents.list|get|create|update|delete|bulkCreate|bulkUpdate|bulkDelete|listModels",
+      "kind": "split"
+    },
+    {
+      "class": "AgentManagementTools",
+      "tool": "manageConnections",
+      "sdk": "agentConnections.list|get|create|bulkCreate|delete|saveApiKey|disconnectProvider|startOAuth|exchangeOAuth|startDeviceAuthorization|pollDeviceAuthorization",
+      "kind": "split"
+    },
+    {
+      "class": "AgentManagementTools",
+      "tool": "agentThreads",
+      "sdk": "agentTasks.list|get|create|rename|archive|sendInput|listMessages",
+      "kind": "split"
+    },
+    {
+      "class": "AppContextTools",
+      "tool": "getAppContext",
+      "sdk": "context.getAppContext",
+      "kind": "composition"
+    },
+
+    { "class": "CodeStudioTools", "tool": "listApps", "sdk": "apps.list", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "getApp", "sdk": "apps.get", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "createApp", "sdk": "apps.create", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "deleteApp", "sdk": "apps.delete", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "updateApp", "sdk": "apps.update", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "getAppFiles", "sdk": "apps.getFiles", "kind": "direct" },
+    {
+      "class": "CodeStudioTools",
+      "tool": "replaceAppFiles",
+      "sdk": "apps.replaceFiles",
+      "kind": "direct"
+    },
+    {
+      "class": "CodeStudioTools",
+      "tool": "mergeAppFiles",
+      "sdk": "apps.mergeFiles",
+      "kind": "direct"
+    },
+    { "class": "CodeStudioTools", "tool": "buildApp", "sdk": "apps.build", "kind": "direct" },
+    { "class": "CodeStudioTools", "tool": "publishApp", "sdk": "apps.publish", "kind": "direct" },
+    {
+      "class": "CodeStudioTools",
+      "tool": "getAppDeploy",
+      "sdk": "apps.getDeploy",
+      "kind": "direct"
+    },
+    {
+      "class": "CodeStudioTools",
+      "tool": "getDeployStatus",
+      "sdk": "apps.getCurrentDeploy",
+      "kind": "direct"
+    },
+    {
+      "class": "CodeStudioTools",
+      "tool": "cancelAppBuild",
+      "sdk": "apps.cancelBuild",
+      "kind": "direct"
+    },
+    { "class": "CodeStudioTools", "tool": "rollbackApp", "sdk": "apps.rollback", "kind": "direct" },
+    {
+      "class": "CodeStudioTools",
+      "tool": "listDeploys",
+      "sdk": "apps.listDeploys",
+      "kind": "direct"
+    },
+    {
+      "class": "CodeStudioTools",
+      "tool": "listAppVersions",
+      "sdk": "apps.listVersions",
+      "kind": "direct"
+    },
+
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "listCustomQueries",
+      "sdk": "customQueries.list",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "getCustomQuery",
+      "sdk": "customQueries.get",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "createCustomQuery",
+      "sdk": "customQueries.create",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "updateCustomQuery",
+      "sdk": "customQueries.update",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "deleteCustomQuery",
+      "sdk": "customQueries.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerCustomQueryTools",
+      "tool": "executeCustomQuery",
+      "sdk": "customQueries.execute",
+      "kind": "direct"
+    },
+
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "listDataSources",
+      "sdk": "dataSources.list",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "getDataSource",
+      "sdk": "dataSources.get",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "createDataSource",
+      "sdk": "dataSources.create",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "updateDataSource",
+      "sdk": "dataSources.update",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "deleteDataSource",
+      "sdk": "dataSources.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "bulkCreateDataSources",
+      "sdk": "dataSources.bulkCreate",
+      "kind": "composition"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "bulkUpdateDataSources",
+      "sdk": "dataSources.bulkUpdate",
+      "kind": "composition"
+    },
+    {
+      "class": "DataManagerDataSourceTools",
+      "tool": "bulkDeleteDataSources",
+      "sdk": "dataSources.bulkDelete",
+      "kind": "composition"
+    },
+
+    {
+      "class": "DataManagerImportTools",
+      "tool": "listImports",
+      "sdk": "imports.list",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "getImport",
+      "sdk": "imports.get",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "createImport",
+      "sdk": "imports.create",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "updateImport",
+      "sdk": "imports.update",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "deleteImport",
+      "sdk": "imports.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "executeImport",
+      "sdk": "imports.execute",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "listImportExecutions",
+      "sdk": "imports.listExecutions",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerImportTools",
+      "tool": "cancelImportExecution",
+      "sdk": "imports.cancelExecution",
+      "kind": "direct"
+    },
+
+    {
+      "class": "DataManagerQueryTools",
+      "tool": "executeQuery",
+      "sdk": "sql.executeQuery",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerQueryTools",
+      "tool": "executeDml",
+      "sdk": "sql.executeDml",
+      "kind": "alias"
+    },
+    {
+      "class": "DataManagerQueryTools",
+      "tool": "executeDmlBatch",
+      "sdk": "sql.executeDml",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerQueryTools",
+      "tool": "executeDdl",
+      "sdk": "sql.executeDdl",
+      "kind": "alias"
+    },
+    {
+      "class": "DataManagerQueryTools",
+      "tool": "executeDdlBatch",
+      "sdk": "sql.executeDdl",
+      "kind": "direct"
+    },
+
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "listRecords",
+      "sdk": "entities.getTable(name).list|filter",
+      "kind": "split"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "getRecord",
+      "sdk": "entities.getTable(name).get",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "createRecord",
+      "sdk": "entities.getTable(name).create",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "bulkCreateRecords",
+      "sdk": "entities.getTable(name).bulkCreate",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "updateRecord",
+      "sdk": "entities.getTable(name).update",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "deleteRecord",
+      "sdk": "entities.getTable(name).delete",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerRecordTools",
+      "tool": "deleteManyRecords",
+      "sdk": "entities.getTable(name).deleteMany",
+      "kind": "direct"
+    },
+
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "createDatabaseTable",
+      "sdk": "schema.createTable",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "listTables",
+      "sdk": "schema.listTables",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "listAppTables",
+      "sdk": "schema.listAppTables",
+      "kind": "alias"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "getTableDetails",
+      "sdk": "schema.getTable",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "dropTable",
+      "sdk": "schema.dropTable",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "truncateTable",
+      "sdk": "schema.truncateTable",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "addColumn",
+      "sdk": "schema.addColumn",
+      "kind": "direct"
+    },
+    {
+      "class": "DataManagerSchemaTools",
+      "tool": "dropColumn",
+      "sdk": "schema.dropColumn",
+      "kind": "direct"
+    },
+
+    {
+      "class": "FunctionTools",
+      "tool": "listFunctions",
+      "sdk": "functionsAdmin.list",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "getFunction",
+      "sdk": "functionsAdmin.get",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "createFunction",
+      "sdk": "functionsAdmin.create",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "updateFunction",
+      "sdk": "functionsAdmin.patch",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "deleteFunction",
+      "sdk": "functionsAdmin.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "bulkCreateFunctions",
+      "sdk": "functionsAdmin.bulkCreate",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "bulkUpdateFunctions",
+      "sdk": "functionsAdmin.bulkPatch",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "bulkDeleteFunctions",
+      "sdk": "functionsAdmin.bulkDelete",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "publishFunction",
+      "sdk": "functionsAdmin.publish",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "rollbackFunction",
+      "sdk": "functionsAdmin.rollback",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "listFunctionVersions",
+      "sdk": "functionsAdmin.listVersions",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "executeFunction",
+      "sdk": "functions.execute",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "getExecution",
+      "sdk": "functionsAdmin.getExecution",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "listExecutions",
+      "sdk": "functionsAdmin.listExecutions",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "listSecrets",
+      "sdk": "functionsAdmin.listSecrets",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "createSecret",
+      "sdk": "functionsAdmin.createSecret",
+      "kind": "direct"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "deleteSecret",
+      "sdk": "functionsAdmin.deleteSecret",
+      "kind": "direct"
+    },
+
+    { "class": "AppUserTools", "tool": "listAppUsers", "sdk": "members.list", "kind": "direct" },
+    {
+      "class": "AppUserTools",
+      "tool": "inviteAppUser",
+      "sdk": "members.invite",
+      "kind": "direct"
+    },
+    {
+      "class": "AppUserTools",
+      "tool": "unsubscribeAppUser",
+      "sdk": "members.unsubscribe",
+      "kind": "direct"
+    },
+    {
+      "class": "AppUserTools",
+      "tool": "bulkInviteAppUsers",
+      "sdk": "members.bulkInvite",
+      "kind": "direct"
+    },
+    {
+      "class": "AppUserTools",
+      "tool": "bulkUnsubscribeAppUsers",
+      "sdk": "members.bulkUnsubscribe",
+      "kind": "direct"
+    },
+    { "class": "IamTools", "tool": "getMe", "sdk": "auth.me", "kind": "direct" },
+    { "class": "IamTools", "tool": "listUserPlans", "sdk": "auth.listUserPlans", "kind": "direct" },
+
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "createIntegrationConfig",
+      "sdk": "integrationAdmin.create",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "updateIntegrationConfig",
+      "sdk": "integrationAdmin.update",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "deleteIntegrationConfig",
+      "sdk": "integrationAdmin.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "bulkCreateIntegrationConfigs",
+      "sdk": "integrationAdmin.bulkCreate",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "bulkUpdateIntegrationConfigs",
+      "sdk": "integrationAdmin.bulkUpdate",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "bulkDeleteIntegrationConfigs",
+      "sdk": "integrationAdmin.bulkDelete",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "testIntegrationCredentials",
+      "sdk": "integrationAdmin.testCredentials",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "testIntegrationConfig",
+      "sdk": "integrationAdmin.testConfig",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "executeIntegrationTemplateConfig",
+      "sdk": "integration.execute",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "listIntegrationExecutions",
+      "sdk": "integrationAdmin.listExecutions",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationProxyTools",
+      "tool": "getIntegrationExecution",
+      "sdk": "integrationAdmin.getExecution",
+      "kind": "direct"
+    },
+
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "listIntegrationResources",
+      "sdk": "integrationResources.list",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "getIntegrationResource",
+      "sdk": "integrationResources.get",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "createIntegrationResource",
+      "sdk": "integrationResources.create",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "updateIntegrationResource",
+      "sdk": "integrationResources.update",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "deleteIntegrationResource",
+      "sdk": "integrationResources.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "executeIntegrationResource",
+      "sdk": "integration.executeResource",
+      "kind": "direct"
+    },
+
+    {
+      "class": "IntegrationTemplateTools",
+      "tool": "listIntegrationTemplates",
+      "sdk": "integrationTemplates.list",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationTemplateTools",
+      "tool": "getIntegrationTemplate",
+      "sdk": "integrationTemplates.get",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationTemplateTools",
+      "tool": "listIntegrationConfigs",
+      "sdk": "integrationTemplates.listConfigs",
+      "kind": "direct"
+    },
+    {
+      "class": "IntegrationTemplateTools",
+      "tool": "getIntegrationConfig",
+      "sdk": "integrationTemplates.getConfig",
+      "kind": "direct"
+    },
+    {
+      "class": "MessengerTools",
+      "tool": "notifyUser",
+      "sdk": "messenger.notify",
+      "kind": "direct"
+    },
+
+    {
+      "class": "WorkflowTools",
+      "tool": "listWorkflows",
+      "sdk": "workflows.list",
+      "kind": "direct"
+    },
+    { "class": "WorkflowTools", "tool": "getWorkflow", "sdk": "workflows.get", "kind": "direct" },
+    {
+      "class": "WorkflowTools",
+      "tool": "createWorkflow",
+      "sdk": "workflows.create",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "updateWorkflow",
+      "sdk": "workflows.update",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "deleteWorkflow",
+      "sdk": "workflows.delete",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "executeWorkflow",
+      "sdk": "workflows.execute",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "listWorkflowExecutions",
+      "sdk": "workflows.listExecutions",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "getWorkflowExecution",
+      "sdk": "workflows.getExecution",
+      "kind": "direct"
+    },
+    {
+      "class": "WorkflowTools",
+      "tool": "cancelWorkflowExecution",
+      "sdk": "workflows.cancelExecution",
+      "kind": "direct"
+    }
+  ],
+  "verifiedContracts": [
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "listIntegrationResources",
+      "module": "integrationResources",
+      "sdkMethod": "list",
+      "httpMethod": "GET",
+      "path": "/api/v1/integration-resources",
+      "body": null,
+      "response": "Page<IntegrationResourceSummary>",
+      "source": "mitra-integration:src/main/java/io/mitralab/integration/infrastructure/api/ResourceController.java"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "getIntegrationResource",
+      "module": "integrationResources",
+      "sdkMethod": "get",
+      "httpMethod": "GET",
+      "path": "/api/v1/integration-resources/resource%2F1",
+      "body": null,
+      "response": "IntegrationResource",
+      "source": "mitra-integration:src/main/java/io/mitralab/integration/infrastructure/api/ResourceController.java"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "createIntegrationResource",
+      "module": "integrationResources",
+      "sdkMethod": "create",
+      "httpMethod": "POST",
+      "path": "/api/v1/integration-resources",
+      "body": "IntegrationResourceInput",
+      "response": "IntegrationResource",
+      "source": "mitra-integration:src/main/java/io/mitralab/integration/infrastructure/api/ResourceController.java"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "updateIntegrationResource",
+      "module": "integrationResources",
+      "sdkMethod": "update",
+      "httpMethod": "PUT",
+      "path": "/api/v1/integration-resources/resource%2F1",
+      "body": "IntegrationResourceUpdateInput",
+      "response": "IntegrationResource",
+      "source": "mitra-integration:src/main/java/io/mitralab/integration/infrastructure/api/ResourceController.java"
+    },
+    {
+      "class": "IntegrationResourceTools",
+      "tool": "deleteIntegrationResource",
+      "module": "integrationResources",
+      "sdkMethod": "delete",
+      "httpMethod": "DELETE",
+      "path": "/api/v1/integration-resources/resource%2F1",
+      "body": null,
+      "response": "void",
+      "source": "mitra-integration:src/main/java/io/mitralab/integration/infrastructure/api/ResourceController.java"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "updateFunction",
+      "module": "functionsAdmin",
+      "sdkMethod": "patch",
+      "httpMethod": "PATCH",
+      "path": "/api/v1/functions/function%2F1",
+      "body": "FunctionPatchInput",
+      "response": "FunctionDefinition",
+      "source": "mitra-functions:src/main/java/io/mitralab/functions/infrastructure/api/FunctionController.java#patch"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "bulkUpdateFunctions",
+      "module": "functionsAdmin",
+      "sdkMethod": "bulkPatch",
+      "httpMethod": "PATCH",
+      "path": "/api/v1/functions/bulk",
+      "body": "FunctionBulkPatchItem[]",
+      "response": "FunctionDefinition[]",
+      "source": "mitra-mcp-server:src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java#bulkUpdateFunctions; mitra-functions:src/main/java/io/mitralab/functions/infrastructure/api/FunctionController.java#bulkPatch"
+    },
+    {
+      "class": "FunctionTools",
+      "tool": "getExecution",
+      "module": "functionsAdmin",
+      "sdkMethod": "getExecution",
+      "httpMethod": "GET",
+      "path": "/api/v1/functions/function%2F1/executions/execution%2F1",
+      "body": null,
+      "response": "FunctionExecution",
+      "source": "mitra-mcp-server:src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java#getExecution; mitra-functions:src/main/java/io/mitralab/functions/infrastructure/api/FunctionExecutionController.java#getById"
+    }
+  ],
+  "sdkOnly": [
+    "publicFunctions.execute",
+    "publicFunctions.executeAsync",
+    "functions.executeAsync",
+    "functions.cancelExecution",
+    "functionsAdmin.bulkUpdate"
+  ],
+  "excluded": [
+    {
+      "capability": "Git credentials",
+      "reason": "Internal Sandbox endpoint and not an alpha MCP tool."
+    },
+    {
+      "capability": "Deprecated Functions bridge",
+      "reason": "Owned by functions-sdk, outside sdk-core."
+    }
+  ]
+}

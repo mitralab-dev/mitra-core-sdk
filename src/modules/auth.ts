@@ -1,10 +1,12 @@
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
-import { expectUser } from "../response"
+import { expectObjectArray, expectUser, expectUserPlan } from "../response"
 import type { Transport } from "../transport"
-import type { User } from "../types"
+import type { User, UserPlan } from "../types"
 
 export interface AuthModule {
   me(): Promise<User>
+  /** Lists user plans available for identity provisioning. */
+  listUserPlans(): Promise<UserPlan[]>
 }
 
 export function createAuthModule(
@@ -17,6 +19,14 @@ export function createAuthModule(
         await transport.request<unknown>("/api/v1/auth/me", { method: "GET" }),
         "Current user response",
         errors,
+      )
+    },
+    async listUserPlans(): Promise<UserPlan[]> {
+      return expectObjectArray<UserPlan>(
+        await transport.request<unknown>("/api/v1/user-plans", { method: "GET" }),
+        "User plan response",
+        errors,
+        expectUserPlan,
       )
     },
   }

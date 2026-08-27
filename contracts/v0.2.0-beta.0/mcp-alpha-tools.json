@@ -1,0 +1,1409 @@
+{
+  "contract": "MCP-ALPHA-TOOLS-001",
+  "source": {
+    "repository": "mitralab-dev/mitra-mcp-server",
+    "ref": "origin/alpha",
+    "commit": "4034ae9086d7599ff1767af0845803f616132b9d"
+  },
+  "extraction": {
+    "script": "scripts/snapshot-mcp-tools.mjs",
+    "canonicalForm": "One ClassName.returnType toolName(parameterType parameterName, ...) line per @McpTool method in source path order.",
+    "sha256": "f050db5487341b0e277db9af3b243760a4b96fe2330a92d0ffc7e6362a9d54fb"
+  },
+  "total": 120,
+  "classes": [
+    {
+      "name": "AgentTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/agent/AgentTools.java",
+      "tools": [
+        {
+          "name": "listServerFunctions",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String listServerFunctions()"
+        },
+        {
+          "name": "executeServerFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteServerFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeServerFunction(ExecuteServerFunctionRequest request)"
+        },
+        {
+          "name": "getServerFunctionExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetServerFunctionExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getServerFunctionExecution(GetServerFunctionExecutionRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "AgentManagementTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/agentmanagement/AgentManagementTools.java",
+      "tools": [
+        {
+          "name": "manageAgents",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "ManageAgentsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult manageAgents(ManageAgentsRequest request)"
+        },
+        {
+          "name": "manageConnections",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "ManageConnectionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult manageConnections(ManageConnectionsRequest request)"
+        },
+        {
+          "name": "agentThreads",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "AgentThreadsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult agentThreads(AgentThreadsRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "AppContextTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/appcontext/AppContextTools.java",
+      "tools": [
+        {
+          "name": "getAppContext",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String getAppContext()"
+        }
+      ]
+    },
+    {
+      "name": "CodeStudioTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/codestudio/CodeStudioTools.java",
+      "tools": [
+        {
+          "name": "listApps",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListAppsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listApps(ListAppsRequest request)"
+        },
+        {
+          "name": "getApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getApp(GetAppRequest request)"
+        },
+        {
+          "name": "createApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createApp(CreateAppRequest request)"
+        },
+        {
+          "name": "deleteApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteApp(DeleteAppRequest request)"
+        },
+        {
+          "name": "updateApp",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "UpdateAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult updateApp(UpdateAppRequest request)"
+        },
+        {
+          "name": "getAppFiles",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getAppFiles(GetAppRequest request)"
+        },
+        {
+          "name": "replaceAppFiles",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateFilesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String replaceAppFiles(UpdateFilesRequest request)"
+        },
+        {
+          "name": "mergeAppFiles",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateFilesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String mergeAppFiles(UpdateFilesRequest request)"
+        },
+        {
+          "name": "buildApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "BuildAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String buildApp(BuildAppRequest request)"
+        },
+        {
+          "name": "publishApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "PublishAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String publishApp(PublishAppRequest request)"
+        },
+        {
+          "name": "getAppDeploy",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "AppDeployRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getAppDeploy(AppDeployRequest request)"
+        },
+        {
+          "name": "getDeployStatus",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getDeployStatus(GetAppRequest request)"
+        },
+        {
+          "name": "cancelAppBuild",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "AppDeployRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String cancelAppBuild(AppDeployRequest request)"
+        },
+        {
+          "name": "rollbackApp",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "RollbackAppRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String rollbackApp(RollbackAppRequest request)"
+        },
+        {
+          "name": "listDeploys",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListDeploysRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listDeploys(ListDeploysRequest request)"
+        },
+        {
+          "name": "listAppVersions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListVersionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listAppVersions(ListVersionsRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerCustomQueryTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerCustomQueryTools.java",
+      "tools": [
+        {
+          "name": "listCustomQueries",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListCustomQueriesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listCustomQueries(ListCustomQueriesRequest request)"
+        },
+        {
+          "name": "getCustomQuery",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetCustomQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getCustomQuery(GetCustomQueryRequest request)"
+        },
+        {
+          "name": "createCustomQuery",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateCustomQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createCustomQuery(CreateCustomQueryRequest request)"
+        },
+        {
+          "name": "updateCustomQuery",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateCustomQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateCustomQuery(UpdateCustomQueryRequest request)"
+        },
+        {
+          "name": "deleteCustomQuery",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteCustomQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteCustomQuery(DeleteCustomQueryRequest request)"
+        },
+        {
+          "name": "executeCustomQuery",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteCustomQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeCustomQuery(ExecuteCustomQueryRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerDataSourceTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerDataSourceTools.java",
+      "tools": [
+        {
+          "name": "listDataSources",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String listDataSources()"
+        },
+        {
+          "name": "getDataSource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "dataSourceId"
+            }
+          ],
+          "signature": "String getDataSource(String dataSourceId)"
+        },
+        {
+          "name": "createDataSource",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "CreateDataSourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult createDataSource(CreateDataSourceRequest request)"
+        },
+        {
+          "name": "updateDataSource",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "UpdateDataSourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult updateDataSource(UpdateDataSourceRequest request)"
+        },
+        {
+          "name": "deleteDataSource",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "DeleteDataSourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult deleteDataSource(DeleteDataSourceRequest request)"
+        },
+        {
+          "name": "bulkCreateDataSources",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkCreateDataSourcesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkCreateDataSources(BulkCreateDataSourcesRequest request)"
+        },
+        {
+          "name": "bulkUpdateDataSources",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkUpdateDataSourcesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkUpdateDataSources(BulkUpdateDataSourcesRequest request)"
+        },
+        {
+          "name": "bulkDeleteDataSources",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkDeleteDataSourcesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkDeleteDataSources(BulkDeleteDataSourcesRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerImportTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerImportTools.java",
+      "tools": [
+        {
+          "name": "listImports",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListImportsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listImports(ListImportsRequest request)"
+        },
+        {
+          "name": "getImport",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetImportRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getImport(GetImportRequest request)"
+        },
+        {
+          "name": "createImport",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateImportRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createImport(CreateImportRequest request)"
+        },
+        {
+          "name": "updateImport",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateImportRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateImport(UpdateImportRequest request)"
+        },
+        {
+          "name": "deleteImport",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteImportRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteImport(DeleteImportRequest request)"
+        },
+        {
+          "name": "executeImport",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteImportRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeImport(ExecuteImportRequest request)"
+        },
+        {
+          "name": "listImportExecutions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListImportExecutionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listImportExecutions(ListImportExecutionsRequest request)"
+        },
+        {
+          "name": "cancelImportExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CancelImportExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String cancelImportExecution(CancelImportExecutionRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerQueryTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerQueryTools.java",
+      "tools": [
+        {
+          "name": "executeQuery",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "ExecuteQueryRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult executeQuery(ExecuteQueryRequest request)"
+        },
+        {
+          "name": "executeDml",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "DmlStatementRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult executeDml(DmlStatementRequest request)"
+        },
+        {
+          "name": "executeDmlBatch",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "DmlBatchRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult executeDmlBatch(DmlBatchRequest request)"
+        },
+        {
+          "name": "executeDdl",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "DdlStatementRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult executeDdl(DdlStatementRequest request)"
+        },
+        {
+          "name": "executeDdlBatch",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "DdlBatchRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult executeDdlBatch(DdlBatchRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerRecordTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerRecordTools.java",
+      "tools": [
+        {
+          "name": "listRecords",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListRecordsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listRecords(ListRecordsRequest request)"
+        },
+        {
+          "name": "getRecord",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetRecordRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getRecord(GetRecordRequest request)"
+        },
+        {
+          "name": "createRecord",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateRecordRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createRecord(CreateRecordRequest request)"
+        },
+        {
+          "name": "bulkCreateRecords",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "BulkCreateRecordsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String bulkCreateRecords(BulkCreateRecordsRequest request)"
+        },
+        {
+          "name": "updateRecord",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateRecordRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateRecord(UpdateRecordRequest request)"
+        },
+        {
+          "name": "deleteRecord",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteRecordRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteRecord(DeleteRecordRequest request)"
+        },
+        {
+          "name": "deleteManyRecords",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteManyRecordsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteManyRecords(DeleteManyRecordsRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "DataManagerSchemaTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerSchemaTools.java",
+      "tools": [
+        {
+          "name": "createDatabaseTable",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateTableRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createDatabaseTable(CreateTableRequest request)"
+        },
+        {
+          "name": "listTables",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListTablesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listTables(ListTablesRequest request)"
+        },
+        {
+          "name": "listAppTables",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String listAppTables()"
+        },
+        {
+          "name": "getTableDetails",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetTableDetailsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getTableDetails(GetTableDetailsRequest request)"
+        },
+        {
+          "name": "dropTable",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DropTableRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String dropTable(DropTableRequest request)"
+        },
+        {
+          "name": "truncateTable",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "TruncateTableRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String truncateTable(TruncateTableRequest request)"
+        },
+        {
+          "name": "addColumn",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "AddColumnRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String addColumn(AddColumnRequest request)"
+        },
+        {
+          "name": "dropColumn",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DropColumnRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String dropColumn(DropColumnRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "FunctionTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java",
+      "tools": [
+        {
+          "name": "listFunctions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListFunctionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listFunctions(ListFunctionsRequest request)"
+        },
+        {
+          "name": "getFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getFunction(GetFunctionRequest request)"
+        },
+        {
+          "name": "createFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createFunction(CreateFunctionRequest request)"
+        },
+        {
+          "name": "updateFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateFunction(UpdateFunctionRequest request)"
+        },
+        {
+          "name": "deleteFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteFunction(DeleteFunctionRequest request)"
+        },
+        {
+          "name": "bulkCreateFunctions",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkCreateFunctionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkCreateFunctions(BulkCreateFunctionsRequest request)"
+        },
+        {
+          "name": "bulkUpdateFunctions",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkUpdateFunctionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkUpdateFunctions(BulkUpdateFunctionsRequest request)"
+        },
+        {
+          "name": "bulkDeleteFunctions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "BulkDeleteFunctionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String bulkDeleteFunctions(BulkDeleteFunctionsRequest request)"
+        },
+        {
+          "name": "publishFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "PublishFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String publishFunction(PublishFunctionRequest request)"
+        },
+        {
+          "name": "rollbackFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "RollbackFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String rollbackFunction(RollbackFunctionRequest request)"
+        },
+        {
+          "name": "listFunctionVersions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListFunctionVersionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listFunctionVersions(ListFunctionVersionsRequest request)"
+        },
+        {
+          "name": "executeFunction",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteFunctionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeFunction(ExecuteFunctionRequest request)"
+        },
+        {
+          "name": "getExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getExecution(GetExecutionRequest request)"
+        },
+        {
+          "name": "listExecutions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListExecutionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listExecutions(ListExecutionsRequest request)"
+        },
+        {
+          "name": "listSecrets",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListSecretsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listSecrets(ListSecretsRequest request)"
+        },
+        {
+          "name": "createSecret",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateSecretRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createSecret(CreateSecretRequest request)"
+        },
+        {
+          "name": "deleteSecret",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteSecretRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteSecret(DeleteSecretRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "AppUserTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/iam/AppUserTools.java",
+      "tools": [
+        {
+          "name": "listAppUsers",
+          "returnType": "CallToolResult",
+          "parameters": [],
+          "signature": "CallToolResult listAppUsers()"
+        },
+        {
+          "name": "inviteAppUser",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "InviteAppUserRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult inviteAppUser(InviteAppUserRequest request)"
+        },
+        {
+          "name": "unsubscribeAppUser",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "UnsubscribeAppUserRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult unsubscribeAppUser(UnsubscribeAppUserRequest request)"
+        },
+        {
+          "name": "bulkInviteAppUsers",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkInviteAppUsersRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkInviteAppUsers(BulkInviteAppUsersRequest request)"
+        },
+        {
+          "name": "bulkUnsubscribeAppUsers",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkUnsubscribeAppUsersRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkUnsubscribeAppUsers(BulkUnsubscribeAppUsersRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "IamTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/iam/IamTools.java",
+      "tools": [
+        {
+          "name": "getMe",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String getMe()"
+        },
+        {
+          "name": "listUserPlans",
+          "returnType": "String",
+          "parameters": [],
+          "signature": "String listUserPlans()"
+        }
+      ]
+    },
+    {
+      "name": "IntegrationProxyTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/integration/IntegrationProxyTools.java",
+      "tools": [
+        {
+          "name": "createIntegrationConfig",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateTemplateConfigRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createIntegrationConfig(CreateTemplateConfigRequest request)"
+        },
+        {
+          "name": "updateIntegrationConfig",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateTemplateConfigRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateIntegrationConfig(UpdateTemplateConfigRequest request)"
+        },
+        {
+          "name": "deleteIntegrationConfig",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "configId"
+            }
+          ],
+          "signature": "String deleteIntegrationConfig(String configId)"
+        },
+        {
+          "name": "bulkCreateIntegrationConfigs",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkCreateIntegrationConfigsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkCreateIntegrationConfigs(BulkCreateIntegrationConfigsRequest request)"
+        },
+        {
+          "name": "bulkUpdateIntegrationConfigs",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkUpdateIntegrationConfigsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkUpdateIntegrationConfigs(BulkUpdateIntegrationConfigsRequest request)"
+        },
+        {
+          "name": "bulkDeleteIntegrationConfigs",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "BulkDeleteIntegrationConfigsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult bulkDeleteIntegrationConfigs(BulkDeleteIntegrationConfigsRequest request)"
+        },
+        {
+          "name": "testIntegrationCredentials",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "TestIntegrationCredentialsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult testIntegrationCredentials(TestIntegrationCredentialsRequest request)"
+        },
+        {
+          "name": "testIntegrationConfig",
+          "returnType": "CallToolResult",
+          "parameters": [
+            {
+              "type": "TestIntegrationConfigRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "CallToolResult testIntegrationConfig(TestIntegrationConfigRequest request)"
+        },
+        {
+          "name": "executeIntegrationTemplateConfig",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteTemplateConfigRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeIntegrationTemplateConfig(ExecuteTemplateConfigRequest request)"
+        },
+        {
+          "name": "listIntegrationExecutions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListExecutionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listIntegrationExecutions(ListExecutionsRequest request)"
+        },
+        {
+          "name": "getIntegrationExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getIntegrationExecution(GetExecutionRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "IntegrationResourceTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/integration/IntegrationResourceTools.java",
+      "tools": [
+        {
+          "name": "listIntegrationResources",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListResourcesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listIntegrationResources(ListResourcesRequest request)"
+        },
+        {
+          "name": "getIntegrationResource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "resourceId"
+            }
+          ],
+          "signature": "String getIntegrationResource(String resourceId)"
+        },
+        {
+          "name": "createIntegrationResource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateResourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createIntegrationResource(CreateResourceRequest request)"
+        },
+        {
+          "name": "updateIntegrationResource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateResourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateIntegrationResource(UpdateResourceRequest request)"
+        },
+        {
+          "name": "deleteIntegrationResource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "resourceId"
+            }
+          ],
+          "signature": "String deleteIntegrationResource(String resourceId)"
+        },
+        {
+          "name": "executeIntegrationResource",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteResourceRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeIntegrationResource(ExecuteResourceRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "IntegrationTemplateTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/integration/IntegrationTemplateTools.java",
+      "tools": [
+        {
+          "name": "listIntegrationTemplates",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListTemplatesRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listIntegrationTemplates(ListTemplatesRequest request)"
+        },
+        {
+          "name": "getIntegrationTemplate",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "templateId"
+            }
+          ],
+          "signature": "String getIntegrationTemplate(String templateId)"
+        },
+        {
+          "name": "listIntegrationConfigs",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListTemplateConfigsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listIntegrationConfigs(ListTemplateConfigsRequest request)"
+        },
+        {
+          "name": "getIntegrationConfig",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "String",
+              "name": "configId"
+            }
+          ],
+          "signature": "String getIntegrationConfig(String configId)"
+        }
+      ]
+    },
+    {
+      "name": "MessengerTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/messenger/MessengerTools.java",
+      "tools": [
+        {
+          "name": "notifyUser",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "NotifyUserRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String notifyUser(NotifyUserRequest request)"
+        }
+      ]
+    },
+    {
+      "name": "WorkflowTools",
+      "path": "src/main/java/io/mitralab/mcp/tools/workflows/WorkflowTools.java",
+      "tools": [
+        {
+          "name": "listWorkflows",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListWorkflowsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listWorkflows(ListWorkflowsRequest request)"
+        },
+        {
+          "name": "getWorkflow",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetWorkflowRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getWorkflow(GetWorkflowRequest request)"
+        },
+        {
+          "name": "createWorkflow",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CreateWorkflowRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String createWorkflow(CreateWorkflowRequest request)"
+        },
+        {
+          "name": "updateWorkflow",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "UpdateWorkflowRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String updateWorkflow(UpdateWorkflowRequest request)"
+        },
+        {
+          "name": "deleteWorkflow",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "DeleteWorkflowRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String deleteWorkflow(DeleteWorkflowRequest request)"
+        },
+        {
+          "name": "executeWorkflow",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ExecuteWorkflowRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String executeWorkflow(ExecuteWorkflowRequest request)"
+        },
+        {
+          "name": "listWorkflowExecutions",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "ListWorkflowExecutionsRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String listWorkflowExecutions(ListWorkflowExecutionsRequest request)"
+        },
+        {
+          "name": "getWorkflowExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "GetWorkflowExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String getWorkflowExecution(GetWorkflowExecutionRequest request)"
+        },
+        {
+          "name": "cancelWorkflowExecution",
+          "returnType": "String",
+          "parameters": [
+            {
+              "type": "CancelWorkflowExecutionRequest",
+              "name": "request"
+            }
+          ],
+          "signature": "String cancelWorkflowExecution(CancelWorkflowExecutionRequest request)"
+        }
+      ]
+    }
+  ]
+}

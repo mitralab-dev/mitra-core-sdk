@@ -1,5 +1,6 @@
-export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
-export type QueryParamValue = string | number | boolean | undefined
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+export type QueryParamPrimitive = string | number | boolean
+export type QueryParamValue = QueryParamPrimitive | readonly QueryParamPrimitive[] | undefined
 
 export interface TransportRequestOptions {
   method?: HttpMethod

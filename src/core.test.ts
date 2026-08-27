@@ -66,7 +66,7 @@ function currentUser(): User {
       shortId: "AAAAAAAAAAAAAAAAAAAAEA",
       legacyId: null,
       slug: "tenant-one",
-      plan: { id: "plan-1", name: "Free" },
+      clusterType: "SHARED",
       name: "Tenant One",
       description: null,
       hexColor: null,
@@ -77,7 +77,9 @@ function currentUser(): User {
     name: "Test User",
     email: "user@example.com",
     imageUrl: null,
+    planId: "user-plan-1",
     onboardingCompleted: false,
+    language: "pt-BR",
   }
 }
 
@@ -99,23 +101,28 @@ function omitField(value: object, field: string): Record<string, unknown> {
 
 describe("createSdkCore", () => {
   it("composes every module with its service transport", async () => {
-    const auth = new QueueTransport([currentUser()])
+    const auth = new QueueTransport([currentUser(), []])
     const dataManager = new QueueTransport([
       { data: [], limit: 100, skip: 0, total: 0, hasMore: false },
       { rows: [], affectedRows: null, durationMs: 1 },
+      { results: [], executedCount: 0, totalDurationMs: 1 },
+      undefined,
     ])
-    const functions = new QueueTransport([execution()])
+    const functions = new QueueTransport([
+      execution(),
+      { deleted: [], notFound: [], deletedCount: 0 },
+    ])
     const integration = new QueueTransport([
       { status: 200, headers: {}, body: {}, durationMs: 1, executionId: "integration-1" },
+      { content: [], totalElements: 0 },
     ])
     const core = createSdkCore({
       transports: { auth, dataManager, functions, integration },
-      getDataSourceId: () => "data-source-1",
       functions: { executeInvocationType: "sync", emptyInput: "empty-object" },
     })
 
     await expect(core.auth.me()).resolves.toMatchObject({ id: "user-1" })
-    await expect(core.entities.Task!.list()).resolves.toEqual([])
+    await expect(core.entities.Task!.list()).resolves.toMatchObject({ data: [] })
     await expect(core.queries.execute("query-1")).resolves.toMatchObject({ rows: [] })
     await expect(core.functions.execute("function-1")).resolves.toMatchObject({
       id: "execution-1",
@@ -123,42 +130,71 @@ describe("createSdkCore", () => {
     await expect(core.integration.executeResource("resource-1")).resolves.toMatchObject({
       executionId: "integration-1",
     })
+    await expect(core.sql.executeDml([{ sql: "SELECT 1" }])).resolves.toMatchObject({
+      executedCount: 0,
+    })
+    await expect(core.dataSources.bulkDelete(["data-source-1"])).resolves.toMatchObject({
+      processedCount: 1,
+    })
+    await expect(core.functionsAdmin.bulkDelete({ allInApp: true })).resolves.toMatchObject({
+      deletedCount: 0,
+    })
+    await expect(core.integrationAdmin.list()).resolves.toMatchObject({ totalElements: 0 })
+    await expect(core.members.list()).resolves.toEqual([])
 
-    expect(auth.requests[0]?.path).toBe("/api/v1/auth/me")
-    expect(dataManager.requests).toHaveLength(2)
+    expect(auth.requests.map(({ path }) => path)).toEqual([
+      "/api/v1/auth/me",
+      "/api/v1/members/current-app",
+    ])
+    expect(dataManager.requests).toHaveLength(4)
     expect(functions.requests[0]?.options.headers).toEqual({ "X-Invocation-Type": "sync" })
+    expect(functions.requests[1]?.path).toBe("/api/v1/functions/bulk-delete")
     expect(integration.requests[0]?.path).toContain("/resources/resource-1/execute")
+    expect(integration.requests[1]?.path).toBe("/api/v1/template-configs")
   })
 })
 
 describe("auth", () => {
-  it("accepts the canonical user and nested tenant, including nullable fields", async () => {
-    const user = currentUser()
-    const auth = createAuthModule(new QueueTransport([{ ...user, futureField: true }]))
+  it.each(["SHARED", "DEDICATED"] as const)(
+    "accepts the canonical user and nested tenant with %s cluster type, including nullable fields",
+    async (clusterType) => {
+      const canonicalUser = currentUser()
+      const user = {
+        ...canonicalUser,
+        tenant: { ...canonicalUser.tenant, clusterType },
+      }
+      const auth = createAuthModule(new QueueTransport([{ ...user, futureField: true }]))
 
-    await expect(auth.me()).resolves.toMatchObject({
-      id: "user-1",
-      tenant: { id: "tenant-1", legacyId: null },
-      name: "Test User",
-      imageUrl: null,
-    })
-  })
-
-  it.each(["id", "tenant", "name", "email", "imageUrl", "onboardingCompleted"])(
-    "rejects a current-user response without %s",
-    async (field) => {
-      const auth = createAuthModule(new QueueTransport([omitField(currentUser(), field)]))
-
-      await expect(auth.me()).rejects.toBeInstanceOf(SdkCoreResponseError)
+      await expect(auth.me()).resolves.toMatchObject({
+        id: "user-1",
+        tenant: { id: "tenant-1", legacyId: null, clusterType },
+        name: "Test User",
+        imageUrl: null,
+      })
     },
   )
+
+  it.each([
+    "id",
+    "tenant",
+    "name",
+    "email",
+    "imageUrl",
+    "planId",
+    "onboardingCompleted",
+    "language",
+  ])("rejects a current-user response without %s", async (field) => {
+    const auth = createAuthModule(new QueueTransport([omitField(currentUser(), field)]))
+
+    await expect(auth.me()).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
 
   it.each([
     "id",
     "shortId",
     "legacyId",
     "slug",
-    "plan",
+    "clusterType",
     "name",
     "description",
     "hexColor",
@@ -176,8 +212,7 @@ describe("auth", () => {
 
   it.each([
     { ...currentUser(), tenant: { ...currentUser().tenant, legacyId: 1.5 } },
-    { ...currentUser(), tenant: { ...currentUser().tenant, plan: {} } },
-    { ...currentUser(), tenant: { ...currentUser().tenant, plan: { id: "plan-1", name: 1 } } },
+    { ...currentUser(), tenant: { ...currentUser().tenant, clusterType: "UNKNOWN" } },
   ])("rejects invalid nested tenant values %#", async (response) => {
     const auth = createAuthModule(new QueueTransport([response]))
 
@@ -212,11 +247,17 @@ describe("entities", () => {
     expect(entities.getTable("Order items")).toBe(typed)
     await expect(
       typed.list({ sort: "-created_at", limit: 10, skip: 2, fields: ["id", "name"] }),
-    ).resolves.toEqual([{ id: "1" }])
+    ).resolves.toEqual({
+      data: [{ id: "1" }],
+      limit: 10,
+      skip: 2,
+      total: 1,
+      hasMore: false,
+    })
     await entities.Task!.list("name", 5, 4, ["id"])
-    await expect(entities.Task!.filter({ status: "open" }, "name", 5)).resolves.toEqual([
-      { id: "2" },
-    ])
+    await expect(entities.Task!.filter({ status: "open" }, "name", 5)).resolves.toMatchObject({
+      data: [{ id: "2" }],
+    })
 
     expect(transport.requests[0]).toEqual({
       path: "/api/v1/tables/Order%20items/records",
@@ -305,13 +346,23 @@ describe("entities", () => {
       SdkCoreResponseError,
     )
   })
+
+  it.each([
+    { data: [], limit: "10", skip: 0, total: 0, hasMore: false },
+    { data: [], limit: 10, skip: "0", total: 0, hasMore: false },
+    { data: [], limit: 10, skip: 0, total: "0", hasMore: false },
+    { data: [], limit: 10, skip: 0, total: 0, hasMore: "false" },
+  ])("rejects invalid record list metadata %#", async (response) => {
+    const table = createEntitiesModule(new QueueTransport([response])).Task!
+
+    await expect(table.list()).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
 })
 
 describe("queries", () => {
-  it("uses the current data source and canonical body casing", async () => {
-    let dataSourceId: string | undefined = "data-source-1"
+  it("uses the app-scoped Custom Query contract body", async () => {
     const transport = new QueueTransport([{ rows: [], durationMs: 3, futureField: true }])
-    const queries = createQueriesModule(transport, () => dataSourceId)
+    const queries = createQueriesModule(transport)
 
     await queries.execute("query/one", { active: true })
 
@@ -319,18 +370,14 @@ describe("queries", () => {
       path: "/api/v1/custom-queries/query%2Fone/execute",
       options: {
         method: "POST",
-        body: { dataSourceId: "data-source-1", parameters: { active: true } },
+        body: { parameters: { active: true } },
       },
     })
-
-    dataSourceId = undefined
-    await expect(queries.execute("query-2")).rejects.toBeInstanceOf(SdkCoreConfigurationError)
-    expect(transport.requests).toHaveLength(1)
   })
 
   it("rejects dot segments and non-object results", async () => {
     const transport = new QueueTransport([[]])
-    const queries = createQueriesModule(transport, () => "data-source")
+    const queries = createQueriesModule(transport)
 
     await expect(queries.execute("..")).rejects.toThrow("query id must not be a dot segment")
     await expect(queries.execute("query-id")).rejects.toBeInstanceOf(SdkCoreResponseError)
@@ -344,14 +391,14 @@ describe("queries", () => {
     { rows: [], affectedRows: "0", durationMs: 1 },
     { rows: [], affectedRows: 0.5, durationMs: 1 },
   ])("rejects a structurally invalid result %#", async (response) => {
-    const queries = createQueriesModule(new QueueTransport([response]), () => "data-source")
+    const queries = createQueriesModule(new QueueTransport([response]))
 
     await expect(queries.execute("query-id")).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 
   it("accepts an affectedRows value when a compatible endpoint includes it", async () => {
     const response = { rows: [], affectedRows: 2, durationMs: 1 }
-    const queries = createQueriesModule(new QueueTransport([response]), () => "data-source")
+    const queries = createQueriesModule(new QueueTransport([response]))
 
     await expect(queries.execute("query-id")).resolves.toEqual(response)
   })
@@ -424,6 +471,7 @@ describe("functions", () => {
       durationMs: null,
       startedAt: null,
       finishedAt: null,
+      createdAt: null,
     }
     const functions = createFunctionsModule(new QueueTransport([response]))
 
@@ -488,6 +536,47 @@ describe("integration", () => {
         },
       },
     })
+  })
+
+  it("executes a config by alias with an encoded path and SDK source", async () => {
+    const transport = new QueueTransport([result])
+    const integration = createIntegrationModule(transport)
+
+    await expect(
+      integration.executeByAlias("primary/crm", {
+        method: "POST",
+        endpoint: "/orders",
+        headers: { "x-client": "agent-minimal" },
+        body: { id: "order-1" },
+      }),
+    ).resolves.toEqual(result)
+
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/proxy/template-configs/by-alias/primary%2Fcrm/execute",
+        options: {
+          method: "POST",
+          body: {
+            method: "POST",
+            endpoint: "/orders",
+            headers: { "x-client": "agent-minimal" },
+            body: { id: "order-1" },
+            source: "SDK",
+          },
+        },
+      },
+    ])
+  })
+
+  it("rejects unsafe aliases and invalid alias execution results", async () => {
+    const integration = createIntegrationModule(new QueueTransport([null]))
+
+    await expect(
+      integration.executeByAlias("..", { method: "GET", endpoint: "/" }),
+    ).rejects.toThrow("alias must not be a dot segment")
+    await expect(
+      integration.executeByAlias("primary", { method: "GET", endpoint: "/" }),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 
   it("uses empty resource params and rejects unsafe IDs or invalid results", async () => {
