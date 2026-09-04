@@ -1085,23 +1085,29 @@ export function expectIntegrationTemplate(
     expectIntegrationLoginConfig(template.loginConfig, `${context} loginConfig`, errors)
   }
   expectIntegrationRequestConfig(template.requestConfig, `${context} requestConfig`, errors)
-  expectObjectArray<JsonObject>(template.fieldsSchema, `${context} fieldsSchema`, errors).forEach(
-    (field, position) => {
-      const fieldContext = `${context} field ${position}`
-      if (typeof field.key !== "string") invalidField(fieldContext, "key", errors)
-      if (typeof field.label !== "string") invalidField(fieldContext, "label", errors)
-      if (!isOneOf(field.type, ["url", "text", "secret"] as const)) {
-        invalidField(fieldContext, "type", errors)
-      }
-      if (typeof field.required !== "boolean") invalidField(fieldContext, "required", errors)
-      if (!isNullableString(field.placeholder)) invalidField(fieldContext, "placeholder", errors)
-      if (!isNullableString(field.default)) invalidField(fieldContext, "default", errors)
-    },
-  )
+  expectIntegrationFieldsSchema(template.fieldsSchema, `${context} fieldsSchema`, errors)
   if (!isNullableString(template.documentationUrl)) {
     invalidField(context, "documentationUrl", errors)
   }
   return template as unknown as IntegrationTemplate
+}
+
+function expectIntegrationFieldsSchema(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory,
+): void {
+  expectObjectArray<JsonObject>(value, context, errors).forEach((field, position) => {
+    const fieldContext = `${context} field ${position}`
+    if (typeof field.key !== "string") invalidField(fieldContext, "key", errors)
+    if (typeof field.label !== "string") invalidField(fieldContext, "label", errors)
+    if (!isOneOf(field.type, ["url", "text", "secret"] as const)) {
+      invalidField(fieldContext, "type", errors)
+    }
+    if (typeof field.required !== "boolean") invalidField(fieldContext, "required", errors)
+    if (!isNullableString(field.placeholder)) invalidField(fieldContext, "placeholder", errors)
+    if (!isNullableString(field.default)) invalidField(fieldContext, "default", errors)
+  })
 }
 
 function expectIntegrationLoginConfig(
@@ -1163,6 +1169,32 @@ function expectIntegrationRequestConfig(
   }
 }
 
+// A template-backed config leaves the three inline fields absent or null, so each one is
+// validated only when the producer actually sends a definition.
+function expectInlineDefinition(
+  config: JsonObject,
+  context: string,
+  errors: SdkCoreErrorFactory,
+): void {
+  if (hasOwn(config, "fieldsSchemaInline") && config.fieldsSchemaInline !== null) {
+    expectIntegrationFieldsSchema(
+      config.fieldsSchemaInline,
+      `${context} fieldsSchemaInline`,
+      errors,
+    )
+  }
+  if (hasOwn(config, "requestConfigInline") && config.requestConfigInline !== null) {
+    expectIntegrationRequestConfig(
+      config.requestConfigInline,
+      `${context} requestConfigInline`,
+      errors,
+    )
+  }
+  if (hasOwn(config, "loginConfigInline") && config.loginConfigInline !== null) {
+    expectIntegrationLoginConfig(config.loginConfigInline, `${context} loginConfigInline`, errors)
+  }
+}
+
 export function expectTemplateConfigSummary(
   value: unknown,
   context: string,
@@ -1172,8 +1204,9 @@ export function expectTemplateConfigSummary(
   if (typeof config.id !== "string") invalidField(context, "id", errors)
   if (!isNullableString(config.appId)) invalidField(context, "appId", errors)
   if (!isNullableInteger(config.legacyId)) invalidField(context, "legacyId", errors)
-  if (typeof config.templateId !== "string") invalidField(context, "templateId", errors)
+  if (!isNullableString(config.templateId)) invalidField(context, "templateId", errors)
   if (typeof config.alias !== "string") invalidField(context, "alias", errors)
+  expectInlineDefinition(config, context, errors)
   if (
     config.status !== null &&
     !isOneOf(config.status, ["unchecked", "connected", "error"] as const)

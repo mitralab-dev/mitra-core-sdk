@@ -10,10 +10,17 @@ change requires a new version directory. Consumers may vendor the exact bytes
 and pin their copy with a SHA-256 digest so their tests never depend on network
 access.
 
-A released version directory is immutable. Adding operations means publishing a
-new version and moving `current`, never editing bytes another consumer already
-pinned. Every declared version keeps its digest verified, so a consumer that has
-not migrated stays on the version it vendored.
+A released version directory is immutable. Adding an operation, or widening the
+request or response of one that already exists, means publishing a new version
+and moving `current`, never editing bytes another consumer already pinned. Every
+declared version keeps its digest verified, so a consumer that has not migrated
+stays on the version it vendored.
+
+The `current` version names the package release that will publish it, so it moves
+together with `package.json` in the pull request that prepares that release. The
+release workflow does not bump anything: it checks that the requested version
+already matches `package.json`, runs the full package check, then tags and
+publishes.
 
 ## Versions
 
@@ -23,6 +30,15 @@ not migrated stays on the version it vendored.
   batches, Function administration batches, integration template config
   batches with connection tests and listing, and app members. Its `sources`
   entries pin the producer revisions currently on `origin/alpha`.
+- `0.2.0-beta.1` widens integration template configs with the inline definition
+  contract. A create item or credential test carries `fieldsSchemaInline`,
+  `requestConfigInline`, and `loginConfigInline` instead of a `templateId`, and
+  config responses report `templateId: null`. Operations that accept more than
+  one request shape now keep one success case per shape. It declares no MCP
+  companion artifact because the MCP tool surface is unchanged and each artifact
+  carries its own version identity; the matrix stays pinned at `0.2.0-beta.0`.
+  The `integrationBuilder` source pin still names the last revision on
+  `origin/alpha`, because the producer change is landing in mitra-integration#37.
 
 The `0.2.0-beta.0/mcp-tool-parity.json` companion artifact maps every one of the 120
 `@McpTool` methods on `mitra-mcp-server` `origin/alpha` to a typed Core method.
