@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "current": "0.2.0-beta.0",
+  "current": "0.2.0-beta.1",
   "versions": [
     {
       "version": "0.1.0",
@@ -15,6 +15,11 @@
       "mcpToolsSha256": "77a115d39e2ee195b4e33a86766a6fdd75e89a7a35b6102f6f38f0eeb8c9d587",
       "mcpSourcePath": "v0.2.0-beta.0/mcp-alpha-tools.json",
       "mcpSourceSha256": "480d27eed75f2604da07fadd10f236a0ca971cf6a3c003434a1fb62c4255178f"
+    },
+    {
+      "version": "0.2.0-beta.1",
+      "path": "v0.2.0-beta.1/sdk-parity.json",
+      "sha256": "eb9515241cd092727ddb8cde3e3062df041a4c91f8226da04dc987b7c1053f05"
     }
   ]
 }

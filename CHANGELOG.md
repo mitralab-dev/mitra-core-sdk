@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.0-beta.1
+
+This working tree prepares the `0.2.0-beta.1` package. Publication provenance remains
+unreleased until the final source commit and registry artifact exist.
+
+- Accept an inline template definition on integration config creation and on
+  provisional credential tests, so an app can connect a provider that has no
+  catalog template. `fieldsSchemaInline`, `requestConfigInline`, and
+  `loginConfigInline` replace `templateId` and reuse the catalog shapes. The
+  producer owns the exclusivity between the two, and Core does not check it.
+- Add `IntegrationFieldSchemaInput`, the authoring shape for an inline field,
+  which leaves `placeholder` and `default` optional because the producer stores
+  an omitted one as null. Responses keep the strict `IntegrationFieldSchema`.
+- Read `templateId: null` on configs created from an inline definition and
+  validate the three inline fields echoed back on config and list responses.
+- Publish contract corpus `0.2.0-beta.1` with the inline create, credential
+  test, and listing cases, leaving the released `0.2.0-beta.0` bytes untouched.
+- Name the array in the integration template field-schema validation message.
+  It now reads `fieldsSchema field 0` instead of `field 0`, because the template
+  and inline paths share one validator. Consumers that reimplement Core response
+  validation, such as the Python SDK, follow the same wording.
+
 ## 0.2.0-beta.0
 
 This working tree prepares the `0.2.0-beta.0` package. Publication provenance remains

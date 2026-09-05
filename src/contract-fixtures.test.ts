@@ -431,9 +431,18 @@ describe("SDK-PARITY-001 contract fixture", () => {
     }
   })
 
-  it("has one executable success case for every operation", () => {
-    expect(fixture.cases.map(({ operation }) => operation)).toEqual(operations)
+  // An operation that accepts more than one request shape keeps one case per shape. Sorting by
+  // canonical position is stable, so an unchanged order proves the cases of one operation stay
+  // contiguous and the operations themselves stay in canonical order.
+  it("has at least one executable success case for every operation", () => {
+    const covered = fixture.cases.map(({ operation }) => operation)
+    const grouped = [...covered].sort(
+      (left, right) => operations.indexOf(left) - operations.indexOf(right),
+    )
+    expect([...new Set(covered)]).toEqual(operations)
+    expect(covered).toEqual(grouped)
     expect(fixture.cases.every(({ kind }) => kind === "success")).toBe(true)
+    expect(new Set(fixture.cases.map(({ id }) => id)).size).toBe(fixture.cases.length)
   })
 
   it.each(fixture.cases)("executes canonical success case $id", async (testCase) => {

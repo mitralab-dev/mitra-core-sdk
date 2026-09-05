@@ -27,7 +27,12 @@ import type {
 const MAX_CONFIGS = 100
 
 export interface IntegrationAdminModule {
-  /** Creates one integration config. Secret values are write-only. */
+  /**
+   * Creates one integration config from a catalog template or from an inline definition.
+   *
+   * Secret values are write-only. Send `templateId` or the inline definition, never both: the
+   * exclusivity is the producer's, so Core forwards whatever the caller sends.
+   */
   create(input: TemplateConfigCreateInput): Promise<TemplateConfig>
   /** Updates one config. Omitting `values` preserves stored credentials. */
   update(id: string, input: Omit<TemplateConfigUpdateInput, "configId">): Promise<TemplateConfig>
@@ -38,6 +43,7 @@ export interface IntegrationAdminModule {
    *
    * The whole batch is validated first, then items run in order, NOT atomically: read `results`
    * for the outcome of each one. `values` hold credentials and never come back in any response.
+   * Each item independently chooses a catalog template or an inline definition.
    */
   bulkCreate(configs: TemplateConfigCreateInput[]): Promise<TemplateConfigBulkResult>
   /**
@@ -50,7 +56,7 @@ export interface IntegrationAdminModule {
   bulkUpdate(configs: TemplateConfigUpdateInput[]): Promise<TemplateConfigBulkResult>
   /** Deletes 1 to 100 template configs by id, in order and NOT atomically. */
   bulkDelete(configIds: string[]): Promise<TemplateConfigBulkResult>
-  /** Tests provisional credentials against a template without storing anything. */
+  /** Tests provisional credentials against a template or inline definition, storing nothing. */
   testCredentials(request: TestCredentialsInput): Promise<ConnectionTestResult>
   /** Tests a stored template config using the credentials it already holds. */
   testConfig(configId: string): Promise<ConnectionTestResult>

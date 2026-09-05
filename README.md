@@ -158,6 +158,42 @@ or by their app-scoped alias with `integration.executeByAlias()`. Both methods
 send the proxy request unchanged apart from the required `source: "SDK"` audit
 field and validate the same proxy result.
 
+An integration config normally points at a catalog template through `templateId`.
+When the provider has no template, `integrationAdmin.create()`,
+`integrationAdmin.bulkCreate()`, and `integrationAdmin.testCredentials()` accept
+an inline definition instead, in the same shapes the catalog uses:
+
+```typescript
+await integrationAdmin.create({
+  alias: "erp-inline",
+  fieldsSchemaInline: [
+    { key: "base_url", label: "Base URL", type: "url", required: true },
+    { key: "access_key_code", label: "Access Key Code", type: "secret", required: true },
+    { key: "access_key_token", label: "Access Key Token", type: "secret", required: true },
+  ],
+  requestConfigInline: {
+    headers: {
+      "X-Access-Key-Code": "{{access_key_code}}",
+      "X-Access-Key-Token": "{{access_key_token}}",
+    },
+    credential_rules: null,
+  },
+  loginConfigInline: null,
+  values: { base_url: "https://api.example.com", access_key_code: "...", access_key_token: "..." },
+})
+```
+
+Send `templateId` or the inline definition, never both and never neither. The
+Integration service owns that rule and answers 400; Core forwards whatever the
+caller sends. Configs created this way report `templateId: null` and echo the
+three inline fields back on every config response, with secrets in `config`
+masked exactly as they are for template-backed configs.
+
+Inline fields are authored as `IntegrationFieldSchemaInput`, which makes
+`placeholder` and `default` optional because the producer stores an omitted one
+as null. Responses keep the strict `IntegrationFieldSchema`, where both
+properties are always present.
+
 `integrationAdmin.list()` is the native equivalent for listing configured
 integrations. It calls `GET /api/v1/template-configs` and returns the producer's
 paginated `TemplateConfigSummary` values. With an app-scoped token, the
@@ -267,12 +303,15 @@ The build produces ESM, CommonJS, `.d.ts`, and `.d.cts` artifacts. Package smoke
 
 ## Release order
 
-`0.2.0-beta.0` is the beta producer release for the concrete SDK adapters. Publish Core first:
+Core is the producer for the concrete SDK adapters, so it publishes first. For a prerelease
+`X.Y.Z-beta.N`, currently `0.2.0-beta.1`:
 
-1. Merge the complete `0.2.0-beta.0` source and contract corpus to `main`.
-2. Run the Release workflow with version `0.2.0-beta.0`. It runs the full package check before
-   tagging and publishes the prerelease under npm's `beta` dist-tag.
-3. Confirm `npm view @mitralab.io/sdk-core@0.2.0-beta.0 version` returns `0.2.0-beta.0`.
+1. Merge the source, the `package.json` version, and the matching contract corpus version to
+   `main` in the same pull request. The Release workflow bumps nothing.
+2. Run the Release workflow with version `X.Y.Z-beta.N`. It checks that the requested version
+   already matches `package.json`, runs the full package check, then tags and publishes the
+   prerelease under npm's `beta` dist-tag.
+3. Confirm `npm view @mitralab.io/sdk-core@X.Y.Z-beta.N version` returns the same version.
 4. Regenerate each adapter lockfile from the npm registry and pin this repository commit in the
    adapter's contract-source manifest before publishing that adapter.
 

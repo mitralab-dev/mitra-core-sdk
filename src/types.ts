@@ -414,12 +414,26 @@ export interface FunctionDefinition {
   updatedAt: string
 }
 
+/**
+ * Creates an integration config from a catalog template or from an inline definition.
+ *
+ * Send exactly one of the two: either `templateId`, or the inline definition carried by
+ * `fieldsSchemaInline` and `requestConfigInline` with the optional `loginConfigInline`. Sending
+ * both or neither is rejected by the producer; Core does not check it locally. An inline
+ * definition connects a provider that has no template in the catalog.
+ */
 export interface TemplateConfigCreateInput {
-  /** Integration template UUID. */
-  templateId: string
+  /** Integration template UUID. Omitted when the inline definition is sent. */
+  templateId?: string | null
   /** App-unique alias used by proxy execution. */
   alias: string
   legacyId?: number
+  /** Inline field definitions, in the same shape as a template `fieldsSchema`. */
+  fieldsSchemaInline?: IntegrationFieldSchemaInput[]
+  /** Inline header and credential placement rules, in the same shape as a template. */
+  requestConfigInline?: IntegrationRequestConfig
+  /** Inline login handshake. Null when the provider authenticates on the request itself. */
+  loginConfigInline?: IntegrationLoginConfig | null
   /** Complete credential and configuration map. Values are write-only. */
   values: Record<string, JsonValue>
 }
@@ -450,8 +464,13 @@ export interface TemplateConfigSummary {
   id: string
   appId: string | null
   legacyId: number | null
-  templateId: string
+  /** Null on a config created from an inline definition. */
+  templateId: string | null
   alias: string
+  /** Inline definition echoed back. Absent or null on a template-backed config. */
+  fieldsSchemaInline?: IntegrationFieldSchema[] | null
+  requestConfigInline?: IntegrationRequestConfig | null
+  loginConfigInline?: IntegrationLoginConfig | null
   status: IntegrationConnectionStatus | null
   lastCheckedAt: string | null
 }
@@ -472,8 +491,21 @@ export interface ListTemplateConfigsOptions {
   sort?: string
 }
 
+/**
+ * Tests credentials against a catalog template or against an inline definition.
+ *
+ * Follows the same exclusivity as `TemplateConfigCreateInput`: exactly one of `templateId` or the
+ * inline definition, checked by the producer and not by Core. Nothing is stored either way.
+ */
 export interface TestCredentialsInput {
-  templateId: string
+  /** Integration template UUID. Omitted when the inline definition is sent. */
+  templateId?: string | null
+  /** Inline field definitions, in the same shape as a template `fieldsSchema`. */
+  fieldsSchemaInline?: IntegrationFieldSchemaInput[]
+  /** Inline header and credential placement rules, in the same shape as a template. */
+  requestConfigInline?: IntegrationRequestConfig
+  /** Inline login handshake. Null when the provider authenticates on the request itself. */
+  loginConfigInline?: IntegrationLoginConfig | null
   values: Record<string, JsonValue>
 }
 
@@ -1061,6 +1093,10 @@ export interface IntegrationFieldSchema {
   placeholder: string | null
   default: string | null
 }
+
+/** Inline field authoring shape. The producer stores an omitted `placeholder` or `default` as null. */
+export type IntegrationFieldSchemaInput = Omit<IntegrationFieldSchema, "placeholder" | "default"> &
+  Partial<Pick<IntegrationFieldSchema, "placeholder" | "default">>
 
 export interface IntegrationTemplate extends IntegrationTemplateSummary {
   loginConfig: IntegrationLoginConfig | null

@@ -1,0 +1,2902 @@
+{
+  "contract": "SDK-PARITY-001",
+  "version": "0.2.0-beta.1",
+  "description": "Canonical semantic and HTTP contract fixtures for the Mitra runtime SDKs.",
+  "sources": {
+    "mcp": {
+      "repository": "mitralab-dev/mitra-mcp-server",
+      "ref": "origin/alpha",
+      "commit": "4034ae9086d7599ff1767af0845803f616132b9d",
+      "paths": [
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerRecordTools.java",
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerCustomQueryTools.java",
+        "src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java",
+        "src/main/java/io/mitralab/mcp/tools/iam/IamTools.java",
+        "src/main/java/io/mitralab/mcp/tools/integration/IntegrationProxyTools.java",
+        "src/main/java/io/mitralab/mcp/tools/integration/IntegrationResourceTools.java"
+      ]
+    },
+    "dataManagerAlpha": {
+      "repository": "mitralab-dev/mitra-data-manager",
+      "ref": "origin/alpha",
+      "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
+      "request": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/CustomQueryExecuteRequest.java",
+      "controller": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/CustomQueryController.java",
+      "response": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/QueryExecuteResponse.java",
+      "errorHandler": "api/src/main/java/io/mitralab/datamanager/infrastructure/api/exception/GlobalExceptionHandler.java",
+      "controllerTest": "api/src/test/java/io/mitralab/datamanager/api/CustomQueryControllerTest.java"
+    },
+    "dataManagerBuilder": {
+      "repository": "mitralab-dev/mitra-data-manager",
+      "ref": "origin/alpha",
+      "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
+      "paths": [
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/SqlBatchController.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/BatchExecuteResponse.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/BatchItemResponse.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/DdlBatchStatementRequest.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/DmlBatchStatementRequest.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/SchemaController.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/DataSourceController.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/DataSourceBulkResponse.java",
+        "api/src/main/java/io/mitralab/datamanager/infrastructure/api/dto/DataSourceBulkUpdateItemRequest.java"
+      ]
+    },
+    "functionsBuilder": {
+      "repository": "mitralab-dev/mitra-functions",
+      "ref": "origin/alpha",
+      "commit": "d9921f620afff62ea8a047d2f301b41c725b35cb",
+      "paths": [
+        "src/main/java/io/mitralab/functions/infrastructure/api/FunctionController.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionCreateRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionPatchRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionResponse.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionShortResponse.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkCreateRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkUpdateRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkPatchRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkDeleteRequest.java",
+        "src/main/java/io/mitralab/functions/infrastructure/api/dto/FunctionBulkDeleteResponse.java"
+      ]
+    },
+    "integrationBuilder": {
+      "repository": "mitralab-dev/mitra-integration",
+      "ref": "origin/alpha",
+      "commit": "cfd4b1ce6e36c07b88de7e67e0fa3b9adb9f158b",
+      "paths": [
+        "src/main/java/io/mitralab/integration/infrastructure/api/TemplateConfigController.java",
+        "src/main/java/io/mitralab/integration/infrastructure/api/dto/BulkCreateTemplateConfigsRequest.java",
+        "src/main/java/io/mitralab/integration/infrastructure/api/dto/BulkUpdateTemplateConfigsRequest.java",
+        "src/main/java/io/mitralab/integration/infrastructure/api/dto/BulkDeleteTemplateConfigsRequest.java",
+        "src/main/java/io/mitralab/integration/infrastructure/api/dto/TemplateConfigBulkResponse.java",
+        "src/main/java/io/mitralab/integration/infrastructure/api/dto/TestConnectionResponse.java"
+      ]
+    },
+    "iamBuilder": {
+      "repository": "mitralab-dev/mitra-iam",
+      "ref": "origin/alpha",
+      "commit": "6337ced228bfd0c2244a23a09142a34ac7e87aad",
+      "paths": [
+        "src/main/java/io/mitralab/iam/domain/entity/ClusterType.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/AuthController.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/MemberController.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/dto/CurrentUserResponse.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/dto/TenantResponse.java",
+        "src/main/java/io/mitralab/iam/infrastructure/api/dto/EffectiveAppUserResponse.java"
+      ]
+    },
+    "mcpBuilder": {
+      "repository": "mitralab-dev/mitra-mcp-server",
+      "ref": "origin/alpha",
+      "commit": "4034ae9086d7599ff1767af0845803f616132b9d",
+      "paths": [
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerQueryTools.java",
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerSchemaTools.java",
+        "src/main/java/io/mitralab/mcp/tools/datamanager/DataManagerDataSourceTools.java",
+        "src/main/java/io/mitralab/mcp/tools/functions/FunctionTools.java",
+        "src/main/java/io/mitralab/mcp/tools/integration/IntegrationProxyTools.java"
+      ]
+    }
+  },
+  "matrix": [
+    {
+      "operation": "auth.me",
+      "mcpTool": "getMe",
+      "javascript": "auth.me()",
+      "python": "auth.me()",
+      "endpoint": "GET /iam/api/v1/auth/me",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "entities.list",
+      "mcpTool": "listRecords",
+      "javascript": "entities.getTable(table).list(options)",
+      "python": "entities.table(table).list(**options)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.filter",
+      "mcpTool": "listRecords",
+      "javascript": "entities.getTable(table).filter(query, sort, limit, skip, fields)",
+      "python": "entities.table(table).filter(query, sort=sort, limit=limit, skip=skip, fields=fields)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.get",
+      "mcpTool": "getRecord",
+      "javascript": "entities.getTable(table).get(id)",
+      "python": "entities.table(table).get(id)",
+      "endpoint": "GET /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.create",
+      "mcpTool": "createRecord",
+      "javascript": "entities.getTable(table).create(data)",
+      "python": "entities.table(table).create(data)",
+      "endpoint": "POST /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.bulkCreate",
+      "mcpTool": "bulkCreateRecords",
+      "javascript": "entities.getTable(table).bulkCreate(data)",
+      "python": "entities.table(table).bulk_create(data)",
+      "endpoint": "POST /data-manager/api/v1/tables/{table}/records/bulk",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.update",
+      "mcpTool": "updateRecord",
+      "javascript": "entities.getTable(table).update(id, data)",
+      "python": "entities.table(table).update(id, data)",
+      "endpoint": "PUT /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.delete",
+      "mcpTool": "deleteRecord",
+      "javascript": "entities.getTable(table).delete(id)",
+      "python": "entities.table(table).delete(id)",
+      "endpoint": "DELETE /data-manager/api/v1/tables/{table}/records/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "entities.deleteMany",
+      "mcpTool": "deleteManyRecords",
+      "javascript": "entities.getTable(table).deleteMany(query)",
+      "python": "entities.table(table).delete_many(query)",
+      "endpoint": "DELETE /data-manager/api/v1/tables/{table}/records",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "queries.execute",
+      "mcpTool": "executeCustomQuery",
+      "javascript": "queries.execute(id, parameters)",
+      "python": "queries.execute(id, parameters)",
+      "endpoint": "POST /data-manager/api/v1/custom-queries/{id}/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "functions.execute",
+      "mcpTool": "executeFunction",
+      "javascript": "functions.execute(id, input)",
+      "python": "functions.execute(id, input)",
+      "endpoint": "POST /functions/api/v1/functions/{id}/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "functions.executeAsync",
+      "mcpTool": null,
+      "javascript": "functions.executeAsync(id, input)",
+      "python": "functions.execute_async(id, input)",
+      "endpoint": "POST /functions/api/v1/functions/{id}/execute",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "functions.getExecution",
+      "mcpTool": "getExecution",
+      "javascript": "functions.getExecution(id)",
+      "python": "functions.get_execution(id)",
+      "endpoint": "GET /functions/api/v1/executions/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "functions.cancelExecution",
+      "mcpTool": null,
+      "javascript": "functions.cancelExecution(id)",
+      "python": "functions.cancel_execution(id)",
+      "endpoint": "POST /functions/api/v1/executions/{id}/cancel",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "integration.execute",
+      "mcpTool": "executeIntegrationTemplateConfig",
+      "javascript": "integration.execute(configId, request)",
+      "python": "integration.execute(config_id, request)",
+      "endpoint": "POST /integration/api/v1/proxy/template-configs/{id}/execute",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "integration.executeResource",
+      "mcpTool": "executeIntegrationResource",
+      "javascript": "integration.executeResource(resourceId, parameters)",
+      "python": "integration.execute_resource(resource_id, parameters)",
+      "endpoint": "POST /integration/api/v1/proxy/resources/{id}/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "sql.executeDdl",
+      "mcpTool": "executeDdlBatch",
+      "javascript": "sql.executeDdl(statements)",
+      "python": "sql.execute_ddl(statements)",
+      "endpoint": "POST /data-manager/api/v1/sql/ddl/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "sql.executeDml",
+      "mcpTool": "executeDmlBatch",
+      "javascript": "sql.executeDml(statements)",
+      "python": "sql.execute_dml(statements)",
+      "endpoint": "POST /data-manager/api/v1/sql/dml/execute",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "sql.listTables",
+      "mcpTool": "listTables",
+      "javascript": "sql.listTables(options)",
+      "python": "sql.list_tables(**options)",
+      "endpoint": "GET /data-manager/api/v1/tables",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "dataSources.bulkCreate",
+      "mcpTool": "bulkCreateDataSources",
+      "javascript": "dataSources.bulkCreate(dataSources)",
+      "python": "data_sources.bulk_create(data_sources)",
+      "endpoint": "POST /data-manager/api/v1/data-sources",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "dataSources.bulkUpdate",
+      "mcpTool": "bulkUpdateDataSources",
+      "javascript": "dataSources.bulkUpdate(dataSources)",
+      "python": "data_sources.bulk_update(data_sources)",
+      "endpoint": "PUT /data-manager/api/v1/data-sources/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "dataSources.bulkDelete",
+      "mcpTool": "bulkDeleteDataSources",
+      "javascript": "dataSources.bulkDelete(dataSourceIds)",
+      "python": "data_sources.bulk_delete(data_source_ids)",
+      "endpoint": "DELETE /data-manager/api/v1/data-sources/{id}",
+      "mcpTransportParity": "semantic-only"
+    },
+    {
+      "operation": "functionsAdmin.bulkCreate",
+      "mcpTool": "bulkCreateFunctions",
+      "javascript": "functionsAdmin.bulkCreate(functions)",
+      "python": "functions_admin.bulk_create(functions)",
+      "endpoint": "POST /functions/api/v1/functions/bulk",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "functionsAdmin.bulkUpdate",
+      "mcpTool": null,
+      "javascript": "functionsAdmin.bulkUpdate(functions)",
+      "python": "functions_admin.bulk_update(functions)",
+      "endpoint": "PUT /functions/api/v1/functions/bulk",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "functionsAdmin.bulkPatch",
+      "mcpTool": "bulkUpdateFunctions",
+      "javascript": "functionsAdmin.bulkPatch(functions)",
+      "python": "functions_admin.bulk_patch(functions)",
+      "endpoint": "PATCH /functions/api/v1/functions/bulk",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "functionsAdmin.bulkDelete",
+      "mcpTool": "bulkDeleteFunctions",
+      "javascript": "functionsAdmin.bulkDelete(selector)",
+      "python": "functions_admin.bulk_delete(selector)",
+      "endpoint": "POST /functions/api/v1/functions/bulk-delete",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.bulkCreate",
+      "mcpTool": "bulkCreateIntegrationConfigs",
+      "javascript": "integrationAdmin.bulkCreate(configs)",
+      "python": "integration_admin.bulk_create(configs)",
+      "endpoint": "POST /integration/api/v1/template-configs/bulk",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.bulkUpdate",
+      "mcpTool": "bulkUpdateIntegrationConfigs",
+      "javascript": "integrationAdmin.bulkUpdate(configs)",
+      "python": "integration_admin.bulk_update(configs)",
+      "endpoint": "PUT /integration/api/v1/template-configs/bulk",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.bulkDelete",
+      "mcpTool": "bulkDeleteIntegrationConfigs",
+      "javascript": "integrationAdmin.bulkDelete(configIds)",
+      "python": "integration_admin.bulk_delete(config_ids)",
+      "endpoint": "POST /integration/api/v1/template-configs/bulk-delete",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.testCredentials",
+      "mcpTool": "testIntegrationCredentials",
+      "javascript": "integrationAdmin.testCredentials(request)",
+      "python": "integration_admin.test_credentials(request)",
+      "endpoint": "POST /integration/api/v1/template-configs/test",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.testConfig",
+      "mcpTool": "testIntegrationConfig",
+      "javascript": "integrationAdmin.testConfig(configId)",
+      "python": "integration_admin.test_config(config_id)",
+      "endpoint": "POST /integration/api/v1/template-configs/{id}/test",
+      "mcpTransportParity": "exact"
+    },
+    {
+      "operation": "integrationAdmin.list",
+      "mcpTool": null,
+      "javascript": "integrationAdmin.list(options)",
+      "python": "integration_admin.list(**options)",
+      "endpoint": "GET /integration/api/v1/template-configs",
+      "mcpTransportParity": "sdk-only"
+    },
+    {
+      "operation": "members.list",
+      "mcpTool": null,
+      "javascript": "members.list()",
+      "python": "members.list()",
+      "endpoint": "GET /iam/api/v1/members/current-app",
+      "mcpTransportParity": "sdk-only"
+    }
+  ],
+  "customQueryExecution": {
+    "sdkTarget": "alpha",
+    "requestBody": {
+      "parameters": {
+        "status": "active"
+      }
+    },
+    "dataSourceResolution": "authenticated-app",
+    "declaresDataSourceId": false,
+    "adapterRequirement": "Use the app-scoped JWT so Data Manager resolves the current app Data Source."
+  },
+  "consumerRequirements": {
+    "@mitralab.io/sdk-core": {
+      "successCases": "all",
+      "responseValidationCases": "all"
+    },
+    "@mitralab.io/functions-sdk": {
+      "httpAdapterCases": "all"
+    },
+    "mitra-functions-sdk": {
+      "successCases": "all",
+      "responseValidationCases": "all",
+      "httpAdapterCases": "all"
+    }
+  },
+  "cases": [
+    {
+      "id": "auth.me.success",
+      "kind": "success",
+      "operation": "auth.me",
+      "input": {},
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "user-1",
+          "tenant": {
+            "id": "tenant-1",
+            "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+            "legacyId": null,
+            "slug": "tenant-one",
+            "clusterType": "SHARED",
+            "name": "Tenant One",
+            "description": null,
+            "hexColor": null,
+            "icon": null,
+            "infraStatus": "ACTIVE",
+            "active": true
+          },
+          "name": "Test User",
+          "email": "user@example.com",
+          "imageUrl": null,
+          "planId": "plan-1",
+          "onboardingCompleted": false,
+          "language": "pt-BR"
+        }
+      },
+      "expectedResult": {
+        "id": "user-1",
+        "tenant": {
+          "id": "tenant-1",
+          "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+          "legacyId": null,
+          "slug": "tenant-one",
+          "clusterType": "SHARED",
+          "name": "Tenant One",
+          "description": null,
+          "hexColor": null,
+          "icon": null,
+          "infraStatus": "ACTIVE",
+          "active": true
+        },
+        "name": "Test User",
+        "email": "user@example.com",
+        "imageUrl": null,
+        "planId": "plan-1",
+        "onboardingCompleted": false,
+        "language": "pt-BR"
+      }
+    },
+    {
+      "id": "entities.list.success",
+      "kind": "success",
+      "operation": "entities.list",
+      "input": {
+        "table": "Order items",
+        "options": {
+          "sort": "-created_at",
+          "limit": 2,
+          "skip": 4,
+          "fields": ["id", "status"]
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Order%20items/records",
+        "params": {
+          "sort": "-created_at",
+          "limit": 2,
+          "skip": 4,
+          "fields": "id,status"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "order-5",
+              "status": "active"
+            },
+            {
+              "id": "order-6",
+              "status": "pending"
+            }
+          ],
+          "limit": 2,
+          "skip": 4,
+          "total": 8,
+          "hasMore": true
+        }
+      },
+      "expectedResult": {
+        "data": [
+          {
+            "id": "order-5",
+            "status": "active"
+          },
+          {
+            "id": "order-6",
+            "status": "pending"
+          }
+        ],
+        "limit": 2,
+        "skip": 4,
+        "total": 8,
+        "hasMore": true
+      }
+    },
+    {
+      "id": "entities.filter.success",
+      "kind": "success",
+      "operation": "entities.filter",
+      "input": {
+        "table": "Orders",
+        "query": {
+          "status": "active"
+        },
+        "sort": "name",
+        "limit": 5,
+        "skip": 0,
+        "fields": ["id", "status"]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Orders/records",
+        "params": {
+          "q": "{\"status\":\"active\"}",
+          "sort": "name",
+          "limit": 5,
+          "skip": 0,
+          "fields": "id,status"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "order-1",
+              "status": "active"
+            }
+          ],
+          "limit": 5,
+          "skip": 0,
+          "total": 1,
+          "hasMore": false
+        }
+      },
+      "expectedResult": {
+        "data": [
+          {
+            "id": "order-1",
+            "status": "active"
+          }
+        ],
+        "limit": 5,
+        "skip": 0,
+        "total": 1,
+        "hasMore": false
+      }
+    },
+    {
+      "id": "entities.get.success",
+      "kind": "success",
+      "operation": "entities.get",
+      "input": {
+        "table": "Orders",
+        "id": "order/1"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables/Orders/records/order%2F1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "order/1",
+          "status": "active"
+        }
+      },
+      "expectedResult": {
+        "id": "order/1",
+        "status": "active"
+      }
+    },
+    {
+      "id": "entities.create.success",
+      "kind": "success",
+      "operation": "entities.create",
+      "input": {
+        "table": "Orders",
+        "data": {
+          "status": "draft"
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/tables/Orders/records",
+        "body": {
+          "status": "draft"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": "order-2",
+          "status": "draft"
+        }
+      },
+      "expectedResult": {
+        "id": "order-2",
+        "status": "draft"
+      }
+    },
+    {
+      "id": "entities.bulk-create.success",
+      "kind": "success",
+      "operation": "entities.bulkCreate",
+      "input": {
+        "table": "Orders",
+        "data": [
+          {
+            "status": "draft"
+          },
+          {
+            "status": "active"
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/tables/Orders/records/bulk",
+        "body": [
+          {
+            "status": "draft"
+          },
+          {
+            "status": "active"
+          }
+        ]
+      },
+      "response": {
+        "status": 201,
+        "body": [
+          {
+            "id": "order-3",
+            "status": "draft"
+          },
+          {
+            "id": "order-4",
+            "status": "active"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "id": "order-3",
+          "status": "draft"
+        },
+        {
+          "id": "order-4",
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "id": "entities.update.success",
+      "kind": "success",
+      "operation": "entities.update",
+      "input": {
+        "table": "Orders",
+        "id": "order-2",
+        "data": {
+          "status": "active"
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "PUT",
+        "path": "/api/v1/tables/Orders/records/order-2",
+        "body": {
+          "status": "active"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "order-2",
+          "status": "active"
+        }
+      },
+      "expectedResult": {
+        "id": "order-2",
+        "status": "active"
+      }
+    },
+    {
+      "id": "entities.delete.success",
+      "kind": "success",
+      "operation": "entities.delete",
+      "input": {
+        "table": "Orders",
+        "id": "order-2"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "DELETE",
+        "path": "/api/v1/tables/Orders/records/order-2"
+      },
+      "response": {
+        "status": 204,
+        "empty": true
+      }
+    },
+    {
+      "id": "entities.delete-many.success",
+      "kind": "success",
+      "operation": "entities.deleteMany",
+      "input": {
+        "table": "Orders",
+        "query": {
+          "status": "archived"
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "DELETE",
+        "path": "/api/v1/tables/Orders/records",
+        "params": {
+          "q": "{\"status\":\"archived\"}"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "deleted": 2
+        }
+      },
+      "expectedResult": {
+        "deleted": 2
+      }
+    },
+    {
+      "id": "queries.execute.success",
+      "kind": "success",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "parameters": {
+          "status": "active"
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": {
+          "parameters": {
+            "status": "active"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "rows": [
+            {
+              "total": 2
+            }
+          ],
+          "durationMs": 7
+        }
+      },
+      "expectedResult": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ],
+        "durationMs": 7
+      }
+    },
+    {
+      "id": "functions.execute.success",
+      "kind": "success",
+      "operation": "functions.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000201",
+        "body": {
+          "orderId": "order-1"
+        }
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/00000000-0000-4000-8000-000000000201/execute",
+        "headers": {
+          "X-Invocation-Type": "sync"
+        },
+        "body": {
+          "input": {
+            "orderId": "order-1"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000301",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "SUCCESS",
+          "input": {
+            "orderId": "order-1"
+          },
+          "output": {
+            "ok": true
+          },
+          "errorMessage": null,
+          "logs": null,
+          "durationMs": 10,
+          "startedAt": "2026-08-14T20:00:00Z",
+          "finishedAt": "2026-08-14T20:00:01Z",
+          "createdAt": "2026-08-14T20:00:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000301",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "SUCCESS",
+        "input": {
+          "orderId": "order-1"
+        },
+        "output": {
+          "ok": true
+        },
+        "errorMessage": null,
+        "logs": null,
+        "durationMs": 10,
+        "startedAt": "2026-08-14T20:00:00Z",
+        "finishedAt": "2026-08-14T20:00:01Z",
+        "createdAt": "2026-08-14T20:00:00Z"
+      }
+    },
+    {
+      "id": "functions.execute-async.success",
+      "kind": "success",
+      "operation": "functions.executeAsync",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000201",
+        "body": {
+          "orderId": "order-2"
+        }
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/00000000-0000-4000-8000-000000000201/execute",
+        "headers": {
+          "X-Invocation-Type": "async"
+        },
+        "body": {
+          "input": {
+            "orderId": "order-2"
+          }
+        }
+      },
+      "response": {
+        "status": 202,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000302",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "PENDING",
+          "input": {
+            "orderId": "order-2"
+          },
+          "output": null,
+          "errorMessage": null,
+          "logs": null,
+          "durationMs": null,
+          "startedAt": null,
+          "finishedAt": null,
+          "createdAt": "2026-08-14T20:01:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000302",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "PENDING",
+        "input": {
+          "orderId": "order-2"
+        },
+        "output": null,
+        "errorMessage": null,
+        "logs": null,
+        "durationMs": null,
+        "startedAt": null,
+        "finishedAt": null,
+        "createdAt": "2026-08-14T20:01:00Z"
+      }
+    },
+    {
+      "id": "functions.get-execution.success",
+      "kind": "success",
+      "operation": "functions.getExecution",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000302"
+      },
+      "request": {
+        "service": "functions",
+        "method": "GET",
+        "path": "/api/v1/executions/00000000-0000-4000-8000-000000000302"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000302",
+          "functionId": "00000000-0000-4000-8000-000000000201",
+          "functionVersionId": "00000000-0000-4000-8000-000000000211",
+          "status": "SUCCESS",
+          "input": {
+            "orderId": "order-2"
+          },
+          "output": {
+            "ok": true
+          },
+          "errorMessage": null,
+          "logs": "done",
+          "durationMs": 12,
+          "startedAt": "2026-08-14T20:01:00Z",
+          "finishedAt": "2026-08-14T20:01:01Z",
+          "createdAt": "2026-08-14T20:01:00Z"
+        }
+      },
+      "expectedResult": {
+        "id": "00000000-0000-4000-8000-000000000302",
+        "functionId": "00000000-0000-4000-8000-000000000201",
+        "functionVersionId": "00000000-0000-4000-8000-000000000211",
+        "status": "SUCCESS",
+        "input": {
+          "orderId": "order-2"
+        },
+        "output": {
+          "ok": true
+        },
+        "errorMessage": null,
+        "logs": "done",
+        "durationMs": 12,
+        "startedAt": "2026-08-14T20:01:00Z",
+        "finishedAt": "2026-08-14T20:01:01Z",
+        "createdAt": "2026-08-14T20:01:00Z"
+      }
+    },
+    {
+      "id": "functions.cancel-execution.success",
+      "kind": "success",
+      "operation": "functions.cancelExecution",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000302"
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/executions/00000000-0000-4000-8000-000000000302/cancel"
+      },
+      "response": {
+        "status": 204,
+        "empty": true
+      }
+    },
+    {
+      "id": "integration.execute.success",
+      "kind": "success",
+      "operation": "integration.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000401",
+        "proxyRequest": {
+          "method": "POST",
+          "endpoint": "/orders",
+          "headers": {
+            "x-client": "sdk"
+          },
+          "body": {
+            "id": "order-1"
+          },
+          "queryParams": {
+            "dryRun": true
+          }
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/proxy/template-configs/00000000-0000-4000-8000-000000000401/execute",
+        "body": {
+          "method": "POST",
+          "endpoint": "/orders",
+          "headers": {
+            "x-client": "sdk"
+          },
+          "body": {
+            "id": "order-1"
+          },
+          "queryParams": {
+            "dryRun": true
+          },
+          "source": "SDK"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": 201,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "id": "remote-order-1"
+          },
+          "durationMs": 18,
+          "executionId": "integration-execution-1"
+        }
+      },
+      "expectedResult": {
+        "status": 201,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "id": "remote-order-1"
+        },
+        "durationMs": 18,
+        "executionId": "integration-execution-1"
+      }
+    },
+    {
+      "id": "integration.execute-resource.success",
+      "kind": "success",
+      "operation": "integration.executeResource",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000402",
+        "parameters": {
+          "limit": 10
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/proxy/resources/00000000-0000-4000-8000-000000000402/execute",
+        "body": {
+          "params": {
+            "limit": 10
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json"
+          },
+          "body": {
+            "ok": true
+          },
+          "durationMs": 20,
+          "executionId": "integration-execution-2"
+        }
+      },
+      "expectedResult": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "ok": true
+        },
+        "durationMs": 20,
+        "executionId": "integration-execution-2"
+      }
+    },
+    {
+      "id": "sql.execute-ddl.success",
+      "kind": "success",
+      "operation": "sql.executeDdl",
+      "input": {
+        "statements": [
+          {
+            "sql": "CREATE TABLE reports (id INT PRIMARY KEY)"
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/sql/ddl/execute",
+        "body": {
+          "statements": [
+            {
+              "sql": "CREATE TABLE reports (id INT PRIMARY KEY)"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "durationMs": 12
+            }
+          ],
+          "executedCount": 1,
+          "totalDurationMs": 14
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "durationMs": 12
+          }
+        ],
+        "executedCount": 1,
+        "totalDurationMs": 14
+      }
+    },
+    {
+      "id": "sql.execute-dml.success",
+      "kind": "success",
+      "operation": "sql.executeDml",
+      "input": {
+        "statements": [
+          {
+            "sql": "INSERT INTO reports (id, name) VALUES (:id, :name)",
+            "parameters": {
+              "id": 1,
+              "name": "Monthly"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/sql/dml/execute",
+        "body": {
+          "statements": [
+            {
+              "sql": "INSERT INTO reports (id, name) VALUES (:id, :name)",
+              "parameters": {
+                "id": 1,
+                "name": "Monthly"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "affectedRows": 1,
+              "durationMs": 8
+            }
+          ],
+          "executedCount": 1,
+          "totalDurationMs": 9
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "affectedRows": 1,
+            "durationMs": 8
+          }
+        ],
+        "executedCount": 1,
+        "totalDurationMs": 9
+      }
+    },
+    {
+      "id": "sql.list-tables.success",
+      "kind": "success",
+      "operation": "sql.listTables",
+      "input": {
+        "listTablesOptions": {
+          "scope": "APP",
+          "includeColumns": true
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables",
+        "params": {
+          "scope": "APP",
+          "includeColumns": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "schema": "app_schema",
+            "tables": [
+              {
+                "tableName": "reports",
+                "columns": [
+                  {
+                    "name": "id",
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "nullable": false,
+                    "defaultValue": null
+                  }
+                ],
+                "foreignKeys": [
+                  {
+                    "columns": ["owner_id"],
+                    "referencedTable": "owners",
+                    "referencedColumns": ["id"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "schema": "app_schema",
+          "tables": [
+            {
+              "tableName": "reports",
+              "columns": [
+                {
+                  "name": "id",
+                  "type": "INTEGER",
+                  "primaryKey": true,
+                  "nullable": false,
+                  "defaultValue": null
+                }
+              ],
+              "foreignKeys": [
+                {
+                  "columns": ["owner_id"],
+                  "referencedTable": "owners",
+                  "referencedColumns": ["id"]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-sources.bulk-create.success",
+      "kind": "success",
+      "operation": "dataSources.bulkCreate",
+      "input": {
+        "dataSources": [
+          {
+            "name": "Reporting",
+            "instanceType": "EXTERNAL",
+            "dbType": "POSTGRES",
+            "writeConnectionConfig": {
+              "host": "db.example.com",
+              "port": 5432,
+              "databaseName": "reporting",
+              "username": "reader",
+              "credential": "write-only-credential"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/data-sources",
+        "body": {
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": "write-only-credential"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000501",
+          "legacyId": null,
+          "appId": "00000000-0000-4000-8000-000000000500",
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "schema": null,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": null,
+            "maxPoolSize": null,
+            "connectionTimeoutMs": null,
+            "idleTimeoutMs": null,
+            "minimumIdle": null,
+            "maxLifetimeMs": null,
+            "additionalParams": null
+          },
+          "readConnectionConfig": null,
+          "connectionStatus": null,
+          "lastCheckedAt": null,
+          "storageQuota": null
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "dataSourceId": "00000000-0000-4000-8000-000000000501",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "data-sources.bulk-update.success",
+      "kind": "success",
+      "operation": "dataSources.bulkUpdate",
+      "input": {
+        "dataSources": [
+          {
+            "dataSourceId": "00000000-0000-4000-8000-000000000501",
+            "name": "Reporting",
+            "instanceType": "EXTERNAL",
+            "dbType": "POSTGRES",
+            "writeConnectionConfig": {
+              "host": "db.example.com",
+              "port": 5432,
+              "databaseName": "reporting",
+              "username": "reader"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "PUT",
+        "path": "/api/v1/data-sources/00000000-0000-4000-8000-000000000501",
+        "body": {
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "databaseName": "reporting",
+            "username": "reader"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "00000000-0000-4000-8000-000000000501",
+          "legacyId": null,
+          "appId": "00000000-0000-4000-8000-000000000500",
+          "name": "Reporting",
+          "instanceType": "EXTERNAL",
+          "dbType": "POSTGRES",
+          "writeConnectionConfig": {
+            "host": "db.example.com",
+            "port": 5432,
+            "schema": null,
+            "databaseName": "reporting",
+            "username": "reader",
+            "credential": null,
+            "maxPoolSize": null,
+            "connectionTimeoutMs": null,
+            "idleTimeoutMs": null,
+            "minimumIdle": null,
+            "maxLifetimeMs": null,
+            "additionalParams": null
+          },
+          "readConnectionConfig": null,
+          "connectionStatus": null,
+          "lastCheckedAt": null,
+          "storageQuota": null
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "dataSourceId": "00000000-0000-4000-8000-000000000501",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "data-sources.bulk-delete.success",
+      "kind": "success",
+      "operation": "dataSources.bulkDelete",
+      "input": {
+        "dataSourceIds": ["00000000-0000-4000-8000-000000000502"]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "DELETE",
+        "path": "/api/v1/data-sources/00000000-0000-4000-8000-000000000502"
+      },
+      "response": {
+        "status": 200,
+        "empty": true
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "dataSourceId": "00000000-0000-4000-8000-000000000502",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "functions-admin.bulk-create.success",
+      "kind": "success",
+      "operation": "functionsAdmin.bulkCreate",
+      "input": {
+        "functions": [
+          {
+            "name": "sync orders",
+            "description": "Pushes orders downstream",
+            "runtime": "JAVASCRIPT",
+            "code": "export default async () => ({ ok: true })",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "secrets": ["ORDERS_TOKEN"]
+          }
+        ]
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/bulk",
+        "body": {
+          "functions": [
+            {
+              "name": "sync orders",
+              "description": "Pushes orders downstream",
+              "runtime": "JAVASCRIPT",
+              "code": "export default async () => ({ ok: true })",
+              "inputSchema": {
+                "type": "object"
+              },
+              "outputSchema": {
+                "type": "object"
+              },
+              "secrets": ["ORDERS_TOKEN"]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "tenantId": "00000000-0000-4000-8000-000000000011",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "name": "sync orders",
+            "description": "Pushes orders downstream",
+            "runtime": "JAVASCRIPT",
+            "dataSourceId": null,
+            "visibility": "PRIVATE",
+            "currentVersion": {
+              "id": "00000000-0000-4000-8000-000000000611",
+              "functionId": "00000000-0000-4000-8000-000000000601",
+              "status": "DRAFT",
+              "code": "export default async () => ({ ok: true })",
+              "inputSchema": {
+                "type": "object"
+              },
+              "outputSchema": {
+                "type": "object"
+              },
+              "secrets": ["ORDERS_TOKEN"],
+              "createdAt": "2026-08-18T12:00:00Z"
+            },
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
+            "createdAt": "2026-08-18T12:00:00Z",
+            "updatedAt": "2026-08-18T12:00:00Z"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "id": "00000000-0000-4000-8000-000000000601",
+          "tenantId": "00000000-0000-4000-8000-000000000011",
+          "appId": "00000000-0000-4000-8000-000000000012",
+          "legacyId": null,
+          "name": "sync orders",
+          "description": "Pushes orders downstream",
+          "runtime": "JAVASCRIPT",
+          "dataSourceId": null,
+          "visibility": "PRIVATE",
+          "currentVersion": {
+            "id": "00000000-0000-4000-8000-000000000611",
+            "functionId": "00000000-0000-4000-8000-000000000601",
+            "status": "DRAFT",
+            "code": "export default async () => ({ ok: true })",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "secrets": ["ORDERS_TOKEN"],
+            "createdAt": "2026-08-18T12:00:00Z"
+          },
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
+          "createdAt": "2026-08-18T12:00:00Z",
+          "updatedAt": "2026-08-18T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "functions-admin.bulk-update.success",
+      "kind": "success",
+      "operation": "functionsAdmin.bulkUpdate",
+      "input": {
+        "functionUpdates": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "update": {
+              "name": "sync orders",
+              "code": "export default async () => ({ ok: false })"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "functions",
+        "method": "PUT",
+        "path": "/api/v1/functions/bulk",
+        "body": {
+          "functions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000601",
+              "update": {
+                "name": "sync orders",
+                "code": "export default async () => ({ ok: false })"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "tenantId": "00000000-0000-4000-8000-000000000011",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "name": "sync orders",
+            "description": null,
+            "runtime": "JAVASCRIPT",
+            "dataSourceId": null,
+            "visibility": "PRIVATE",
+            "currentVersion": {
+              "id": "00000000-0000-4000-8000-000000000611",
+              "functionId": "00000000-0000-4000-8000-000000000601",
+              "status": "DRAFT",
+              "code": "export default async () => ({ ok: false })",
+              "inputSchema": null,
+              "outputSchema": null,
+              "secrets": null,
+              "createdAt": "2026-08-18T12:05:00Z"
+            },
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
+            "createdAt": "2026-08-18T12:00:00Z",
+            "updatedAt": "2026-08-18T12:05:00Z"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "id": "00000000-0000-4000-8000-000000000601",
+          "tenantId": "00000000-0000-4000-8000-000000000011",
+          "appId": "00000000-0000-4000-8000-000000000012",
+          "legacyId": null,
+          "name": "sync orders",
+          "description": null,
+          "runtime": "JAVASCRIPT",
+          "dataSourceId": null,
+          "visibility": "PRIVATE",
+          "currentVersion": {
+            "id": "00000000-0000-4000-8000-000000000611",
+            "functionId": "00000000-0000-4000-8000-000000000601",
+            "status": "DRAFT",
+            "code": "export default async () => ({ ok: false })",
+            "inputSchema": null,
+            "outputSchema": null,
+            "secrets": null,
+            "createdAt": "2026-08-18T12:05:00Z"
+          },
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
+          "createdAt": "2026-08-18T12:00:00Z",
+          "updatedAt": "2026-08-18T12:05:00Z"
+        }
+      ]
+    },
+    {
+      "id": "functions-admin.bulk-patch.success",
+      "kind": "success",
+      "operation": "functionsAdmin.bulkPatch",
+      "input": {
+        "functionPatches": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "update": {
+              "description": "Preserved patch semantics",
+              "secrets": []
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "functions",
+        "method": "PATCH",
+        "path": "/api/v1/functions/bulk",
+        "body": {
+          "functions": [
+            {
+              "id": "00000000-0000-4000-8000-000000000601",
+              "update": {
+                "description": "Preserved patch semantics",
+                "secrets": []
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "tenantId": "00000000-0000-4000-8000-000000000011",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "name": "sync orders",
+            "description": "Preserved patch semantics",
+            "runtime": "JAVASCRIPT",
+            "dataSourceId": null,
+            "visibility": "PRIVATE",
+            "currentVersion": null,
+            "cronExpression": null,
+            "cronInputJson": null,
+            "cronEnabled": null,
+            "createdAt": "2026-08-18T12:00:00Z",
+            "updatedAt": "2026-08-18T12:06:00Z"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "id": "00000000-0000-4000-8000-000000000601",
+          "tenantId": "00000000-0000-4000-8000-000000000011",
+          "appId": "00000000-0000-4000-8000-000000000012",
+          "legacyId": null,
+          "name": "sync orders",
+          "description": "Preserved patch semantics",
+          "runtime": "JAVASCRIPT",
+          "dataSourceId": null,
+          "visibility": "PRIVATE",
+          "currentVersion": null,
+          "cronExpression": null,
+          "cronInputJson": null,
+          "cronEnabled": null,
+          "createdAt": "2026-08-18T12:00:00Z",
+          "updatedAt": "2026-08-18T12:06:00Z"
+        }
+      ]
+    },
+    {
+      "id": "functions-admin.bulk-delete.success",
+      "kind": "success",
+      "operation": "functionsAdmin.bulkDelete",
+      "input": {
+        "functionDeleteSelector": {
+          "ids": ["00000000-0000-4000-8000-000000000602"]
+        }
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/bulk-delete",
+        "body": {
+          "ids": ["00000000-0000-4000-8000-000000000602"]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "deleted": ["00000000-0000-4000-8000-000000000602"],
+          "notFound": [],
+          "deletedCount": 1
+        }
+      },
+      "expectedResult": {
+        "deleted": ["00000000-0000-4000-8000-000000000602"],
+        "notFound": [],
+        "deletedCount": 1
+      }
+    },
+    {
+      "id": "integration-admin.bulk-create.success",
+      "kind": "success",
+      "operation": "integrationAdmin.bulkCreate",
+      "input": {
+        "configs": [
+          {
+            "templateId": "00000000-0000-4000-8000-000000000801",
+            "alias": "crm",
+            "values": {
+              "token": "write-only-value"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/bulk",
+        "body": {
+          "configs": [
+            {
+              "templateId": "00000000-0000-4000-8000-000000000801",
+              "alias": "crm",
+              "values": {
+                "token": "write-only-value"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "success": true,
+              "configId": "00000000-0000-4000-8000-000000000701",
+              "errorCode": null,
+              "message": null
+            }
+          ],
+          "processedCount": 1,
+          "succeededCount": 1,
+          "failedCount": 0
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "configId": "00000000-0000-4000-8000-000000000701",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "integration-admin.bulk-create.inline.success",
+      "kind": "success",
+      "operation": "integrationAdmin.bulkCreate",
+      "input": {
+        "configs": [
+          {
+            "alias": "erp-inline",
+            "fieldsSchemaInline": [
+              {
+                "key": "base_url",
+                "label": "Base URL",
+                "type": "url",
+                "required": true
+              },
+              {
+                "key": "access_key_code",
+                "label": "Access Key Code",
+                "type": "secret",
+                "required": true
+              },
+              {
+                "key": "access_key_token",
+                "label": "Access Key Token",
+                "type": "secret",
+                "required": true
+              }
+            ],
+            "requestConfigInline": {
+              "headers": {
+                "X-Access-Key-Code": "{{access_key_code}}",
+                "X-Access-Key-Token": "{{access_key_token}}"
+              },
+              "credential_rules": null
+            },
+            "loginConfigInline": null,
+            "values": {
+              "base_url": "https://api.example.com",
+              "access_key_code": "write-only-value",
+              "access_key_token": "write-only-value"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/bulk",
+        "body": {
+          "configs": [
+            {
+              "alias": "erp-inline",
+              "fieldsSchemaInline": [
+                {
+                  "key": "base_url",
+                  "label": "Base URL",
+                  "type": "url",
+                  "required": true
+                },
+                {
+                  "key": "access_key_code",
+                  "label": "Access Key Code",
+                  "type": "secret",
+                  "required": true
+                },
+                {
+                  "key": "access_key_token",
+                  "label": "Access Key Token",
+                  "type": "secret",
+                  "required": true
+                }
+              ],
+              "requestConfigInline": {
+                "headers": {
+                  "X-Access-Key-Code": "{{access_key_code}}",
+                  "X-Access-Key-Token": "{{access_key_token}}"
+                },
+                "credential_rules": null
+              },
+              "loginConfigInline": null,
+              "values": {
+                "base_url": "https://api.example.com",
+                "access_key_code": "write-only-value",
+                "access_key_token": "write-only-value"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "success": true,
+              "configId": "00000000-0000-4000-8000-000000000703",
+              "errorCode": null,
+              "message": null
+            }
+          ],
+          "processedCount": 1,
+          "succeededCount": 1,
+          "failedCount": 0
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "configId": "00000000-0000-4000-8000-000000000703",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "integration-admin.bulk-update.success",
+      "kind": "success",
+      "operation": "integrationAdmin.bulkUpdate",
+      "input": {
+        "configs": [
+          {
+            "configId": "00000000-0000-4000-8000-000000000701",
+            "alias": "crm-production"
+          }
+        ]
+      },
+      "request": {
+        "service": "integration",
+        "method": "PUT",
+        "path": "/api/v1/template-configs/bulk",
+        "body": {
+          "configs": [
+            {
+              "configId": "00000000-0000-4000-8000-000000000701",
+              "alias": "crm-production"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "success": true,
+              "configId": "00000000-0000-4000-8000-000000000701",
+              "errorCode": null,
+              "message": null
+            }
+          ],
+          "processedCount": 1,
+          "succeededCount": 1,
+          "failedCount": 0
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "configId": "00000000-0000-4000-8000-000000000701",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "integration-admin.bulk-delete.success",
+      "kind": "success",
+      "operation": "integrationAdmin.bulkDelete",
+      "input": {
+        "configIds": ["00000000-0000-4000-8000-000000000702"]
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/bulk-delete",
+        "body": {
+          "configIds": ["00000000-0000-4000-8000-000000000702"]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "success": true,
+              "configId": "00000000-0000-4000-8000-000000000702",
+              "errorCode": null,
+              "message": null
+            }
+          ],
+          "processedCount": 1,
+          "succeededCount": 1,
+          "failedCount": 0
+        }
+      },
+      "expectedResult": {
+        "results": [
+          {
+            "index": 0,
+            "success": true,
+            "configId": "00000000-0000-4000-8000-000000000702",
+            "errorCode": null,
+            "message": null
+          }
+        ],
+        "processedCount": 1,
+        "succeededCount": 1,
+        "failedCount": 0
+      }
+    },
+    {
+      "id": "integration-admin.test-credentials.success",
+      "kind": "success",
+      "operation": "integrationAdmin.testCredentials",
+      "input": {
+        "testCredentials": {
+          "templateId": "00000000-0000-4000-8000-000000000801",
+          "values": {
+            "token": "write-only-value"
+          }
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/test",
+        "body": {
+          "templateId": "00000000-0000-4000-8000-000000000801",
+          "values": {
+            "token": "write-only-value"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": "connected",
+          "durationMs": 120,
+          "checkedAt": "2026-08-18T12:00:00Z",
+          "message": null
+        }
+      },
+      "expectedResult": {
+        "status": "connected",
+        "durationMs": 120,
+        "checkedAt": "2026-08-18T12:00:00Z",
+        "message": null
+      }
+    },
+    {
+      "id": "integration-admin.test-credentials.inline.success",
+      "kind": "success",
+      "operation": "integrationAdmin.testCredentials",
+      "input": {
+        "testCredentials": {
+          "fieldsSchemaInline": [
+            {
+              "key": "base_url",
+              "label": "Base URL",
+              "type": "url",
+              "required": true
+            },
+            {
+              "key": "access_key_code",
+              "label": "Access Key Code",
+              "type": "secret",
+              "required": true
+            },
+            {
+              "key": "access_key_token",
+              "label": "Access Key Token",
+              "type": "secret",
+              "required": true
+            }
+          ],
+          "requestConfigInline": {
+            "headers": {
+              "X-Access-Key-Code": "{{access_key_code}}",
+              "X-Access-Key-Token": "{{access_key_token}}"
+            },
+            "credential_rules": null
+          },
+          "loginConfigInline": null,
+          "values": {
+            "base_url": "https://api.example.com",
+            "access_key_code": "write-only-value",
+            "access_key_token": "write-only-value"
+          }
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/test",
+        "body": {
+          "fieldsSchemaInline": [
+            {
+              "key": "base_url",
+              "label": "Base URL",
+              "type": "url",
+              "required": true
+            },
+            {
+              "key": "access_key_code",
+              "label": "Access Key Code",
+              "type": "secret",
+              "required": true
+            },
+            {
+              "key": "access_key_token",
+              "label": "Access Key Token",
+              "type": "secret",
+              "required": true
+            }
+          ],
+          "requestConfigInline": {
+            "headers": {
+              "X-Access-Key-Code": "{{access_key_code}}",
+              "X-Access-Key-Token": "{{access_key_token}}"
+            },
+            "credential_rules": null
+          },
+          "loginConfigInline": null,
+          "values": {
+            "base_url": "https://api.example.com",
+            "access_key_code": "write-only-value",
+            "access_key_token": "write-only-value"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": "connected",
+          "durationMs": 140,
+          "checkedAt": "2026-08-18T12:02:00Z",
+          "message": null
+        }
+      },
+      "expectedResult": {
+        "status": "connected",
+        "durationMs": 140,
+        "checkedAt": "2026-08-18T12:02:00Z",
+        "message": null
+      }
+    },
+    {
+      "id": "integration-admin.test-config.success",
+      "kind": "success",
+      "operation": "integrationAdmin.testConfig",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000701"
+      },
+      "request": {
+        "service": "integration",
+        "method": "POST",
+        "path": "/api/v1/template-configs/00000000-0000-4000-8000-000000000701/test"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "status": "error",
+          "durationMs": 250,
+          "checkedAt": "2026-08-18T12:01:00Z",
+          "message": "Connection test failed"
+        }
+      },
+      "expectedResult": {
+        "status": "error",
+        "durationMs": 250,
+        "checkedAt": "2026-08-18T12:01:00Z",
+        "message": "Connection test failed"
+      }
+    },
+    {
+      "id": "integration-admin.list.success",
+      "kind": "success",
+      "operation": "integrationAdmin.list",
+      "input": {
+        "listConfigsOptions": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "GET",
+        "path": "/api/v1/template-configs",
+        "params": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": [
+            {
+              "id": "00000000-0000-4000-8000-000000000701",
+              "appId": "00000000-0000-4000-8000-000000000012",
+              "legacyId": null,
+              "templateId": "00000000-0000-4000-8000-000000000801",
+              "alias": "crm-production",
+              "status": "connected",
+              "lastCheckedAt": "2026-08-18T12:00:00Z"
+            }
+          ],
+          "totalElements": 1
+        }
+      },
+      "expectedResult": {
+        "content": [
+          {
+            "id": "00000000-0000-4000-8000-000000000701",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "templateId": "00000000-0000-4000-8000-000000000801",
+            "alias": "crm-production",
+            "status": "connected",
+            "lastCheckedAt": "2026-08-18T12:00:00Z"
+          }
+        ],
+        "totalElements": 1
+      }
+    },
+    {
+      "id": "integration-admin.list.inline.success",
+      "kind": "success",
+      "operation": "integrationAdmin.list",
+      "input": {
+        "listConfigsOptions": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "GET",
+        "path": "/api/v1/template-configs",
+        "params": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": [
+            {
+              "id": "00000000-0000-4000-8000-000000000703",
+              "appId": "00000000-0000-4000-8000-000000000012",
+              "legacyId": null,
+              "templateId": null,
+              "alias": "erp-inline",
+              "fieldsSchemaInline": [
+                {
+                  "key": "base_url",
+                  "label": "Base URL",
+                  "type": "url",
+                  "required": true,
+                  "placeholder": null,
+                  "default": null
+                },
+                {
+                  "key": "access_key_code",
+                  "label": "Access Key Code",
+                  "type": "secret",
+                  "required": true,
+                  "placeholder": null,
+                  "default": null
+                },
+                {
+                  "key": "access_key_token",
+                  "label": "Access Key Token",
+                  "type": "secret",
+                  "required": true,
+                  "placeholder": null,
+                  "default": null
+                }
+              ],
+              "requestConfigInline": {
+                "headers": {
+                  "X-Access-Key-Code": "{{access_key_code}}",
+                  "X-Access-Key-Token": "{{access_key_token}}"
+                },
+                "credential_rules": null
+              },
+              "loginConfigInline": null,
+              "status": "connected",
+              "lastCheckedAt": "2026-08-18T12:02:00Z"
+            }
+          ],
+          "totalElements": 1
+        }
+      },
+      "expectedResult": {
+        "content": [
+          {
+            "id": "00000000-0000-4000-8000-000000000703",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "templateId": null,
+            "alias": "erp-inline",
+            "fieldsSchemaInline": [
+              {
+                "key": "base_url",
+                "label": "Base URL",
+                "type": "url",
+                "required": true,
+                "placeholder": null,
+                "default": null
+              },
+              {
+                "key": "access_key_code",
+                "label": "Access Key Code",
+                "type": "secret",
+                "required": true,
+                "placeholder": null,
+                "default": null
+              },
+              {
+                "key": "access_key_token",
+                "label": "Access Key Token",
+                "type": "secret",
+                "required": true,
+                "placeholder": null,
+                "default": null
+              }
+            ],
+            "requestConfigInline": {
+              "headers": {
+                "X-Access-Key-Code": "{{access_key_code}}",
+                "X-Access-Key-Token": "{{access_key_token}}"
+              },
+              "credential_rules": null
+            },
+            "loginConfigInline": null,
+            "status": "connected",
+            "lastCheckedAt": "2026-08-18T12:02:00Z"
+          }
+        ],
+        "totalElements": 1
+      }
+    },
+    {
+      "id": "members.list.success",
+      "kind": "success",
+      "operation": "members.list",
+      "input": {},
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/members/current-app"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "userId": "00000000-0000-4000-8000-000000000901",
+            "name": "Test User",
+            "email": "user@example.com",
+            "accessLevel": "EDIT",
+            "accessSource": "DERIVED"
+          }
+        ]
+      },
+      "expectedResult": [
+        {
+          "userId": "00000000-0000-4000-8000-000000000901",
+          "name": "Test User",
+          "email": "user@example.com",
+          "accessLevel": "EDIT",
+          "accessSource": "DERIVED"
+        }
+      ]
+    }
+  ],
+  "responseValidationCases": [
+    {
+      "id": "auth.me.invalid-cluster-type",
+      "kind": "invalid-payload",
+      "operation": "auth.me",
+      "input": {},
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "user-1",
+          "tenant": {
+            "id": "tenant-1",
+            "shortId": "AAAAAAAAAAAAAAAAAAAAEA",
+            "legacyId": null,
+            "slug": "tenant-one",
+            "clusterType": "UNKNOWN",
+            "name": "Tenant One",
+            "description": null,
+            "hexColor": null,
+            "icon": null,
+            "infraStatus": "ACTIVE",
+            "active": true
+          },
+          "name": "Test User",
+          "email": "user@example.com",
+          "imageUrl": null,
+          "planId": "plan-1",
+          "onboardingCompleted": false,
+          "language": "pt-BR"
+        }
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Current user response tenant has an invalid clusterType field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "queries.execute.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "parameters": {}
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": {
+          "parameters": {}
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "rows": [
+            {
+              "total": 2
+            }
+          ],
+          "durationMs": "7"
+        }
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Query execution response has an invalid durationMs field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "sql.execute-dml.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "sql.executeDml",
+      "input": {
+        "statements": [
+          {
+            "sql": "INSERT INTO reports (id, name) VALUES (:id, :name)",
+            "parameters": {
+              "id": 1,
+              "name": "Monthly"
+            }
+          }
+        ]
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/sql/dml/execute",
+        "body": {
+          "statements": [
+            {
+              "sql": "INSERT INTO reports (id, name) VALUES (:id, :name)",
+              "parameters": {
+                "id": 1,
+                "name": "Monthly"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "results": [
+            {
+              "index": 0,
+              "affectedRows": 1,
+              "durationMs": "8"
+            }
+          ],
+          "executedCount": 1,
+          "totalDurationMs": 9
+        }
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "DML batch response result 0 has an invalid durationMs field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "sql.list-tables.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "sql.listTables",
+      "input": {
+        "listTablesOptions": {
+          "scope": "APP",
+          "includeColumns": true
+        }
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "GET",
+        "path": "/api/v1/tables",
+        "params": {
+          "scope": "APP",
+          "includeColumns": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "schema": "app_schema",
+            "tables": [
+              {
+                "tableName": "reports",
+                "columns": [
+                  {
+                    "name": "id",
+                    "type": "INTEGER",
+                    "primaryKey": "true",
+                    "nullable": false,
+                    "defaultValue": null
+                  }
+                ],
+                "foreignKeys": []
+              }
+            ]
+          }
+        ]
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Schema tables response group 0 table 0 column 0 has an invalid primaryKey field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "functions-admin.bulk-create.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "functionsAdmin.bulkCreate",
+      "input": {
+        "functions": [
+          {
+            "name": "sync orders",
+            "description": "Pushes orders downstream",
+            "runtime": "JAVASCRIPT",
+            "code": "export default async () => ({ ok: true })",
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "secrets": ["ORDERS_TOKEN"]
+          }
+        ]
+      },
+      "request": {
+        "service": "functions",
+        "method": "POST",
+        "path": "/api/v1/functions/bulk",
+        "body": {
+          "functions": [
+            {
+              "name": "sync orders",
+              "description": "Pushes orders downstream",
+              "runtime": "JAVASCRIPT",
+              "code": "export default async () => ({ ok: true })",
+              "inputSchema": {
+                "type": "object"
+              },
+              "outputSchema": {
+                "type": "object"
+              },
+              "secrets": ["ORDERS_TOKEN"]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": [
+          {
+            "id": "00000000-0000-4000-8000-000000000601",
+            "tenantId": "00000000-0000-4000-8000-000000000011",
+            "appId": "00000000-0000-4000-8000-000000000012",
+            "legacyId": null,
+            "name": "sync orders",
+            "description": "Pushes orders downstream",
+            "runtime": "JAVASCRIPT",
+            "dataSourceId": null,
+            "visibility": 2,
+            "currentVersion": {
+              "id": "00000000-0000-4000-8000-000000000611",
+              "functionId": "00000000-0000-4000-8000-000000000601",
+              "status": "DRAFT",
+              "code": "export default async () => ({ ok: true })",
+              "inputSchema": {
+                "type": "object"
+              },
+              "outputSchema": {
+                "type": "object"
+              },
+              "secrets": ["ORDERS_TOKEN"],
+              "createdAt": "2026-08-18T12:00:00Z"
+            },
+            "createdAt": "2026-08-18T12:00:00Z",
+            "updatedAt": "2026-08-18T12:00:00Z"
+          }
+        ]
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 201,
+        "code": "INVALID_RESPONSE",
+        "message": "Function bulk create response item 0 has an invalid visibility field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "integration-admin.list.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "integrationAdmin.list",
+      "input": {
+        "listConfigsOptions": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "request": {
+        "service": "integration",
+        "method": "GET",
+        "path": "/api/v1/template-configs",
+        "params": {
+          "page": 0,
+          "size": 20,
+          "sort": "alias"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "content": [
+            {
+              "id": "00000000-0000-4000-8000-000000000701",
+              "appId": "00000000-0000-4000-8000-000000000012",
+              "legacyId": null,
+              "templateId": "00000000-0000-4000-8000-000000000801",
+              "alias": "crm-production",
+              "status": "connected",
+              "lastCheckedAt": 0
+            }
+          ],
+          "totalElements": 1
+        }
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "Template config page response item 0 has an invalid lastCheckedAt field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "members.list.invalid-payload",
+      "kind": "invalid-payload",
+      "operation": "members.list",
+      "input": {},
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/members/current-app"
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "userId": "00000000-0000-4000-8000-000000000901",
+            "name": "Test User",
+            "email": "user@example.com",
+            "accessLevel": "EDIT",
+            "accessSource": 5
+          }
+        ]
+      },
+      "expectedError": {
+        "type": "response",
+        "status": 200,
+        "code": "INVALID_RESPONSE",
+        "message": "App members response member 0 has an invalid accessSource field",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    }
+  ],
+  "httpAdapterCases": [
+    {
+      "id": "queries.execute.data-source-not-found",
+      "kind": "api-4xx",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000103",
+        "parameters": {}
+      },
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "source": {
+        "service": "mitra-data-manager",
+        "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
+        "handler": "GlobalExceptionHandler.handleNotFound",
+        "useCase": "ExecuteSqlUseCase.execute",
+        "integrationTest": "CustomQueryControllerTest.Execute.execute_withDataSourceAssociatedToAnotherApp_shouldFailClosed"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000103/execute",
+        "body": {
+          "parameters": {}
+        }
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error_code": "NOT_FOUND",
+          "message": "The Custom Query data source was not found for the authenticated app"
+        }
+      },
+      "expectedError": {
+        "type": "api",
+        "status": 404,
+        "code": "NOT_FOUND",
+        "message": "The Custom Query data source was not found for the authenticated app",
+        "details": null,
+        "requestId": null,
+        "retryable": false
+      }
+    },
+    {
+      "id": "queries.execute.database-unavailable",
+      "kind": "api-5xx",
+      "operation": "queries.execute",
+      "input": {
+        "id": "00000000-0000-4000-8000-000000000101",
+        "parameters": {}
+      },
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "source": {
+        "service": "mitra-data-manager",
+        "commit": "50dac9514c6b79b0da34280955e4afeaa24f9f84",
+        "handler": "GlobalExceptionHandler.handleDatabaseException"
+      },
+      "request": {
+        "service": "dataManager",
+        "method": "POST",
+        "path": "/api/v1/custom-queries/00000000-0000-4000-8000-000000000101/execute",
+        "body": {
+          "parameters": {}
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error_code": "DATABASE_ERROR",
+          "message": "Failed to connect to database. Please check your connection settings.",
+          "details": "Connection refused"
+        }
+      },
+      "expectedError": {
+        "type": "api",
+        "status": 503,
+        "code": "DATABASE_ERROR",
+        "message": "Failed to connect to database. Please check your connection settings.",
+        "details": "Connection refused",
+        "requestId": null,
+        "retryable": true
+      }
+    },
+    {
+      "id": "auth.me.timeout",
+      "kind": "timeout",
+      "operation": "auth.me",
+      "input": {},
+      "verification": {
+        "owner": "concrete-sdk-http-adapter",
+        "coreExecutable": false,
+        "requiredConsumers": ["@mitralab.io/functions-sdk", "mitra-functions-sdk"]
+      },
+      "request": {
+        "service": "auth",
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "failure": {
+        "type": "timeout"
+      },
+      "expectedError": {
+        "type": "network",
+        "status": 0,
+        "code": "REQUEST_TIMEOUT",
+        "message": "Mitra request timed out",
+        "details": null,
+        "requestId": null,
+        "retryable": true
+      }
+    }
+  ]
+}

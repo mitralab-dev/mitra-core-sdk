@@ -1,6 +1,6 @@
 {
   "name": "@mitralab.io/sdk-core",
-  "version": "0.2.0-beta.0",
+  "version": "0.2.0-beta.1",
   "description": "Environment-neutral contracts and modules shared by Mitra JavaScript SDKs",
   "type": "module",
   "sideEffects": false,
