@@ -7,13 +7,13 @@ const esm = await import("../dist/index.js")
 
 const expectedRuntimeExports = {
   AgentTaskTurnError: "function",
-  SdkCoreConfigurationError: "function",
-  SdkCoreResponseError: "function",
+  API_KEY_EXCHANGE_PATH: "string",
+  appAccessTokenPath: "function",
   createAgentConnectionsModule: "function",
   createAgentCredentialsModule: "function",
-  createAgentTasksModule: "function",
-  createAgentTaskSessionManager: "function",
   createAgentsModule: "function",
+  createAgentTaskSessionManager: "function",
+  createAgentTasksModule: "function",
   createAppsModule: "function",
   createAuthModule: "function",
   createContextModule: "function",
@@ -44,7 +44,14 @@ const expectedRuntimeExports = {
   expectObjectArray: "function",
   expectPage: "function",
   expectStringArray: "function",
+  isWorkspaceSession: "function",
+  readTokenAppId: "function",
+  readTokenExpiry: "function",
+  resolveApiKeyToken: "function",
+  SdkCoreConfigurationError: "function",
+  SdkCoreResponseError: "function",
   toAgentTimelineItem: "function",
+  tokenAuthorizesApp: "function",
   withAgentTaskSessions: "function",
 }
 

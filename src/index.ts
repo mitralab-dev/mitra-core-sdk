@@ -33,6 +33,16 @@ export {
   defaultSdkCoreErrorFactory,
 } from "./errors"
 export type { SdkCoreErrorFactory } from "./errors"
+export {
+  API_KEY_EXCHANGE_PATH,
+  appAccessTokenPath,
+  isWorkspaceSession,
+  readTokenAppId,
+  readTokenExpiry,
+  resolveApiKeyToken,
+  tokenAuthorizesApp,
+} from "./apiKeySession"
+export type { ApiKeyExchangeCaller } from "./apiKeySession"
 export { createAgentConnectionsModule } from "./modules/agentConnections"
 export type { AgentConnectionsModule } from "./modules/agentConnections"
 export { createAgentCredentialsModule } from "./modules/agentCredentials"
