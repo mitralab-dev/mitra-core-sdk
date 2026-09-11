@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.2.0-beta.3` carries the same parity surface as `0.2.0-beta.1`. It exists so a
+  consumer that pins the package version can pin a corpus with the same number:
+  the api key exchange contract added in that release is authentication, not a new
+  SDK operation, so no parity case changed.
+
 - `0.1.0` covers the runtime surface: current user, entities, custom queries,
   Function execution, and integration proxying.
 - `0.2.0-beta.0` adds the builder tier: SQL batches and table listing, Data Source
