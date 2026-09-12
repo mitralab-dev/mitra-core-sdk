@@ -649,7 +649,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("raw", event)
     const payload = asObject(event.payload)
     switch (event.type) {
+      // A box transmite o texto do agente ao vivo em `textDelta` e grava o mesmo texto no log
+      // como `textChunk`. Uma repeticao depois de uma queda devolve chunks, entao trata-los como
+      // texto e o que faz a resposta recuperada aparecer; sem isso ela chega e morre aqui.
       case "textDelta":
+      case "textChunk":
         this.consumeDelta(payload, "text")
         break
       case "thinking":

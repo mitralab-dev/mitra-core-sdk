@@ -182,6 +182,25 @@ describe("Agent task session", () => {
     expect(workspace).toEqual([{ payload: { path: "result.md" }, timestamp: 1 }])
   })
 
+  it("renders the text a replay brings back, which the box logs as textChunk", async () => {
+    // Ao vivo a box manda `textDelta`; no log ela guarda o mesmo texto como `textChunk`, e e
+    // isso que uma repeticao apos queda devolve. Sem este caso a resposta recuperada some.
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const deltas: string[] = []
+    session.on("delta", (e) => deltas.push(e.delta))
+    const result = session.sendAndWait("replay", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(event("textChunk", { text: "resposta inteira" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ content: "resposta inteira", reason: "endTurn" })
+    expect(deltas).toEqual(["resposta inteira"])
+    expect(session.content).toBe("resposta inteira")
+  })
+
   it("rejects sendAndWait with a typed producer error and continues with the FIFO queue", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
