@@ -24,6 +24,9 @@ publishes.
 
 ## Versions
 
+- `0.2.0` is the stable release of the `0.2.0-beta.3` surface. Same parity cases; the
+  version exists so consumers pinning the stable package can pin a corpus with the same number.
+
 - `0.2.0-beta.3` carries the same parity surface as `0.2.0-beta.1`. It exists so a
   consumer that pins the package version can pin a corpus with the same number:
   the api key exchange contract added in that release is authentication, not a new
