@@ -670,6 +670,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "stepFinish": {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
+        const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined
+        // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
+        // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
+        // cancel on the safety timeout with the turn already gone on the server.
+        if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
+          this.finishTurn("interrupted")
+          break
+        }
         if (reason === "stop" || reason === "endTurn") {
           if (this.recoveryUsed) {
             this.recoveredTerminalReason = reason

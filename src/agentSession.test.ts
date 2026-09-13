@@ -364,6 +364,33 @@ describe("Agent task session", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("settles a cancellation the box acknowledged with an interrupted terminal", async () => {
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    vi.useFakeTimers()
+    try {
+      await session.cancel()
+      expect(session.status).toBe("cancelled")
+      source.emit(
+        event("stepFinish", {
+          reason: "interrupted",
+          lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+        }),
+      )
+      await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+      expect(session.status).toBe("idle")
+      // The safety timer was cleared by the acknowledgement: nothing fires later.
+      const errors: unknown[] = []
+      session.on("error", (payload) => errors.push(payload))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(errors).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
