@@ -409,14 +409,24 @@ describe("Agent task session", () => {
     const starts: unknown[] = []
     session.on("turnStart", (payload) => starts.push(payload))
 
-    source.emit(event("textDelta", { text: "late text of the stopped turn", kind: "text", lifecycle: { activityId: "a-1", turnId: "t-1" } }))
+    source.emit(
+      event("textDelta", {
+        text: "late text of the stopped turn",
+        kind: "text",
+        lifecycle: { activityId: "a-1", turnId: "t-1" },
+      }),
+    )
 
     expect(session.status).toBe("idle")
     expect(starts).toEqual([])
     const second = session.sendAndWait("second")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
-    source.emit(event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }))
-    source.emit(event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
     await expect(second).resolves.toMatchObject({ content: "next" })
   })
 
