@@ -373,15 +373,6 @@ describe("integrationAdmin inline definitions", () => {
       ...inlineSummary(),
       fieldsSchemaInline: [{ ...storedFieldsSchemaInline()[0]!, placeholder: 1 }],
     },
-    // The response side stays strict: an omitted placeholder is not the same as a null one.
-    {
-      ...inlineSummary(),
-      fieldsSchemaInline: [withoutField(storedFieldsSchemaInline()[0]!, "placeholder")],
-    },
-    {
-      ...inlineSummary(),
-      fieldsSchemaInline: [withoutField(storedFieldsSchemaInline()[0]!, "default")],
-    },
     { ...inlineSummary(), fieldsSchemaInline: {} },
     {
       ...inlineSummary(),
@@ -395,5 +386,27 @@ describe("integrationAdmin inline definitions", () => {
     )
 
     await expect(integrationAdmin.list()).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+
+  // The producer serializes FieldSchema with @JsonInclude(NON_NULL), so a null placeholder or
+  // default never reaches the wire as a key. Omitted and null have to mean the same thing here.
+  it.each(["placeholder", "default"])("accepts an inline field that omits %s", async (field) => {
+    const integrationAdmin = createIntegrationAdminModule(
+      new QueueTransport([
+        {
+          content: [
+            {
+              ...inlineSummary(),
+              fieldsSchemaInline: [withoutField(storedFieldsSchemaInline()[0]!, field)],
+            },
+          ],
+          totalElements: 1,
+        },
+      ]),
+    )
+
+    const page = await integrationAdmin.list()
+
+    expect(page.content).toHaveLength(1)
   })
 })

@@ -68,6 +68,11 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string"
 }
 
+/** For fields a producer omits or nulls interchangeably. */
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value)
+}
+
 function isNullableBoolean(value: unknown): value is boolean | null {
   return value === null || typeof value === "boolean"
 }
@@ -876,7 +881,7 @@ export function expectImportDefinition(
       }
     })
   }
-  if (typeof definition.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(definition.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof definition.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return definition as unknown as ImportDefinition
 }
@@ -942,7 +947,7 @@ export function expectAgentDefinition(
   if (!isStringArray(agent.functionIds)) invalidField(context, "functionIds", errors)
   if (typeof agent.autonomous !== "boolean") invalidField(context, "autonomous", errors)
   if (typeof agent.createdAt !== "string") invalidField(context, "createdAt", errors)
-  if (typeof agent.updatedAt !== "string") invalidField(context, "updatedAt", errors)
+  if (!isNullableString(agent.updatedAt)) invalidField(context, "updatedAt", errors)
   return agent as unknown as AgentDefinition
 }
 
@@ -978,7 +983,7 @@ export function expectWorkflowSummary(
   if (typeof workflow.tenantId !== "string") invalidField(context, "tenantId", errors)
   if (!isNullableString(workflow.appId)) invalidField(context, "appId", errors)
   if (typeof workflow.name !== "string") invalidField(context, "name", errors)
-  if (typeof workflow.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (!isNullableString(workflow.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof workflow.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return workflow as unknown as WorkflowSummary
 }
@@ -1105,8 +1110,8 @@ function expectIntegrationFieldsSchema(
       invalidField(fieldContext, "type", errors)
     }
     if (typeof field.required !== "boolean") invalidField(fieldContext, "required", errors)
-    if (!isNullableString(field.placeholder)) invalidField(fieldContext, "placeholder", errors)
-    if (!isNullableString(field.default)) invalidField(fieldContext, "default", errors)
+    if (!isOptionalString(field.placeholder)) invalidField(fieldContext, "placeholder", errors)
+    if (!isOptionalString(field.default)) invalidField(fieldContext, "default", errors)
   })
 }
 

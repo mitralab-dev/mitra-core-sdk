@@ -887,7 +887,7 @@ export interface ImportDefinition {
     enabled: boolean
   }
   columnMappings: ImportColumnMapping[] | null
-  createdAt: string
+  createdAt: string | null
   updatedAt: string
 }
 
@@ -944,7 +944,7 @@ export interface AgentDefinition extends AgentInput {
   functionIds: string[]
   autonomous: boolean
   createdAt: string
-  updatedAt: string
+  updatedAt: string | null
 }
 
 export interface AgentUpdateItem {
@@ -970,7 +970,7 @@ export interface WorkflowDefinition extends WorkflowInput {
   id: string
   tenantId: string
   appId: string | null
-  createdAt: string
+  createdAt: string | null
   updatedAt: string
 }
 
@@ -1090,8 +1090,8 @@ export interface IntegrationFieldSchema {
   label: string
   type: "url" | "text" | "secret"
   required: boolean
-  placeholder: string | null
-  default: string | null
+  placeholder?: string | null
+  default?: string | null
 }
 
 /** Inline field authoring shape. The producer stores an omitted `placeholder` or `default` as null. */

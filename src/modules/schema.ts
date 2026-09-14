@@ -23,6 +23,12 @@ export interface SchemaModule {
   dropColumn(tableName: string, columnName: string): Promise<void>
 }
 
+// The Data Manager rejects a column that omits either flag with a bare 400, while the input
+// type documents both as optional with a false default. Fill them here so the type is true.
+function withColumnDefaults(column: ColumnInput): ColumnInput {
+  return { ...column, primaryKey: column.primaryKey ?? false, nullable: column.nullable ?? false }
+}
+
 export function createSchemaModule(
   transport: Transport,
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
@@ -45,7 +51,7 @@ export function createSchemaModule(
       expectEmpty(
         await transport.request<unknown>("/api/v1/tables", {
           method: "POST",
-          body: { tableName, columns },
+          body: { tableName, columns: columns.map(withColumnDefaults) },
         }),
         "Create table response",
         errors,
@@ -83,7 +89,7 @@ export function createSchemaModule(
       expectEmpty(
         await transport.request<unknown>(`${tablePath(tableName)}/columns`, {
           method: "POST",
-          body: column,
+          body: withColumnDefaults(column),
         }),
         "Add column response",
         errors,
