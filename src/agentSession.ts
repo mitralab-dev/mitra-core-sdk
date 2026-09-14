@@ -270,6 +270,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private createPromise: Promise<void> | null = null
   private dispatching = false
   private recoveryUsed = false
+  // Turns the server already ended. A box flushes the text it had buffered for a stopped turn
+  // after the interrupted terminal (dev, 2026-09-14); that text must not open a turn of its own.
+  private readonly finishedTurnIds: string[] = []
   private recoveryPromise: Promise<void> | null = null
   private recoveryGeneration = 0
   private recoveredTerminalReason: string | undefined
@@ -675,10 +678,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
         if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
+          this.rememberFinishedTurn(lifecycle)
           this.finishTurn("interrupted")
           break
         }
         if (reason === "stop" || reason === "endTurn") {
+          this.rememberFinishedTurn(lifecycle)
           if (this.recoveryUsed) {
             this.recoveredTerminalReason = reason
             if (!this.recoveryPromise) {
@@ -708,7 +713,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
+  private rememberFinishedTurn(lifecycle: Record<string, unknown> | undefined): void {
+    const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
+    if (!turnId) return
+    this.finishedTurnIds.push(turnId)
+    if (this.finishedTurnIds.length > 8) this.finishedTurnIds.shift()
+  }
+
   private consumeDelta(payload: Record<string, unknown> | null, kind: "text" | "thinking"): void {
+    const lifecycle = asObject(payload?.lifecycle)
+    const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
+    if (turnId && this.finishedTurnIds.includes(turnId)) return
     const text = typeof payload?.text === "string" ? payload.text : ""
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this.setStatus("streaming")

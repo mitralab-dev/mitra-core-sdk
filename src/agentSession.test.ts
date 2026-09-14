@@ -391,6 +391,35 @@ describe("Agent task session", () => {
     }
   })
 
+  it("ignores the text a box flushes after the cancel it acknowledged, so the next prompt goes out", async () => {
+    // Dev, 2026-09-14: the box answers the stop with the interrupted terminal and, about a second
+    // later, delivers the text it had buffered for that same turn as one textDelta. A delta on an
+    // idle session opened a turn nobody asked for, and the next prompt waited behind it forever.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    const starts: unknown[] = []
+    session.on("turnStart", (payload) => starts.push(payload))
+
+    source.emit(event("textDelta", { text: "late text of the stopped turn", kind: "text", lifecycle: { activityId: "a-1", turnId: "t-1" } }))
+
+    expect(session.status).toBe("idle")
+    expect(starts).toEqual([])
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }))
+    source.emit(event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }))
+    await expect(second).resolves.toMatchObject({ content: "next" })
+  })
+
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
