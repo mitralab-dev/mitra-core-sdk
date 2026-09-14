@@ -360,6 +360,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     try {
       await this.sendInput({ type: "interrupt" })
+      // The box can acknowledge the stop before this request returns; the turn is then already
+      // settled and there is nothing left to mark as cancelled or to wait for.
+      if (this._status !== "streaming") return
       this.setStatus("cancelled")
       this.emit("cancelled", {})
       if (this.cancelTimer) clearTimeout(this.cancelTimer)

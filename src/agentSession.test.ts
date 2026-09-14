@@ -468,6 +468,47 @@ describe("Agent task session", () => {
     await expect(second).resolves.toMatchObject({ content: "next" })
   })
 
+  it("does not mark a turn cancelled when the box ended it before the cancel request returned", async () => {
+    // Dev, 2026-09-14 04:58 UTC: the box acknowledged the stop in 300 ms, before the POST of the
+    // interrupt returned. The session then entered "cancelled" with no turn left, held the next
+    // prompt behind it, and fired the safety timeout ten seconds later as a spurious error.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    let releaseInterrupt: () => void = () => {}
+    tasks.sendInput.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseInterrupt = resolve
+        }),
+    )
+    const cancelling = session.cancel()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    releaseInterrupt()
+    await cancelling
+
+    expect(session.status).toBe("idle")
+    const errors: unknown[] = []
+    session.on("error", (payload) => errors.push(payload))
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    await expect(second).resolves.toMatchObject({ content: "next" })
+    expect(errors).toEqual([])
+  })
+
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
