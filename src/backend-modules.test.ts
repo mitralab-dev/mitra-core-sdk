@@ -570,6 +570,18 @@ describe("Data Manager authoring modules", () => {
     await schema.addColumn("Order items", { name: "name", type: "STRING" })
     await schema.dropColumn("Order items", "old/name")
     expect(schemaTransport.requests[7]?.path).toContain("columns/old%2Fname")
+    // The Data Manager requires both flags on every column; the input type documents them as
+    // optional with a false default, so the module has to be the one filling them in.
+    expect(schemaTransport.requests[0]?.options?.body).toEqual({
+      tableName: "Order items",
+      columns: [{ name: "id", type: "UUID", primaryKey: true, nullable: false }],
+    })
+    expect(schemaTransport.requests[6]?.options?.body).toEqual({
+      name: "name",
+      type: "STRING",
+      primaryKey: false,
+      nullable: false,
+    })
 
     const queryTransport = new QueueTransport([
       springPage([customQuerySummary]),
