@@ -724,6 +724,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const lifecycle = asObject(payload?.lifecycle)
     const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
     if (turnId && this.finishedTurnIds.includes(turnId)) return
+    // A lifecycle that names no turn on a session with no turn running is text the server
+    // flushed after settling a turn (the box does that after a stop). Frames with no lifecycle
+    // at all come from servers that never carry one, and those still open a turn as before.
+    const idle = this._status !== "streaming" && this._status !== "cancelled"
+    if (idle && lifecycle && !turnId) return
     const text = typeof payload?.text === "string" ? payload.text : ""
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this.setStatus("streaming")

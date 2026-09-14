@@ -430,6 +430,44 @@ describe("Agent task session", () => {
     await expect(second).resolves.toMatchObject({ content: "next" })
   })
 
+  it("ignores text that arrives with no turn left in its lifecycle on an idle session", async () => {
+    // Dev, 2026-09-14 01:49 UTC: the box settles the stopped turn, then flushes its buffered text
+    // as one textDelta whose lifecycle has activityId and turnId null. Nothing is running, so
+    // that text belongs to nobody and must not start a turn.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    const starts: unknown[] = []
+    session.on("turnStart", (payload) => starts.push(payload))
+
+    source.emit(
+      event("textDelta", {
+        text: "flushed after the stop",
+        lifecycle: { activityId: null, turnId: null, terminal: false, sessionIdle: false },
+      }),
+    )
+
+    expect(session.status).toBe("idle")
+    expect(starts).toEqual([])
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    await expect(second).resolves.toMatchObject({ content: "next" })
+  })
+
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
