@@ -1419,3 +1419,55 @@ describe("specific response validators", () => {
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })
+
+describe("producer responses the validators must accept", () => {
+  // Each shape below was captured from alpha on 2026-09-14. The producers null or omit these
+  // fields, and the SDK used to refuse the whole 200 because of them (#36).
+
+  it("accepts a PUT workflow response whose createdAt is null", async () => {
+    const transport = new QueueTransport([{ ...workflowDefinition, createdAt: null }])
+    const workflows = createWorkflowsModule(transport)
+
+    const result = await workflows.update("workflow-1", {
+      name: workflowDefinition.name,
+      definition: workflowDefinition.definition,
+    })
+
+    expect(result.createdAt).toBeNull()
+  })
+
+  it("accepts a PUT import response whose createdAt is null", async () => {
+    const transport = new QueueTransport([{ ...importDefinition, createdAt: null }])
+    const imports = createImportsModule(transport)
+
+    const result = await imports.update("import-1", {
+      name: "Import",
+      source: { type: "SQL" as const, query: "SELECT 1" },
+      target: { tableName: "users", mode: "APPEND" as const },
+    })
+
+    expect(result.createdAt).toBeNull()
+  })
+
+  it("accepts a bulk agent update whose items carry updatedAt null", async () => {
+    const transport = new QueueTransport([[{ ...agentDefinition, updatedAt: null }]])
+    const agents = createAgentsModule(transport, new QueueTransport())
+
+    const result = await agents.bulkUpdate([
+      { id: agentDefinition.id, update: { name: agentDefinition.name } },
+    ])
+
+    expect(result[0]?.updatedAt).toBeNull()
+  })
+
+  it("accepts a template whose fields omit placeholder and default", async () => {
+    const field = integrationTemplate.fieldsSchema[0]!
+    const bare = { key: field.key, label: field.label, type: field.type, required: field.required }
+    const transport = new QueueTransport([{ ...integrationTemplate, fieldsSchema: [bare] }])
+    const templates = createIntegrationTemplatesModule(transport)
+
+    const result = await templates.get(integrationTemplate.id)
+
+    expect(result.fieldsSchema[0]?.placeholder).toBeUndefined()
+  })
+})
