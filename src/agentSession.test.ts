@@ -182,6 +182,25 @@ describe("Agent task session", () => {
     expect(workspace).toEqual([{ payload: { path: "result.md" }, timestamp: 1 }])
   })
 
+  it("renders the text a replay brings back, which the box logs as textChunk", async () => {
+    // Ao vivo a box manda `textDelta`; no log ela guarda o mesmo texto como `textChunk`, e e
+    // isso que uma repeticao apos queda devolve. Sem este caso a resposta recuperada some.
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const deltas: string[] = []
+    session.on("delta", (e) => deltas.push(e.delta))
+    const result = session.sendAndWait("replay", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(event("textChunk", { text: "resposta inteira" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ content: "resposta inteira", reason: "endTurn" })
+    expect(deltas).toEqual(["resposta inteira"])
+    expect(session.content).toBe("resposta inteira")
+  })
+
   it("rejects sendAndWait with a typed producer error and continues with the FIFO queue", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
@@ -343,6 +362,151 @@ describe("Agent task session", () => {
     await rejection
     await expect(result).rejects.toThrow("Provider failed")
     expect(session.status).toBe("idle")
+  })
+
+  it("settles a cancellation the box acknowledged with an interrupted terminal", async () => {
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    vi.useFakeTimers()
+    try {
+      await session.cancel()
+      expect(session.status).toBe("cancelled")
+      source.emit(
+        event("stepFinish", {
+          reason: "interrupted",
+          lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+        }),
+      )
+      await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+      expect(session.status).toBe("idle")
+      // The safety timer was cleared by the acknowledgement: nothing fires later.
+      const errors: unknown[] = []
+      session.on("error", (payload) => errors.push(payload))
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(errors).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("ignores the text a box flushes after the cancel it acknowledged, so the next prompt goes out", async () => {
+    // Dev, 2026-09-14: the box answers the stop with the interrupted terminal and, about a second
+    // later, delivers the text it had buffered for that same turn as one textDelta. A delta on an
+    // idle session opened a turn nobody asked for, and the next prompt waited behind it forever.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    const starts: unknown[] = []
+    session.on("turnStart", (payload) => starts.push(payload))
+
+    source.emit(
+      event("textDelta", {
+        text: "late text of the stopped turn",
+        kind: "text",
+        lifecycle: { activityId: "a-1", turnId: "t-1" },
+      }),
+    )
+
+    expect(session.status).toBe("idle")
+    expect(starts).toEqual([])
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    await expect(second).resolves.toMatchObject({ content: "next" })
+  })
+
+  it("ignores text that arrives with no turn left in its lifecycle on an idle session", async () => {
+    // Dev, 2026-09-14 01:49 UTC: the box settles the stopped turn, then flushes its buffered text
+    // as one textDelta whose lifecycle has activityId and turnId null. Nothing is running, so
+    // that text belongs to nobody and must not start a turn.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    const starts: unknown[] = []
+    session.on("turnStart", (payload) => starts.push(payload))
+
+    source.emit(
+      event("textDelta", {
+        text: "flushed after the stop",
+        lifecycle: { activityId: null, turnId: null, terminal: false, sessionIdle: false },
+      }),
+    )
+
+    expect(session.status).toBe("idle")
+    expect(starts).toEqual([])
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    await expect(second).resolves.toMatchObject({ content: "next" })
+  })
+
+  it("does not mark a turn cancelled when the box ended it before the cancel request returned", async () => {
+    // Dev, 2026-09-14 04:58 UTC: the box acknowledged the stop in 300 ms, before the POST of the
+    // interrupt returned. The session then entered "cancelled" with no turn left, held the next
+    // prompt behind it, and fired the safety timeout ten seconds later as a spurious error.
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    let releaseInterrupt: () => void = () => {}
+    tasks.sendInput.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseInterrupt = resolve
+        }),
+    )
+    const cancelling = session.cancel()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+    releaseInterrupt()
+    await cancelling
+
+    expect(session.status).toBe("idle")
+    const errors: unknown[] = []
+    session.on("error", (payload) => errors.push(payload))
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    source.emit(
+      event("textDelta", { text: "next", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    source.emit(
+      event("stepFinish", { reason: "endTurn", lifecycle: { activityId: "a-2", turnId: "t-2" } }),
+    )
+    await expect(second).resolves.toMatchObject({ content: "next" })
+    expect(errors).toEqual([])
   })
 
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {

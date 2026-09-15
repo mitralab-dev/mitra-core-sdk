@@ -270,6 +270,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private createPromise: Promise<void> | null = null
   private dispatching = false
   private recoveryUsed = false
+  // Turns the server already ended. A box flushes the text it had buffered for a stopped turn
+  // after the interrupted terminal (dev, 2026-09-14); that text must not open a turn of its own.
+  private readonly finishedTurnIds: string[] = []
   private recoveryPromise: Promise<void> | null = null
   private recoveryGeneration = 0
   private recoveredTerminalReason: string | undefined
@@ -357,6 +360,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     try {
       await this.sendInput({ type: "interrupt" })
+      // The box can acknowledge the stop before this request returns; the turn is then already
+      // settled and there is nothing left to mark as cancelled or to wait for.
+      if (this._status !== "streaming") return
       this.setStatus("cancelled")
       this.emit("cancelled", {})
       if (this.cancelTimer) clearTimeout(this.cancelTimer)
@@ -649,7 +655,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("raw", event)
     const payload = asObject(event.payload)
     switch (event.type) {
+      // A box transmite o texto do agente ao vivo em `textDelta` e grava o mesmo texto no log
+      // como `textChunk`. Uma repeticao depois de uma queda devolve chunks, entao trata-los como
+      // texto e o que faz a resposta recuperada aparecer; sem isso ela chega e morre aqui.
       case "textDelta":
+      case "textChunk":
         this.consumeDelta(payload, "text")
         break
       case "thinking":
@@ -666,7 +676,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "stepFinish": {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
+        const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined
+        // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
+        // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
+        // cancel on the safety timeout with the turn already gone on the server.
+        if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
+          this.rememberFinishedTurn(lifecycle)
+          this.finishTurn("interrupted")
+          break
+        }
         if (reason === "stop" || reason === "endTurn") {
+          this.rememberFinishedTurn(lifecycle)
           if (this.recoveryUsed) {
             this.recoveredTerminalReason = reason
             if (!this.recoveryPromise) {
@@ -696,7 +716,22 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
+  private rememberFinishedTurn(lifecycle: Record<string, unknown> | undefined): void {
+    const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
+    if (!turnId) return
+    this.finishedTurnIds.push(turnId)
+    if (this.finishedTurnIds.length > 8) this.finishedTurnIds.shift()
+  }
+
   private consumeDelta(payload: Record<string, unknown> | null, kind: "text" | "thinking"): void {
+    const lifecycle = asObject(payload?.lifecycle)
+    const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
+    if (turnId && this.finishedTurnIds.includes(turnId)) return
+    // A lifecycle that names no turn on a session with no turn running is text the server
+    // flushed after settling a turn (the box does that after a stop). Frames with no lifecycle
+    // at all come from servers that never carry one, and those still open a turn as before.
+    const idle = this._status !== "streaming" && this._status !== "cancelled"
+    if (idle && lifecycle && !turnId) return
     const text = typeof payload?.text === "string" ? payload.text : ""
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this.setStatus("streaming")
