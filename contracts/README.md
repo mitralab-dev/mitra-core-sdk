@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.2` is the `0.2.0` parity surface republished with the agent session fixes of
+  0.2.1, which shipped without a corpus. Same parity cases; the version exists so a
+  consumer pinning the stable package can pin a corpus with the same number.
+
 - `0.2.0` is the stable release of the `0.2.0-beta.3` surface. Same parity cases; the
   version exists so consumers pinning the stable package can pin a corpus with the same number.
 
