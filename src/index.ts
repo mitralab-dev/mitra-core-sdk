@@ -127,6 +127,7 @@ export type {
   AgentTaskEvent,
   AgentTaskInput,
   AgentTaskListOptions,
+  AgentTaskRuntime,
   AgentUpdateItem,
   AppColor,
   AppContext,

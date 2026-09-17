@@ -182,6 +182,34 @@ describe("Agent task session", () => {
     expect(workspace).toEqual([{ payload: { path: "result.md" }, timestamp: 1 }])
   })
 
+  it("declares the runtime on task creation when the session asks for one", async () => {
+    const tasks = createTasks()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({
+      create: true,
+      agentType: "CLAUDE",
+      runtime: "T3",
+      transport: "http",
+    })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
+
+    expect(tasks.create.mock.calls[0]?.[0]).toStrictEqual({ agentType: "CLAUDE", runtime: "T3" })
+  })
+
+  it("leaves runtime out of the create body when the session does not set it", async () => {
+    // Core never picks a runtime: an absent key lets the Copilot server apply its default.
+    const { tasks, session } = createSession()
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
+
+    const body = tasks.create.mock.calls[0]?.[0]
+    expect(body).toStrictEqual({ agentType: "CLAUDE" })
+    expect(body).not.toHaveProperty("runtime")
+  })
+
   it("renders the text a replay brings back, which the box logs as textChunk", async () => {
     // Ao vivo a box manda `textDelta`; no log ela guarda o mesmo texto como `textChunk`, e e
     // isso que uma repeticao apos queda devolve. Sem este caso a resposta recuperada some.
