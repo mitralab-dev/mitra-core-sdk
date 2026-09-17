@@ -210,6 +210,54 @@ describe("Agent task session", () => {
     expect(body).not.toHaveProperty("runtime")
   })
 
+  it("still sends the prompt when the session is closed inside taskCreated", async () => {
+    // Generated apps close the creating session in their taskCreated handler and reopen by
+    // task id. The prompt reached the point where its task exists, so it must go out anyway.
+    const { tasks, source, session } = createSession()
+    session.on("taskCreated", () => session.close())
+
+    session.send("hi")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(session.status).toBe("closed")
+    expect(source.taskIds).toEqual([])
+  })
+
+  it("still sends the prompt when the session closes while the task is being created", async () => {
+    let resolveCreate: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      create: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveCreate = resolve))),
+    })
+    const { source, session } = createSession(tasks)
+
+    session.send("hi")
+    session.close()
+    resolveCreate(TASK)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(source.taskIds).toEqual([])
+  })
+
+  it("swallows a REST failure for a prompt sent after close without surfacing it", async () => {
+    const tasks = createTasks({
+      sendInput: vi.fn(async () => {
+        throw new Error("boom")
+      }),
+    })
+    const { session } = createSession(tasks)
+    const errors: unknown[] = []
+    session.on("error", (value) => errors.push(value))
+    session.on("taskCreated", () => session.close())
+
+    session.send("hi")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(errors).toEqual([])
+  })
+
   it("renders the text a replay brings back, which the box logs as textChunk", async () => {
     // Ao vivo a box manda `textDelta`; no log ela guarda o mesmo texto como `textChunk`, e e
     // isso que uma repeticao apos queda devolve. Sem este caso a resposta recuperada some.

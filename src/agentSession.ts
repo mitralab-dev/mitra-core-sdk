@@ -508,7 +508,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
     if (this.isClosed() || waiter?.settled) return
     await this.ensureTask()
-    if (this.isClosed() || waiter?.settled) return
+    const input: AgentTaskInput = {
+      type: "message",
+      content: prompt,
+      ...(options.agentType ? { agentType: options.agentType } : {}),
+      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    }
+    if (this.isClosed()) {
+      // A prompt whose task exists is never dropped by close; the task outlives the session.
+      // Apps close the creating session inside taskCreated and reopen by task id, so the
+      // input still goes out over REST. No channel, status, or event for a closed session,
+      // and a failure has no listener left to hear it.
+      await this.sendInput(input).catch(() => undefined)
+      return
+    }
+    if (waiter?.settled) return
     await this.ensureChannel()
     if (this.isClosed() || waiter?.settled) return
     await this.captureTurnBaseline()
@@ -519,12 +533,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    await this.sendInput({
-      type: "message",
-      content: prompt,
-      ...(options.agentType ? { agentType: options.agentType } : {}),
-      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    })
+    await this.sendInput(input)
   }
 
   private async ensureTask(): Promise<void> {
