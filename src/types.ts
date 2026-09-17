@@ -1123,6 +1123,9 @@ export interface IntegrationExecution {
 
 export type CopilotProvider = "ANTHROPIC" | "OPENAI" | (string & {})
 
+/** Execution runtime a chat is born on. Absent means the Copilot server default. */
+export type AgentTaskRuntime = "T3" | "RUNNER"
+
 export interface AgentTaskCreateInput {
   /** Optional title, at most 255 characters. */
   title?: string
@@ -1132,6 +1135,8 @@ export interface AgentTaskCreateInput {
   agentId?: string
   /** Optional reasoning setting supported by the selected model. */
   reasoningEffort?: string
+  /** Optional runtime. Core never defaults it; the concrete SDK decides what to send. */
+  runtime?: AgentTaskRuntime
   /** Owner for an on-behalf chat. Requires AGENT_WRITE in the current app. */
   userId?: string
   /**

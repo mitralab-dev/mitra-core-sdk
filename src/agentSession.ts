@@ -1,5 +1,11 @@
 import type { AgentTasksModule } from "./modules/agentTasks"
-import type { AgentMessage, AgentTask, AgentTaskEvent, AgentTaskInput } from "./types"
+import type {
+  AgentMessage,
+  AgentTask,
+  AgentTaskEvent,
+  AgentTaskInput,
+  AgentTaskRuntime,
+} from "./types"
 
 const AGENT_QUEUE_LIMIT = 10
 const CANCEL_SAFETY_MS = 10_000
@@ -33,6 +39,8 @@ export interface NewAgentTaskSessionOptions {
   agentId?: string
   reasoningEffort?: string
   userId?: string
+  /** Runtime the task is born on. Omitted means the Copilot server default. */
+  runtime?: AgentTaskRuntime
   /** Adapter preference. Server adapters support `http`; browser adapters may support all values. */
   transport?: AgentSessionTransport
 }
@@ -533,6 +541,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
           ? { reasoningEffort: createOptions.reasoningEffort }
           : {}),
         ...(createOptions.userId ? { userId: createOptions.userId } : {}),
+        ...(createOptions.runtime ? { runtime: createOptions.runtime } : {}),
       })
       this._task = task
       this._taskId = task.id
