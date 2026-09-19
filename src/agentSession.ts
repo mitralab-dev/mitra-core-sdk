@@ -1,5 +1,6 @@
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type {
+  AgentCredentialScope,
   AgentMessage,
   AgentTask,
   AgentTaskEvent,
@@ -41,6 +42,8 @@ export interface NewAgentTaskSessionOptions {
   userId?: string
   /** Runtime the task is born on. Omitted means the Copilot server default. */
   runtime?: AgentTaskRuntime
+  /** Credential scope the task resolves against. Omitted means the Copilot server default. */
+  scope?: AgentCredentialScope
   /** Adapter preference. Server adapters support `http`; browser adapters may support all values. */
   transport?: AgentSessionTransport
 }
@@ -551,6 +554,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
           : {}),
         ...(createOptions.userId ? { userId: createOptions.userId } : {}),
         ...(createOptions.runtime ? { runtime: createOptions.runtime } : {}),
+        ...(createOptions.scope ? { scope: createOptions.scope } : {}),
       })
       this._task = task
       this._taskId = task.id

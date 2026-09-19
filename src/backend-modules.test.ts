@@ -268,6 +268,7 @@ const agentTask = {
   title: "Task",
   agentType: "CODEX",
   reasoningEffort: null,
+  scope: null,
   archived: false,
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
@@ -852,6 +853,23 @@ describe("agent and workflow modules", () => {
     ])
   })
 
+  it("preserves the scope returned by create", async () => {
+    const scoped: AgentTask = { ...agentTask, scope: "ACCOUNT" }
+    const transport = new QueueTransport([scoped])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(tasks.create({ agentType: "CODEX", scope: "ACCOUNT" })).resolves.toEqual(scoped)
+    expect(transport.requests[0]?.options.body).toEqual({ agentType: "CODEX", scope: "ACCOUNT" })
+  })
+
+  it("accepts a task response without scope from an older Copilot", async () => {
+    const legacy: Partial<AgentTask> = { ...agentTask }
+    delete legacy.scope
+    const tasks = createAgentTasksModule(new QueueTransport([legacy]))
+
+    await expect(tasks.get("task-1")).resolves.toEqual(legacy)
+  })
+
   it("covers credentials, connections, and workflows", async () => {
     const credentialTransport = new QueueTransport([
       [],
@@ -872,6 +890,14 @@ describe("agent and workflow modules", () => {
     await credentials.exchangeOAuth("OPENAI", { code: "code", state: "state" })
     await credentials.startDeviceAuthorization("OPENAI")
     await credentials.pollDeviceAuthorization("OPENAI", "device/1")
+    expect(credentialTransport.requests[0]?.options).toStrictEqual({ method: "GET" })
+    expect(credentialTransport.requests[2]?.options).toStrictEqual({
+      method: "PUT",
+      body: { apiKey: "secret" },
+    })
+    expect(credentialTransport.requests.map(({ options }) => options.params?.scope)).toEqual(
+      Array(8).fill(undefined),
+    )
 
     const connectionTransport = new QueueTransport([
       [],
@@ -924,6 +950,40 @@ describe("agent and workflow modules", () => {
     await workflows.getExecution("workflow/1", "execution/1")
     await workflows.cancelExecution("workflow/1", "execution/1")
     expect(workflowTransport.requests[8]?.path).toContain("execution%2F1/cancel")
+  })
+})
+
+describe("credential scope", () => {
+  it("sends scope=ACCOUNT on every credential call that asks for it", async () => {
+    const transport = new QueueTransport([
+      [],
+      [],
+      undefined,
+      undefined,
+      oauthStart,
+      authentication,
+      deviceAuthorization,
+      authentication,
+    ])
+    const credentials = createAgentCredentialsModule(transport)
+    const scope = { scope: "ACCOUNT" as const }
+    await credentials.list(scope)
+    await credentials.listModels("agent-1", scope)
+    await credentials.saveApiKey("OPENAI", "secret", scope)
+    await credentials.remove("OPENAI", scope)
+    await credentials.startOAuth("OPENAI", scope)
+    await credentials.exchangeOAuth("OPENAI", { code: "code", state: "state" }, scope)
+    await credentials.startDeviceAuthorization("OPENAI", scope)
+    await credentials.pollDeviceAuthorization("OPENAI", "device/1", scope)
+
+    expect(transport.requests.map(({ options }) => options.params?.scope)).toEqual(
+      Array(8).fill("ACCOUNT"),
+    )
+    expect(transport.requests[1]?.options.params).toEqual({ agentId: "agent-1", scope: "ACCOUNT" })
+    expect(transport.requests[2]).toStrictEqual({
+      path: "/api/v1/credentials/OPENAI/api-key",
+      options: { method: "PUT", body: { apiKey: "secret" }, params: { scope: "ACCOUNT" } },
+    })
   })
 })
 

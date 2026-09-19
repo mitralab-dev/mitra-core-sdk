@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.5-beta.0` is the `0.2.4` parity surface republished with the credential scope on
+  credential calls and task creation. Same parity cases; the version exists so a
+  consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.4` is the `0.2.3` parity surface; a prompt in flight survives the session
   closing. Same parity cases; the version exists so a consumer pinning the package
   can pin a corpus with the same number.
