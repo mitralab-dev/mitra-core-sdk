@@ -46,7 +46,7 @@ export type { ApiKeyExchangeCaller } from "./apiKeySession"
 export { createAgentConnectionsModule } from "./modules/agentConnections"
 export type { AgentConnectionsModule } from "./modules/agentConnections"
 export { createAgentCredentialsModule } from "./modules/agentCredentials"
-export type { AgentCredentialsModule } from "./modules/agentCredentials"
+export type { AgentCredentialOptions, AgentCredentialsModule } from "./modules/agentCredentials"
 export { createAgentsModule } from "./modules/agents"
 export type { AgentsModule } from "./modules/agents"
 export { createAgentTasksModule } from "./modules/agentTasks"
@@ -118,6 +118,7 @@ export type {
   AgentBulkDeleteResult,
   AgentConnection,
   AgentConnectionCreateInput,
+  AgentCredentialScope,
   AgentDefinition,
   AgentInput,
   AgentMessage,

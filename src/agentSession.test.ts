@@ -21,6 +21,7 @@ const TASK: AgentTask = {
   title: "Task",
   agentType: "CLAUDE",
   reasoningEffort: null,
+  scope: null,
   archived: false,
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
@@ -182,24 +183,29 @@ describe("Agent task session", () => {
     expect(workspace).toEqual([{ payload: { path: "result.md" }, timestamp: 1 }])
   })
 
-  it("declares the runtime on task creation when the session asks for one", async () => {
+  it("declares the runtime and scope on task creation when the session asks for them", async () => {
     const tasks = createTasks()
     const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
     const session = manager.session({
       create: true,
       agentType: "CLAUDE",
       runtime: "T3",
+      scope: "ACCOUNT",
       transport: "http",
     })
 
     session.send("hello")
     await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
 
-    expect(tasks.create.mock.calls[0]?.[0]).toStrictEqual({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create.mock.calls[0]?.[0]).toStrictEqual({
+      agentType: "CLAUDE",
+      runtime: "T3",
+      scope: "ACCOUNT",
+    })
   })
 
-  it("leaves runtime out of the create body when the session does not set it", async () => {
-    // Core never picks a runtime: an absent key lets the Copilot server apply its default.
+  it("leaves runtime and scope out of the create body when the session does not set them", async () => {
+    // Core never picks a runtime or a scope: an absent key lets the Copilot server apply its default.
     const { tasks, session } = createSession()
 
     session.send("hello")
@@ -208,6 +214,7 @@ describe("Agent task session", () => {
     const body = tasks.create.mock.calls[0]?.[0]
     expect(body).toStrictEqual({ agentType: "CLAUDE" })
     expect(body).not.toHaveProperty("runtime")
+    expect(body).not.toHaveProperty("scope")
   })
 
   it("still sends the prompt when the session is closed inside taskCreated", async () => {
