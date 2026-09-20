@@ -1126,9 +1126,6 @@ export type CopilotProvider = "ANTHROPIC" | "OPENAI" | (string & {})
 /** Execution runtime a chat is born on. Absent means the Copilot server default. */
 export type AgentTaskRuntime = "T3" | "RUNNER"
 
-/** Credential scope a call or a chat resolves against. Absent means the Copilot server default. */
-export type AgentCredentialScope = "ACCOUNT"
-
 export interface AgentTaskCreateInput {
   /** Optional title, at most 255 characters. */
   title?: string
@@ -1140,8 +1137,6 @@ export interface AgentTaskCreateInput {
   reasoningEffort?: string
   /** Optional runtime. Core never defaults it; the concrete SDK decides what to send. */
   runtime?: AgentTaskRuntime
-  /** Optional credential scope. Core never defaults it; the concrete SDK decides what to send. */
-  scope?: AgentCredentialScope
   /** Owner for an on-behalf chat. Requires AGENT_WRITE in the current app. */
   userId?: string
   /**
@@ -1159,8 +1154,6 @@ export interface AgentTask {
   title: string | null
   agentType: string
   reasoningEffort: string | null
-  /** Absent on a Copilot that predates credential scopes; null on a task without one. */
-  scope?: AgentCredentialScope | null
   archived: boolean
   createdAt: string | null
   updatedAt: string

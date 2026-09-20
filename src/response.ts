@@ -1273,7 +1273,6 @@ export function expectAgentTask(
   for (const field of ["appId", "agentId", "userId", "title", "reasoningEffort"] as const) {
     if (!isNullableString(task[field])) invalidField(context, field, errors)
   }
-  if ("scope" in task && !isNullableString(task.scope)) invalidField(context, "scope", errors)
   if (typeof task.agentType !== "string") invalidField(context, "agentType", errors)
   if (typeof task.archived !== "boolean") invalidField(context, "archived", errors)
   if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
