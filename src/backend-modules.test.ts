@@ -24,6 +24,8 @@ import {
   createWorkflowsModule,
 } from "./index"
 import type {
+  AgentConnection,
+  AgentModel,
   AgentTask,
   CustomQueryDefinition,
   CustomQuerySummary,
@@ -984,6 +986,154 @@ describe("credential scope", () => {
       path: "/api/v1/credentials/OPENAI/api-key",
       options: { method: "PUT", body: { apiKey: "secret" }, params: { scope: "ACCOUNT" } },
     })
+  })
+})
+
+describe("custom providers", () => {
+  const customProvider = {
+    id: "provider-1",
+    name: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    maskedApiKey: "gsk_****abcd",
+    models: ["llama-3.3-70b"],
+  }
+  const withCustomProvider: AgentConnection = {
+    ...connection,
+    customProviders: [customProvider],
+  }
+  const customModel: AgentModel = {
+    model: "custom/provider-1/llama-3.3-70b",
+    name: "Groq llama-3.3-70b",
+    provider: "CUSTOM",
+    agentType: "CUSTOM_AI",
+    reasoningOptions: [],
+    providerName: "Groq",
+  }
+
+  it("creates a custom provider on the connection and reads it back", async () => {
+    const transport = new QueueTransport([withCustomProvider])
+    const connections = createAgentConnectionsModule(transport)
+    const input = {
+      name: "Groq",
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "gsk_secret",
+      models: ["llama-3.3-70b"],
+    }
+
+    await expect(connections.createCustomProvider("connection/1", input)).resolves.toEqual(
+      withCustomProvider,
+    )
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/connections/connection%2F1/custom-providers",
+      options: { method: "POST", body: input },
+    })
+  })
+
+  it("deletes a custom provider by its encoded id", async () => {
+    const transport = new QueueTransport([undefined])
+    const connections = createAgentConnectionsModule(transport)
+
+    await expect(
+      connections.deleteCustomProvider("connection/1", "provider/1"),
+    ).resolves.toBeUndefined()
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/connections/connection%2F1/custom-providers/provider%2F1",
+      options: { method: "DELETE" },
+    })
+  })
+
+  it("rejects a custom provider without usable models before any request", async () => {
+    const transport = new QueueTransport()
+    const connections = createAgentConnectionsModule(transport)
+    const base = { name: "Groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: "gsk" }
+
+    await expect(
+      connections.createCustomProvider("connection-1", { ...base, models: [] }),
+    ).rejects.toThrow("models must contain between 1 and 32 items")
+    await expect(
+      connections.createCustomProvider("connection-1", {
+        ...base,
+        models: Array.from({ length: 33 }, (_, index) => `model-${index}`),
+      }),
+    ).rejects.toBeInstanceOf(SdkCoreConfigurationError)
+    await expect(
+      connections.createCustomProvider("connection-1", { ...base, models: ["ok", " "] }),
+    ).rejects.toThrow("models must contain only non-blank strings")
+    expect(transport.requests).toEqual([])
+  })
+
+  it("accepts a connection without customProviders from an older Copilot", async () => {
+    const connections = createAgentConnectionsModule(new QueueTransport([connection]))
+
+    await expect(connections.get("connection-1")).resolves.toEqual(connection)
+  })
+
+  it("rejects a custom provider entry missing its models", async () => {
+    const incomplete = { ...customProvider, models: undefined }
+    const connections = createAgentConnectionsModule(
+      new QueueTransport([{ ...connection, customProviders: [incomplete] }]),
+    )
+
+    await expect(connections.get("connection-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+
+  it("preserves providerName on models and tolerates its absence", async () => {
+    const builtIn: AgentModel = {
+      model: "gpt-5",
+      name: "GPT-5",
+      provider: "OPENAI",
+      agentType: "CODEX",
+      reasoningOptions: ["low", "high"],
+    }
+    const credentials = createAgentCredentialsModule(
+      new QueueTransport([[customModel, { ...builtIn, providerName: null }, builtIn]]),
+    )
+
+    await expect(credentials.listModels()).resolves.toEqual([
+      customModel,
+      { ...builtIn, providerName: null },
+      builtIn,
+    ])
+  })
+
+  it("rejects a model whose providerName is not a string", async () => {
+    const credentials = createAgentCredentialsModule(
+      new QueueTransport([[{ ...customModel, providerName: 1 }]]),
+    )
+
+    await expect(credentials.listModels()).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+
+  it("sends model on task creation and message input and preserves it on the task", async () => {
+    const created: AgentTask = { ...agentTask, agentType: "CUSTOM_AI", model: customModel.model }
+    const transport = new QueueTransport([created, undefined])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(
+      tasks.create({ agentType: "CUSTOM_AI", model: customModel.model }),
+    ).resolves.toEqual(created)
+    await tasks.sendInput("task-1", {
+      type: "message",
+      content: "hello",
+      agentType: "CUSTOM_AI",
+      model: customModel.model,
+    })
+    expect(transport.requests[0]?.options.body).toEqual({
+      agentType: "CUSTOM_AI",
+      model: customModel.model,
+    })
+    expect(transport.requests[1]?.options.body).toEqual({
+      type: "message",
+      content: "hello",
+      agentType: "CUSTOM_AI",
+      model: customModel.model,
+    })
+  })
+
+  it("rejects a task whose model is not a string", async () => {
+    const tasks = createAgentTasksModule(new QueueTransport([{ ...agentTask, model: 1 }]))
+
+    await expect(tasks.get("task-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })
 

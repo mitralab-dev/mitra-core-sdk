@@ -118,6 +118,8 @@ export type {
   AgentBulkDeleteResult,
   AgentConnection,
   AgentConnectionCreateInput,
+  AgentConnectionCustomProvider,
+  AgentConnectionCustomProviderInput,
   AgentCredentialScope,
   AgentDefinition,
   AgentInput,

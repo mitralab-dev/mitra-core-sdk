@@ -1,5 +1,5 @@
 import { requireBatchSize } from "../batch"
-import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
+import { configurationError, defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
 import {
   expectAgentConnection,
@@ -13,6 +13,7 @@ import type { Transport } from "../transport"
 import type {
   AgentConnection,
   AgentConnectionCreateInput,
+  AgentConnectionCustomProviderInput,
   AuthenticationResult,
   CopilotProvider,
   DeviceAuthorization,
@@ -21,6 +22,7 @@ import type {
 } from "../types"
 
 const MAX_CONNECTIONS = 100
+const MAX_CUSTOM_PROVIDER_MODELS = 32
 
 export interface AgentConnectionsModule {
   /** Lists app connections with safe per-provider status and no credentials. */
@@ -50,6 +52,22 @@ export interface AgentConnectionsModule {
     provider: CopilotProvider,
     deviceAuthId: string,
   ): Promise<AuthenticationResult>
+  /**
+   * Adds an OpenAI-compatible provider under a name the person chooses. Its models join the
+   * agent catalog as `custom/<providerId>/<model>`; the API key is write-only.
+   */
+  createCustomProvider(
+    id: string,
+    input: AgentConnectionCustomProviderInput,
+  ): Promise<AgentConnection>
+  deleteCustomProvider(id: string, providerId: string): Promise<void>
+}
+
+function requireCustomProviderModels(models: string[], errors: SdkCoreErrorFactory): void {
+  requireBatchSize(models, "models", MAX_CUSTOM_PROVIDER_MODELS, errors)
+  if (models.some((model) => typeof model !== "string" || !model.trim())) {
+    configurationError("models must contain only non-blank strings", errors)
+  }
 }
 
 export function createAgentConnectionsModule(
@@ -161,6 +179,27 @@ export function createAgentConnectionsModule(
           { method: "POST" },
         ),
         "Connection device authorization poll response",
+        errors,
+      )
+    },
+    async createCustomProvider(id, input) {
+      requireCustomProviderModels(input.models, errors)
+      return expectAgentConnection(
+        await transport.request<unknown>(`${path(id)}/custom-providers`, {
+          method: "POST",
+          body: input,
+        }),
+        "Create connection custom provider response",
+        errors,
+      )
+    },
+    async deleteCustomProvider(id, providerId) {
+      expectEmpty(
+        await transport.request<unknown>(
+          `${path(id)}/custom-providers/${encodePathSegment(providerId, "custom provider id", errors)}`,
+          { method: "DELETE" },
+        ),
+        "Delete connection custom provider response",
         errors,
       )
     },
