@@ -1042,7 +1042,7 @@ describe("custom providers", () => {
     })
   })
 
-  it("rejects a custom provider without usable models before any request", async () => {
+  it("rejects a custom provider whose model list is empty or oversized before any request", async () => {
     const transport = new QueueTransport()
     const connections = createAgentConnectionsModule(transport)
     const base = { name: "Groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: "gsk" }
@@ -1056,9 +1056,6 @@ describe("custom providers", () => {
         models: Array.from({ length: 33 }, (_, index) => `model-${index}`),
       }),
     ).rejects.toBeInstanceOf(SdkCoreConfigurationError)
-    await expect(
-      connections.createCustomProvider("connection-1", { ...base, models: ["ok", " "] }),
-    ).rejects.toThrow("models must contain only non-blank strings")
     expect(transport.requests).toEqual([])
   })
 

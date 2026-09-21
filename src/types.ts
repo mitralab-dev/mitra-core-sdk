@@ -1187,7 +1187,7 @@ export type AgentTaskInput =
       content: string
       agentType?: string
       reasoningEffort?: string
-      /** Catalog model id. Copilot requires it when `agentType` is CUSTOM_AI. */
+      /** Catalog model id. */
       model?: string
     }
   | { type: "interrupt" }

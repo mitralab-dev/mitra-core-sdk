@@ -1,5 +1,5 @@
 import { requireBatchSize } from "../batch"
-import { configurationError, defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
+import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
 import {
   expectAgentConnection,
@@ -61,13 +61,6 @@ export interface AgentConnectionsModule {
     input: AgentConnectionCustomProviderInput,
   ): Promise<AgentConnection>
   deleteCustomProvider(id: string, providerId: string): Promise<void>
-}
-
-function requireCustomProviderModels(models: string[], errors: SdkCoreErrorFactory): void {
-  requireBatchSize(models, "models", MAX_CUSTOM_PROVIDER_MODELS, errors)
-  if (models.some((model) => typeof model !== "string" || !model.trim())) {
-    configurationError("models must contain only non-blank strings", errors)
-  }
 }
 
 export function createAgentConnectionsModule(
@@ -183,7 +176,7 @@ export function createAgentConnectionsModule(
       )
     },
     async createCustomProvider(id, input) {
-      requireCustomProviderModels(input.models, errors)
+      requireBatchSize(input.models, "models", MAX_CUSTOM_PROVIDER_MODELS, errors)
       return expectAgentConnection(
         await transport.request<unknown>(`${path(id)}/custom-providers`, {
           method: "POST",

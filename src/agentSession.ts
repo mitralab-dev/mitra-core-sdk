@@ -39,7 +39,7 @@ export interface NewAgentTaskSessionOptions {
   title?: string
   agentId?: string
   reasoningEffort?: string
-  /** Catalog model id. Copilot requires it when `agentType` is CUSTOM_AI. */
+  /** Catalog model id. */
   model?: string
   userId?: string
   /** Runtime the task is born on. Omitted means the Copilot server default. */
@@ -60,7 +60,7 @@ export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgent
 export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
-  /** Catalog model id. Copilot requires it when `agentType` is CUSTOM_AI. */
+  /** Catalog model id. */
   model?: string
 }
 
