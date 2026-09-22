@@ -1,6 +1,8 @@
+import { requireBatchSize } from "../batch"
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
 import {
+  expectAgentConnectionCustomProvider,
   expectAgentModel,
   expectAuthenticationResult,
   expectCredentialStatus,
@@ -11,6 +13,8 @@ import {
 } from "../response"
 import type { Transport } from "../transport"
 import type {
+  AgentConnectionCustomProvider,
+  AgentConnectionCustomProviderInput,
   AgentCredentialScope,
   AgentModel,
   AuthenticationResult,
@@ -25,6 +29,8 @@ export interface AgentCredentialOptions {
   /** Credential scope the call resolves against. Omitted means the Copilot server default. */
   scope?: AgentCredentialScope
 }
+
+const MAX_CUSTOM_PROVIDER_MODELS = 32
 
 export interface AgentCredentialsModule {
   /** Lists safe credential status. Raw credentials never leave Copilot. */
@@ -58,6 +64,19 @@ export interface AgentCredentialsModule {
     deviceAuthId: string,
     options?: AgentCredentialOptions,
   ): Promise<AuthenticationResult>
+  /** Lists the person's OpenAI-compatible providers. The API key is returned masked. */
+  listCustomProviders(options?: AgentCredentialOptions): Promise<AgentConnectionCustomProvider[]>
+  /**
+   * Adds an OpenAI-compatible provider under a name the person chooses and returns the person's
+   * list after creation. Its models join the catalog as `custom/<providerId>/<model>`; the API
+   * key is write-only. Copilot requires scope ACCOUNT on an app token.
+   */
+  createCustomProvider(
+    input: AgentConnectionCustomProviderInput,
+    options?: AgentCredentialOptions,
+  ): Promise<AgentConnectionCustomProvider[]>
+  /** Permanently removes one of the person's custom providers. */
+  deleteCustomProvider(id: string, options?: AgentCredentialOptions): Promise<void>
 }
 
 export function createAgentCredentialsModule(
@@ -153,6 +172,40 @@ export function createAgentCredentialsModule(
           { method: "POST", ...scopeParams(options) },
         ),
         "Device authorization poll response",
+        errors,
+      )
+    },
+    async listCustomProviders(options) {
+      return expectObjectArray<AgentConnectionCustomProvider>(
+        await transport.request<unknown>("/api/v1/credentials/custom-providers", {
+          method: "GET",
+          ...scopeParams(options),
+        }),
+        "Custom provider list response",
+        errors,
+        expectAgentConnectionCustomProvider,
+      )
+    },
+    async createCustomProvider(input, options) {
+      requireBatchSize(input.models, "models", MAX_CUSTOM_PROVIDER_MODELS, errors)
+      return expectObjectArray<AgentConnectionCustomProvider>(
+        await transport.request<unknown>("/api/v1/credentials/custom-providers", {
+          method: "POST",
+          body: input,
+          ...scopeParams(options),
+        }),
+        "Create custom provider response",
+        errors,
+        expectAgentConnectionCustomProvider,
+      )
+    },
+    async deleteCustomProvider(id, options) {
+      expectEmpty(
+        await transport.request<unknown>(
+          `/api/v1/credentials/custom-providers/${encodePathSegment(id, "custom provider id", errors)}`,
+          { method: "DELETE", ...scopeParams(options) },
+        ),
+        "Delete custom provider response",
         errors,
       )
     },

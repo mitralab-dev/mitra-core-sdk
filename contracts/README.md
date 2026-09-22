@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.7-beta.0` is the `0.2.6-beta.0` parity surface republished with the person's custom
+  providers through credentials, with the credential scope. Same parity cases; the version
+  exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.6-beta.0` is the `0.2.5-beta.0` parity surface republished with custom providers on
   app connections and the model on task creation and messages. Same parity cases; the
   version exists so a consumer pinning the package can pin a corpus with the same number.

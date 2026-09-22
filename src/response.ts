@@ -1373,7 +1373,7 @@ function expectProviderCredentialStatus(
   return status as unknown as ProviderCredentialStatus
 }
 
-function expectAgentConnectionCustomProvider(
+export function expectAgentConnectionCustomProvider(
   value: unknown,
   context: string,
   errors: SdkCoreErrorFactory,

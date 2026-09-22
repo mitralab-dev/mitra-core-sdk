@@ -1269,7 +1269,10 @@ export interface ProviderCredentialStatus {
 }
 
 export interface AgentConnectionCustomProviderInput {
-  /** Name the person chooses for the provider, unique within the connection. */
+  /**
+   * Name the person chooses for the provider, unique within the connection, or within the
+   * person's account on the credentials surface.
+   */
   name: string
   /** OpenAI-compatible endpoint, http or https without a query string. */
   baseUrl: string

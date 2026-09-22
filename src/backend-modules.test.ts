@@ -1134,6 +1134,111 @@ describe("custom providers", () => {
   })
 })
 
+describe("the person's custom providers", () => {
+  const customProvider = {
+    id: "provider-1",
+    name: "Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    maskedApiKey: "gsk_****abcd",
+    models: ["llama-3.3-70b"],
+  }
+  const scope = { scope: "ACCOUNT" as const }
+
+  it("lists the person's custom providers with the credential scope", async () => {
+    const transport = new QueueTransport([[customProvider]])
+    const credentials = createAgentCredentialsModule(transport)
+
+    await expect(credentials.listCustomProviders(scope)).resolves.toEqual([customProvider])
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/credentials/custom-providers",
+      options: { method: "GET", params: { scope: "ACCOUNT" } },
+    })
+  })
+
+  it("creates a custom provider and returns the person's list after creation", async () => {
+    const transport = new QueueTransport([[customProvider]])
+    const credentials = createAgentCredentialsModule(transport)
+    const input = {
+      name: "Groq",
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey: "gsk_secret",
+      models: ["llama-3.3-70b"],
+    }
+
+    await expect(credentials.createCustomProvider(input, scope)).resolves.toEqual([customProvider])
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/credentials/custom-providers",
+      options: { method: "POST", body: input, params: { scope: "ACCOUNT" } },
+    })
+  })
+
+  it("sends no scope on a session token", async () => {
+    const transport = new QueueTransport([[], undefined])
+    const credentials = createAgentCredentialsModule(transport)
+
+    await credentials.listCustomProviders()
+    await credentials.deleteCustomProvider("provider-1")
+    expect(transport.requests.map(({ options }) => options.params)).toEqual([undefined, undefined])
+  })
+
+  it("deletes a custom provider by its encoded id", async () => {
+    const transport = new QueueTransport([undefined])
+    const credentials = createAgentCredentialsModule(transport)
+
+    await expect(credentials.deleteCustomProvider("provider/1", scope)).resolves.toBeUndefined()
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/credentials/custom-providers/provider%2F1",
+      options: { method: "DELETE", params: { scope: "ACCOUNT" } },
+    })
+  })
+
+  it("rejects a custom provider whose model list is empty or oversized before any request", async () => {
+    const transport = new QueueTransport()
+    const credentials = createAgentCredentialsModule(transport)
+    const base = { name: "Groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: "gsk" }
+
+    await expect(credentials.createCustomProvider({ ...base, models: [] })).rejects.toThrow(
+      "models must contain between 1 and 32 items",
+    )
+    await expect(
+      credentials.createCustomProvider({
+        ...base,
+        models: Array.from({ length: 33 }, (_, index) => `model-${index}`),
+      }),
+    ).rejects.toBeInstanceOf(SdkCoreConfigurationError)
+    expect(transport.requests).toEqual([])
+  })
+
+  it("rejects a list entry missing its masked key or models", async () => {
+    await expect(
+      createAgentCredentialsModule(
+        new QueueTransport([[{ ...customProvider, maskedApiKey: undefined }]]),
+      ).listCustomProviders(),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+    await expect(
+      createAgentCredentialsModule(
+        new QueueTransport([[{ ...customProvider, models: "llama-3.3-70b" }]]),
+      ).createCustomProvider({
+        name: "Groq",
+        baseUrl: "https://api.groq.com/openai/v1",
+        apiKey: "gsk",
+        models: ["llama-3.3-70b"],
+      }),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+
+  it("rejects a create response that is not an array", async () => {
+    await expect(
+      createAgentCredentialsModule(new QueueTransport([customProvider])).createCustomProvider({
+        name: "Groq",
+        baseUrl: "https://api.groq.com/openai/v1",
+        apiKey: "gsk",
+        models: ["llama-3.3-70b"],
+      }),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+})
+
 describe("integration authoring and Messenger", () => {
   it("covers resource and template CRUD", async () => {
     const resourceTransport = new QueueTransport([
