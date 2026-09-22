@@ -1100,38 +1100,6 @@ describe("custom providers", () => {
 
     await expect(credentials.listModels()).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
-
-  it("sends model on task creation and message input and preserves it on the task", async () => {
-    const created: AgentTask = { ...agentTask, agentType: "CUSTOM_AI", model: customModel.model }
-    const transport = new QueueTransport([created, undefined])
-    const tasks = createAgentTasksModule(transport)
-
-    await expect(
-      tasks.create({ agentType: "CUSTOM_AI", model: customModel.model }),
-    ).resolves.toEqual(created)
-    await tasks.sendInput("task-1", {
-      type: "message",
-      content: "hello",
-      agentType: "CUSTOM_AI",
-      model: customModel.model,
-    })
-    expect(transport.requests[0]?.options.body).toEqual({
-      agentType: "CUSTOM_AI",
-      model: customModel.model,
-    })
-    expect(transport.requests[1]?.options.body).toEqual({
-      type: "message",
-      content: "hello",
-      agentType: "CUSTOM_AI",
-      model: customModel.model,
-    })
-  })
-
-  it("rejects a task whose model is not a string", async () => {
-    const tasks = createAgentTasksModule(new QueueTransport([{ ...agentTask, model: 1 }]))
-
-    await expect(tasks.get("task-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
-  })
 })
 
 describe("the person's custom providers", () => {

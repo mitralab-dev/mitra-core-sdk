@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.8-beta.0` is the `0.2.7-beta.0` parity surface republished without the model field on
+  task creation and messages: the agent type carries the custom provider selection. Same parity
+  cases; the version exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.7-beta.0` is the `0.2.6-beta.0` parity surface republished with the person's custom
   providers through credentials, with the credential scope. Same parity cases; the version
   exists so a consumer pinning the package can pin a corpus with the same number.

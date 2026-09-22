@@ -39,8 +39,6 @@ export interface NewAgentTaskSessionOptions {
   title?: string
   agentId?: string
   reasoningEffort?: string
-  /** Catalog model id. */
-  model?: string
   userId?: string
   /** Runtime the task is born on. Omitted means the Copilot server default. */
   runtime?: AgentTaskRuntime
@@ -60,8 +58,6 @@ export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgent
 export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
-  /** Catalog model id. */
-  model?: string
 }
 
 export interface AgentSendAndWaitOptions extends AgentSendOptions {
@@ -340,7 +336,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       createdAt: item.createdAt,
       ...(item.agentType ? { agentType: item.agentType } : {}),
       ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}),
-      ...(item.model ? { model: item.model } : {}),
     }))
   }
 
@@ -362,7 +357,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const sendOptions: AgentSendOptions = {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-      ...(options.model ? { model: options.model } : {}),
     }
     if (this.isBusy()) {
       const queueId = this.enqueue(prompt, sendOptions, waiter)
@@ -522,7 +516,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       content: prompt,
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-      ...(options.model ? { model: options.model } : {}),
     }
     if (this.isClosed()) {
       // A prompt whose task exists is never dropped by close; the task outlives the session.
@@ -559,7 +552,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         ...(createOptions.reasoningEffort
           ? { reasoningEffort: createOptions.reasoningEffort }
           : {}),
-        ...(createOptions.model ? { model: createOptions.model } : {}),
         ...(createOptions.userId ? { userId: createOptions.userId } : {}),
         ...(createOptions.runtime ? { runtime: createOptions.runtime } : {}),
         ...(createOptions.scope ? { scope: createOptions.scope } : {}),
@@ -867,7 +859,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       {
         ...(next.agentType ? { agentType: next.agentType } : {}),
         ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
-        ...(next.model ? { model: next.model } : {}),
       },
       next.waiter,
     )
