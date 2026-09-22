@@ -145,7 +145,6 @@ describe("Agent task session", () => {
     const resultPromise = session.sendAndWait("Analyze", {
       agentType: "CODEX",
       reasoningEffort: "high",
-      model: "custom/provider-1/llama",
       timeoutMs: 1_000,
     })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
@@ -158,7 +157,6 @@ describe("Agent task session", () => {
       content: "Analyze",
       agentType: "CODEX",
       reasoningEffort: "high",
-      model: "custom/provider-1/llama",
     })
 
     source.emit(event("textDelta", { text: "Hello " }))
@@ -185,13 +183,12 @@ describe("Agent task session", () => {
     expect(workspace).toEqual([{ payload: { path: "result.md" }, timestamp: 1 }])
   })
 
-  it("declares runtime, scope, and model on task creation when the session asks for them", async () => {
+  it("declares the runtime and scope on task creation when the session asks for them", async () => {
     const tasks = createTasks()
     const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
     const session = manager.session({
       create: true,
-      agentType: "CUSTOM_AI",
-      model: "custom/provider-1/llama",
+      agentType: "CLAUDE",
       runtime: "T3",
       scope: "ACCOUNT",
       transport: "http",
@@ -201,15 +198,14 @@ describe("Agent task session", () => {
     await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
 
     expect(tasks.create.mock.calls[0]?.[0]).toStrictEqual({
-      agentType: "CUSTOM_AI",
-      model: "custom/provider-1/llama",
+      agentType: "CLAUDE",
       runtime: "T3",
       scope: "ACCOUNT",
     })
   })
 
-  it("leaves runtime, scope, and model out of the create body when the session does not set them", async () => {
-    // Core never picks a runtime, a scope, or a model: an absent key lets the Copilot server apply its default.
+  it("leaves runtime and scope out of the create body when the session does not set them", async () => {
+    // Core never picks a runtime or a scope: an absent key lets the Copilot server apply its default.
     const { tasks, session } = createSession()
 
     session.send("hello")
@@ -219,28 +215,6 @@ describe("Agent task session", () => {
     expect(body).toStrictEqual({ agentType: "CLAUDE" })
     expect(body).not.toHaveProperty("runtime")
     expect(body).not.toHaveProperty("scope")
-    expect(body).not.toHaveProperty("model")
-  })
-
-  it("keeps the model of a queued prompt until it is dispatched", async () => {
-    const { session, source, tasks } = createSession()
-    session.send("first")
-    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
-    session.send("second", { agentType: "CUSTOM_AI", model: "custom/provider-1/llama" })
-    expect(session.queue[0]).toMatchObject({
-      text: "second",
-      agentType: "CUSTOM_AI",
-      model: "custom/provider-1/llama",
-    })
-
-    source.emit(event("stepFinish", { reason: "stop" }))
-    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
-    expect(tasks.sendInput).toHaveBeenLastCalledWith("task-1", {
-      type: "message",
-      content: "second",
-      agentType: "CUSTOM_AI",
-      model: "custom/provider-1/llama",
-    })
   })
 
   it("still sends the prompt when the session is closed inside taskCreated", async () => {

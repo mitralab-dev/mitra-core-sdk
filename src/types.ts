@@ -1138,8 +1138,6 @@ export interface AgentTaskCreateInput {
   agentId?: string
   /** Optional reasoning setting supported by the selected model. */
   reasoningEffort?: string
-  /** Catalog model id, for example `custom/<providerId>/<model>`. Copilot requires it for CUSTOM_AI. */
-  model?: string
   /** Optional runtime. Core never defaults it; the concrete SDK decides what to send. */
   runtime?: AgentTaskRuntime
   /** Optional credential scope. Core never defaults it; the concrete SDK decides what to send. */
@@ -1163,8 +1161,6 @@ export interface AgentTask {
   reasoningEffort: string | null
   /** Absent on a Copilot that predates credential scopes; null on a task without one. */
   scope?: AgentCredentialScope | null
-  /** Absent on a Copilot that predates custom providers; null on a task without an explicit model. */
-  model?: string | null
   archived: boolean
   createdAt: string | null
   updatedAt: string
@@ -1182,14 +1178,7 @@ export interface AgentTaskListOptions extends PageOptions {
 }
 
 export type AgentTaskInput =
-  | {
-      type: "message"
-      content: string
-      agentType?: string
-      reasoningEffort?: string
-      /** Catalog model id. */
-      model?: string
-    }
+  | { type: "message"; content: string; agentType?: string; reasoningEffort?: string }
   | { type: "interrupt" }
   | { type: "approval_response"; approved: boolean }
 
