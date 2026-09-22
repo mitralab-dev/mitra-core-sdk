@@ -2,6 +2,7 @@ import { defaultSdkCoreErrorFactory, invalidResponse, type SdkCoreErrorFactory }
 import type {
   AgentBulkDeleteResult,
   AgentConnection,
+  AgentConnectionCustomProvider,
   AgentDefinition,
   AgentMessage,
   AgentModel,
@@ -1274,6 +1275,7 @@ export function expectAgentTask(
     if (!isNullableString(task[field])) invalidField(context, field, errors)
   }
   if ("scope" in task && !isNullableString(task.scope)) invalidField(context, "scope", errors)
+  if ("model" in task && !isNullableString(task.model)) invalidField(context, "model", errors)
   if (typeof task.agentType !== "string") invalidField(context, "agentType", errors)
   if (typeof task.archived !== "boolean") invalidField(context, "archived", errors)
   if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
@@ -1303,6 +1305,9 @@ export function expectAgentModel(
     if (typeof model[field] !== "string") invalidField(context, field, errors)
   }
   if (!isStringArray(model.reasoningOptions)) invalidField(context, "reasoningOptions", errors)
+  if ("providerName" in model && !isNullableString(model.providerName)) {
+    invalidField(context, "providerName", errors)
+  }
   return model as unknown as AgentModel
 }
 
@@ -1368,6 +1373,19 @@ function expectProviderCredentialStatus(
   return status as unknown as ProviderCredentialStatus
 }
 
+function expectAgentConnectionCustomProvider(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory,
+): AgentConnectionCustomProvider {
+  const provider = expectObject<JsonObject>(value, context, errors)
+  for (const field of ["id", "name", "baseUrl", "maskedApiKey"] as const) {
+    if (typeof provider[field] !== "string") invalidField(context, field, errors)
+  }
+  if (!isStringArray(provider.models)) invalidField(context, "models", errors)
+  return provider as unknown as AgentConnectionCustomProvider
+}
+
 export function expectAgentConnection(
   value: unknown,
   context: string,
@@ -1384,6 +1402,14 @@ export function expectAgentConnection(
     errors,
     expectProviderCredentialStatus,
   )
+  if ("customProviders" in connection) {
+    expectObjectArray(
+      connection.customProviders,
+      `${context} customProviders`,
+      errors,
+      expectAgentConnectionCustomProvider,
+    )
+  }
   return connection as unknown as AgentConnection
 }
 
