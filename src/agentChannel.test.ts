@@ -52,7 +52,13 @@ class FakeWebSocket {
   onerror: ((event: unknown) => void) | null = null
   onclose: ((event: { code: number }) => void) | null = null
 
-  constructor(readonly url: string) {
+  readonly constructorArgs: unknown[]
+
+  constructor(
+    readonly url: string,
+    ...rest: unknown[]
+  ) {
+    this.constructorArgs = [url, ...rest]
     FakeWebSocket.instances.push(this)
     queueMicrotask(() => {
       if (this.readyState !== 0 || FakeWebSocket.handshake === "hang") return
@@ -448,6 +454,39 @@ describe("Agent direct channel", () => {
 
     expect(tasks.channel).not.toHaveBeenCalled()
     expect(fallback.observers).toHaveLength(1)
+  })
+
+  it("lets the Copilot refuse the box for an existing chat, without an error for the app", async () => {
+    const refused = Object.assign(new Error("The chat does not run on the T3 box"), {
+      status: 409,
+      code: "RUNTIME_NOT_T3",
+    })
+    const tasks = createTasks(async () => {
+      throw refused
+    })
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const raw: AgentTaskEvent[] = []
+    const errors: unknown[] = []
+    session.on("raw", (event) => raw.push(event))
+    session.on("error", (error) => errors.push(error))
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.channel).toHaveBeenCalledWith("task-1")
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "The chat does not run on the T3 box" },
+    })
+    expect(fallback.observers).toHaveLength(1)
+    expect(errors).toEqual([])
+    expect(session.status).not.toBe("error")
   })
 
   it("takes the box for an existing chat of a business agent", async () => {
@@ -1004,6 +1043,123 @@ describe("Agent direct channel over HTTP", () => {
 
     expect(box.posts[1]?.body).toEqual({ type: "interrupt" })
     expect(tasks.sendInput).not.toHaveBeenCalled()
+    session.close()
+  })
+})
+
+describe("Agent direct channel lifecycle", () => {
+  const OTHER_BOX_URL = "wss://49999-box2.e2b.app/api/mitra/chat/ws?grant=other"
+
+  it("forgets the replay cursor when the Copilot points the chat to another box", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 3 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 10 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    const otherBox = FakeWebSocket.last()
+    expect(otherBox.url).toBe(OTHER_BOX_URL)
+    expect(otherBox.sent).toEqual([])
+
+    otherBox.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 10 }])
+    session.close()
+  })
+
+  it("stops the redial when the session closes in the middle of the backoff", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session, raw } = open(tasks)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(raw.map((event) => event.type)).toContain("channelReconnecting")
+
+    session.close()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(tasks.channel).toHaveBeenCalledOnce()
+  })
+
+  it("does not redial after the box confirmed a cancel", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session, raw } = open(tasks)
+
+    session.send("long task")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    await session.cancel()
+    expect(socket.sent.at(-1)).toEqual({ type: "interrupt" })
+    socket.receive(
+      "stepFinish",
+      { reason: "interrupted", lifecycle: { turnId: "turn-1", interruptTerminal: true } },
+      2,
+    )
+    expect(session.status).toBe("idle")
+
+    socket.drop(1000)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(raw.some((event) => event.type === "channelReconnecting")).toBe(false)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(tasks.channel).toHaveBeenCalledOnce()
+    session.close()
+  })
+
+  it("never hands the SDK credentials to the box socket", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+
+    const socket = FakeWebSocket.last()
+    expect(socket.constructorArgs).toEqual([BOX_URL])
+    expect(socket.url).not.toMatch(/token|authorization|bearer/i)
+    expect(JSON.stringify(socket.sent)).not.toMatch(/authorization|bearer/i)
+  })
+
+  it("never sends an Authorization header to the box HTTP routes, renewals included", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsStatuses.push(401)
+    box.answers.push({ status: 401 })
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 0 })
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    await session.cancel()
+
+    const calls = vi.mocked(box.fetch).mock.calls
+    expect(calls.length).toBeGreaterThanOrEqual(5)
+    for (const [url, init] of calls) {
+      const headers = Object.keys(init.headers ?? {}).map((name) => name.toLowerCase())
+      expect(headers).not.toContain("authorization")
+      expect(url).not.toMatch(/token=|authorization|bearer/i)
+    }
     session.close()
   })
 })
