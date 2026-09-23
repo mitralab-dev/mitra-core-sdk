@@ -40,6 +40,7 @@ const EMPTY_PAGE: Page<never> = {
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = []
+  static handshake: "open" | "hang" | "refuse" = "open"
   readyState = 0
   readonly sent: unknown[] = []
   onopen: ((event: unknown) => void) | null = null
@@ -50,7 +51,13 @@ class FakeWebSocket {
   constructor(readonly url: string) {
     FakeWebSocket.instances.push(this)
     queueMicrotask(() => {
-      if (this.readyState !== 0) return
+      if (this.readyState !== 0 || FakeWebSocket.handshake === "hang") return
+      if (FakeWebSocket.handshake === "refuse") {
+        this.readyState = 3
+        this.onerror?.({})
+        this.onclose?.({ code: 1006 })
+        return
+      }
       this.readyState = 1
       this.onopen?.({})
     })
@@ -149,6 +156,7 @@ function open(
 
 afterEach(() => {
   FakeWebSocket.instances = []
+  FakeWebSocket.handshake = "open"
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -335,6 +343,43 @@ describe("Agent direct channel", () => {
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
 
+  it("falls back to the Copilot, visibly, when the box socket never opens", async () => {
+    vi.useFakeTimers()
+    FakeWebSocket.handshake = "hang"
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks)
+
+    session.send("behind a proxy")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "Timed out connecting to the Agent WebSocket." },
+    })
+    expect(fallback.observers).toHaveLength(1)
+    expect(session.status).not.toBe("error")
+  })
+
+  it("falls back to the Copilot, visibly, when the box refuses the handshake", async () => {
+    FakeWebSocket.handshake = "refuse"
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks)
+    const errors: unknown[] = []
+    session.on("error", (error) => errors.push(error))
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "Failed to connect to the Agent WebSocket." },
+    })
+    expect(fallback.observers).toHaveLength(1)
+    expect(errors).toEqual([])
+  })
+
   it("declines a websocket session when no WebSocket can be had", async () => {
     vi.stubGlobal("WebSocket", undefined)
     const tasks = createTasks(offer())
@@ -494,6 +539,27 @@ describe("Agent direct channel over HTTP", () => {
     })
     expect(fallback.transports).toEqual(["http"])
     expect(box.posts).toHaveLength(0)
+  })
+
+  it("falls back to the Copilot, visibly, when the box event stream has no network answer", async () => {
+    const box = new FakeBoxHttp()
+    const fetch = vi.fn<AgentFetch>(async (url, init) => {
+      if (init.method !== "POST") throw new TypeError("fetch failed")
+      return box.fetch(url, init)
+    })
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks, { fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "fetch failed" },
+    })
+    expect(fallback.transports).toEqual(["http"])
+    expect(box.posts).toHaveLength(0)
+    expect(session.status).not.toBe("error")
   })
 
   it("finds the admission in the replay when the POST and the stream were lost", async () => {

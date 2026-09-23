@@ -100,7 +100,9 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   `*.e2b-<env>.mitralab.ai`), on either transport.
 - **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
   `/channel`), the body has no `wsUrl`, the host is outside the rule, a `websocket` session has
-  no WebSocket, or the box answers 404 on its HTTP routes (a template older than them), the
+  no WebSocket, the box cannot be reached (a handshake that times out or is refused, a proxy
+  blocking its host, a network error on the HTTP stream), or the box answers 404 on its HTTP
+  routes (a template older than them), the
   session stays on the event source and REST inputs and first emits a raw `channelDeclined`
   event with `reason` `unavailable`, `body`, `host`, `websocket`, or `http_unsupported`.
 - **Runtimes without WebSocket.** Core uses `directChannel.WebSocket` when given, otherwise

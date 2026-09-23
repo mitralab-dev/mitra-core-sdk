@@ -383,9 +383,15 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     try {
       return await this.openDirect(taskId, mode, answer, observer, signal)
     } catch (error) {
-      if (!(error instanceof HttpUnsupportedError)) throw error
+      // A box that cannot be reached (a proxy blocking its host, a handshake refused, a network
+      // that never answers) is a channel this client cannot follow, not a broken chat: the
+      // conversation goes on through the Copilot, as the browser SDK always did.
+      if (signal?.aborted) throw error
       observer.onEvent(
-        channelEvent("channelDeclined", { reason: "http_unsupported", error: error.message }),
+        channelEvent("channelDeclined", {
+          reason: error instanceof HttpUnsupportedError ? "http_unsupported" : "unavailable",
+          error: errorMessage(error),
+        }),
       )
       return this.fallback.open(taskId, observer, signal, transport)
     }
