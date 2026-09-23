@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  AgentDirectChannel,
   boxRoute,
   isChannelHostAllowed,
   type AgentFetch,
@@ -280,6 +281,46 @@ describe("Agent direct channel", () => {
     })
     expect(tasks.channel.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(raw.some((event) => event.type === "channelConnected")).toBe(false)
+    session.close()
+  })
+
+  it("fails a waiting message out loud when another open supersedes the socket", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    const errors: unknown[] = []
+    session.on("accepted", accepted)
+    session.on("error", (error) => errors.push(error))
+
+    const result = session.sendAndWait("fire and leave")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().drop(4409)
+
+    await expect(result).rejects.toThrow("Agent WebSocket closed (4409).")
+    expect(accepted).not.toHaveBeenCalled()
+    expect(errors).toContainEqual({
+      error: "Failed to send Agent prompt: Agent WebSocket closed (4409).",
+    })
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
+  it("fails a waiting message when the redial gives up", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue(null)
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("fire and leave")
+    const settled = expect(result).rejects.toThrow("no longer offers the box channel")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    await settled
+    expect(tasks.sendInput).not.toHaveBeenCalled()
     session.close()
   })
 
@@ -626,6 +667,26 @@ describe("Agent direct channel over HTTP", () => {
     box.push("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
     session.close()
+  })
+
+  it("rejects the message waiting on a POST in flight when the channel closes", async () => {
+    const box = new FakeBoxHttp()
+    box.answer = () => new Promise(() => undefined)
+    const tasks = createTasks(offer())
+    const observer = { onEvent: vi.fn(), onDisconnect: vi.fn() }
+    const channel = new AgentDirectChannel(tasks, new FallbackSource(), {
+      apiUrl: API_URL,
+      fetch: box.fetch,
+    })
+    const connection = await channel.open("task-1", observer, undefined, "http")
+
+    const admitted = channel.send("task-1", { type: "message", content: "hello" })
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    connection.close()
+
+    await expect(admitted).rejects.toThrow("closed before the box confirmed the turn")
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(channel.send("task-1", { type: "message", content: "again" })).toBeNull()
   })
 
   it("posts an interrupt to the box", async () => {

@@ -421,6 +421,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * and reaches the Copilot's log whether or not this process is still around, so a Serverless
    * Function may return. An `error` frame is a refusal the session already reports from the
    * stream, and resolves false; a refusal in the HTTP answer rejects with `AgentTaskTurnError`.
+   * A channel lost for good, or closed, before the box answered rejects with that cause.
    *
    * A message whose wire drops before the box answers is not sent again over REST: the box may
    * have admitted the turn, and a second copy would start it twice. The redial replays the box
@@ -431,7 +432,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const link = this.links.get(taskId)
     if (!link?.wire) return null
     if (input.type !== "message") return link.wire.interrupt(input)
-    link.admission?.settle(false)
+    link.admission?.fail(new Error("A newer message replaced the one waiting for the box."))
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -547,7 +548,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       link.wire = null
       if (abort.signal.aborted) return
       if (!link.inTurn || code === SUPERSEDED_CLOSE_CODE) {
-        link.admission?.settle(false)
+        link.admission?.fail(error)
         observer.onDisconnect(error)
         return
       }
@@ -561,9 +562,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           cursor = next.lastSequence
           return undefined
         },
-      }).then((wire) => {
-        if (wire) link.wire = wire
-        else link.admission?.settle(false)
+      }).then((outcome) => {
+        // A message still waiting when the channel is gone for good fails out loud: the caller
+        // that fires and leaves must not take a lost message for a sent one.
+        if (outcome instanceof Error) link.admission?.fail(outcome)
+        else if (outcome) link.wire = outcome
       })
     }
 
@@ -580,7 +583,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         abort.abort()
         link.wire?.close()
         link.wire = null
-        link.admission?.settle(false)
+        link.admission?.fail(
+          new Error("The Agent session closed before the box confirmed the turn."),
+        )
         if (this.links.get(taskId) === link) this.links.delete(taskId)
       },
     }
@@ -607,7 +612,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     signal: AbortSignal,
     observer: AgentTaskEventObserver,
     handlers: ReopenHandlers,
-  ): Promise<Wire | null> {
+  ): Promise<Wire | Error | null> {
     let lastError = cause
     for (const [index, delayMs] of RECONNECT_DELAYS_MS.entries()) {
       const attempt = index + 1
@@ -630,19 +635,19 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         return outcome.wire
       }
       if (outcome.kind === "refused") {
-        observer.onDisconnect(
-          new Error(`The Copilot no longer offers the box channel (after: ${cause.message})`),
+        const refused = new Error(
+          `The Copilot no longer offers the box channel (after: ${cause.message})`,
         )
-        return null
+        observer.onDisconnect(refused)
+        return refused
       }
       lastError = outcome.error
     }
-    observer.onDisconnect(
-      new Error(
-        `Agent box channel could not be reopened after ${RECONNECT_DELAYS_MS.length} attempts: ${lastError.message}`,
-      ),
+    const exhausted = new Error(
+      `Agent box channel could not be reopened after ${RECONNECT_DELAYS_MS.length} attempts: ${lastError.message}`,
     )
-    return null
+    observer.onDisconnect(exhausted)
+    return exhausted
   }
 
   // One attempt to get the box back: the channel request, then the dial. A failure is returned
