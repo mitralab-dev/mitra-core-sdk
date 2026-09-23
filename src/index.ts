@@ -27,6 +27,13 @@ export type {
   ExistingAgentTaskSessionOptions,
   NewAgentTaskSessionOptions,
 } from "./agentSession"
+export type {
+  AgentDirectChannelOptions,
+  AgentFetch,
+  AgentFetchResponse,
+  AgentWebSocket,
+  AgentWebSocketConstructor,
+} from "./agentChannel"
 export {
   SdkCoreConfigurationError,
   SdkCoreResponseError,
@@ -126,6 +133,7 @@ export type {
   AgentMessage,
   AgentModel,
   AgentTask,
+  AgentTaskChannel,
   AgentTaskCreateInput,
   AgentTaskEvent,
   AgentTaskInput,

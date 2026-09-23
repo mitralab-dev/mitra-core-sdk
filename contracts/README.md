@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.9-beta.0` is the `0.2.8` parity surface republished with the direct box channel on the
+  Agent session and `agentTasks.channel`, which the parity cases do not cover. Same parity cases;
+  the version exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.8` is the stable release of the `0.2.8-beta.0` surface: the credential scope, the
   person's custom providers, and task creation without the model field. Same parity cases;
   the version exists so a consumer pinning the stable package can pin a corpus with the same number.

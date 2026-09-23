@@ -1,3 +1,5 @@
+import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
+import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type {
   AgentCredentialScope,
@@ -7,6 +9,8 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
 } from "./types"
+
+export { AgentTaskTurnError }
 
 const AGENT_QUEUE_LIMIT = 10
 const CANCEL_SAFETY_MS = 10_000
@@ -21,7 +25,10 @@ export interface AgentTaskEventConnection {
   close(): void
 }
 
-/** Streaming boundary implemented by concrete SDKs. Core never opens HTTP or WebSocket itself. */
+/**
+ * Streaming boundary implemented by concrete SDKs: the Copilot stream a chat falls back to when
+ * its box offers no direct channel. The direct channel itself is Core's.
+ */
 export interface AgentTaskEventSource {
   open(
     taskId: string,
@@ -44,7 +51,11 @@ export interface NewAgentTaskSessionOptions {
   runtime?: AgentTaskRuntime
   /** Credential scope the task resolves against. Omitted means the Copilot server default. */
   scope?: AgentCredentialScope
-  /** Adapter preference. Server adapters support `http`; browser adapters may support all values. */
+  /**
+   * How the session reaches the box the Copilot offers: `websocket` on its socket, `http` on its
+   * HTTP routes, `auto` on the socket when available and HTTP otherwise. Without an offer the
+   * session falls back to the event source.
+   */
   transport?: AgentSessionTransport
 }
 
@@ -93,16 +104,6 @@ export interface AgentTurnResult {
   reason: string
 }
 
-export class AgentTaskTurnError extends Error {
-  readonly code: string | undefined
-
-  constructor(message: string, code?: string) {
-    super(message)
-    this.name = "AgentTaskTurnError"
-    this.code = code
-  }
-}
-
 export interface AgentTaskSessionEventMap {
   statusChange: { status: AgentTaskSessionStatus }
   historyLoaded: { history: readonly AgentTimelineItem[] }
@@ -112,6 +113,12 @@ export interface AgentTaskSessionEventMap {
   tool: AgentToolEvent
   workspace: { payload: unknown; timestamp: number }
   turnEnd: AgentTurnResult
+  /**
+   * The prompt reached the server: the box admitted the turn on the direct channel, or the
+   * Copilot accepted it over REST. From here the turn runs without this session, so a caller
+   * that does not wait for the answer can close it or return.
+   */
+  accepted: Record<string, never>
   cancelled: Record<string, never>
   queueChange: { queue: readonly AgentQueueItem[] }
   error: { code?: string; error: string }
@@ -150,6 +157,8 @@ export type AgentTasksWithSessions = AgentTasksModule & AgentTaskSessionManager
 export interface AgentTaskSessionManagerOptions {
   tasks: AgentTasksModule
   eventSource: AgentTaskEventSource
+  /** Where the box channel may live and how to dial it outside a browser. */
+  directChannel?: AgentDirectChannelOptions
 }
 
 interface TurnWaiter {
@@ -230,15 +239,24 @@ export function createAgentTaskSessionManager(
   options: AgentTaskSessionManagerOptions,
 ): AgentTaskSessionManager {
   const sessions = new Map<string, CoreAgentTaskSession>()
+  const channel = new AgentDirectChannel(options.tasks, options.eventSource, options.directChannel)
   return {
-    session(sessionOptions) {
-      if ("taskId" in sessionOptions) {
-        const current = sessions.get(sessionOptions.taskId)
+    session(requested) {
+      if ("taskId" in requested) {
+        const current = sessions.get(requested.taskId)
         if (current && current.status !== "closed") return current
       }
+      // A chat that will talk to its box is born there, instead of being moved on the first
+      // channel request, which made the first open wait for a boot. An explicit runtime wins.
+      const sessionOptions: AgentTaskSessionOptions =
+        "create" in requested && !requested.runtime && channel.canDial(requested.transport)
+          ? { ...requested, runtime: "T3" }
+          : requested
 
       const session = new CoreAgentTaskSession(sessionOptions, {
-        ...options,
+        tasks: options.tasks,
+        eventSource: channel,
+        channel,
         onTaskId: (taskId, value) => sessions.set(taskId, value),
         onClose: (taskId, value) => {
           if (sessions.get(taskId) === value) sessions.delete(taskId)
@@ -257,7 +275,10 @@ export function withAgentTaskSessions(
   return { ...tasks, session: (options) => manager.session(options) }
 }
 
-interface SessionDependencies extends AgentTaskSessionManagerOptions {
+interface SessionDependencies {
+  tasks: AgentTasksModule
+  eventSource: AgentTaskEventSource
+  channel: AgentDirectChannel
   onTaskId(taskId: string, session: CoreAgentTaskSession): void
   onClose(taskId: string, session: CoreAgentTaskSession): void
 }
@@ -536,7 +557,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    await this.sendInput(input)
+    if (await this.sendInput(input)) this.emit("accepted", {})
   }
 
   private async ensureTask(): Promise<void> {
@@ -668,9 +689,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return true
   }
 
-  private sendInput(input: AgentTaskInput): Promise<void> {
-    if (!this._taskId) return Promise.reject(new Error("Agent task has not been created."))
-    return this.dependencies.tasks.sendInput(this._taskId, input)
+  /** True once the server took the input; false when the box refused it on the stream. */
+  private async sendInput(input: AgentTaskInput): Promise<boolean> {
+    if (!this._taskId) throw new Error("Agent task has not been created.")
+    const direct = this.dependencies.channel.send(this._taskId, input)
+    if (direct) return direct
+    await this.dependencies.tasks.sendInput(this._taskId, input)
+    return true
   }
 
   private handleEvent(event: AgentTaskEvent): void {
