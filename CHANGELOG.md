@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.9-beta.1
+
+- Only a business agent's chat (one with an `agentId`) is created with `runtime: "T3"` and asks
+  the Copilot for the direct channel. Any other chat is created and streamed as before: 0.2.9-beta.0
+  put T3 on every new chat, which the Copilot refuses outside an agent chat
+  (`RUNTIME_REQUIRES_AGENT_APP`).
+- A box event stream answered 200 with a type other than `text/event-stream` is a box without
+  the HTTP routes: `channelDeclined` `http_unsupported`, without reading it as a stream.
+  `AgentFetchResponse` now carries `headers`.
+- Box refusals follow the final POST contract: 409, 400, 413, 503 and 504 reject with
+  `AgentTaskTurnError` and the box's `error_code` and `message`, the 504 included.
+
 ## 0.2.9-beta.0
 
 - Take the chat's direct channel to its box as the Agent session transport. Sessions ask the
