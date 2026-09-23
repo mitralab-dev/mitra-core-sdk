@@ -7,6 +7,7 @@ import type {
   AgentMessage,
   AgentModel,
   AgentTask,
+  AgentTaskChannel,
   AppMember,
   AppDefinition,
   AppDeploy,
@@ -1280,6 +1281,22 @@ export function expectAgentTask(
   if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof task.updatedAt !== "string") invalidField(context, "updatedAt", errors)
   return task as unknown as AgentTask
+}
+
+/** A 202 or an empty body is a Copilot that offers no channel for this chat. */
+export function expectAgentTaskChannel(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): AgentTaskChannel | null {
+  if (value === undefined || value === null || value === "") return null
+  const channel = expectObject<JsonObject>(value, context, errors)
+  if (typeof channel.wsUrl !== "string" || !channel.wsUrl) invalidField(context, "wsUrl", errors)
+  return {
+    wsUrl: channel.wsUrl,
+    lastSequence:
+      isInteger(channel.lastSequence) && channel.lastSequence > 0 ? channel.lastSequence : 0,
+  }
 }
 
 export function expectAgentMessage(

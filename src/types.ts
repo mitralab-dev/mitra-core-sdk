@@ -1191,6 +1191,14 @@ export interface AgentTaskEvent {
   sequence?: number
 }
 
+/** Where the Copilot serves a chat on its box, and how far that box's log went when it answered. */
+export interface AgentTaskChannel {
+  /** Box socket address. The query carries a short-lived grant, so it is never logged or reused. */
+  wsUrl: string
+  /** Last sequence in the box log, 0 when the box reported none. */
+  lastSequence: number
+}
+
 export interface AgentMessage {
   id: string
   sender: string

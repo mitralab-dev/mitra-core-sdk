@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.9-beta.0
+
+- Take the chat's direct channel to its box as the default Agent session transport. `auto` and
+  `websocket` sessions ask the Copilot for the channel (`agentTasks.channel`, `POST
+/api/v1/tasks/{id}/channel`), dial the box, and send messages and interrupts on its socket.
+  Same host rule, redial with backoff and replay, and raw `channelDeclined`,
+  `channelReconnecting` and `channelConnected` events as the platform SDK 1.2.0.
+- Fall back to the concrete SDK's event source and REST inputs only when the channel cannot be
+  followed, and always say so with `channelDeclined` (`unavailable`, `body`, `host`,
+  `websocket`).
+- Accept a WebSocket implementation through `directChannel.WebSocket` for runtimes without a
+  global one (Node 18 and 20, the Serverless Function runtime). No new dependency.
+- Count a message on the box socket as sent only when the box starts the admitted turn
+  (`stepStart`), and emit the new `accepted` session event then, or after the Copilot's 202 on
+  REST.
+- Create new chats with `runtime: "T3"` when the session can reach the box and names no runtime.
+- Publish contract corpus `0.2.9-beta.0` with the same parity cases.
+
 ## 0.2.0-beta.1
 
 This working tree prepares the `0.2.0-beta.1` package. Publication provenance remains

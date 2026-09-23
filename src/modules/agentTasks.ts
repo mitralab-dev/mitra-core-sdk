@@ -1,10 +1,17 @@
 import { defaultSdkCoreErrorFactory, type SdkCoreErrorFactory } from "../errors"
 import { encodePathSegment } from "../path"
-import { expectAgentMessage, expectAgentTask, expectEmpty, expectPage } from "../response"
+import {
+  expectAgentMessage,
+  expectAgentTask,
+  expectAgentTaskChannel,
+  expectEmpty,
+  expectPage,
+} from "../response"
 import type { QueryParamValue, Transport } from "../transport"
 import type {
   AgentMessage,
   AgentTask,
+  AgentTaskChannel,
   AgentTaskCreateInput,
   AgentTaskInput,
   AgentTaskListOptions,
@@ -29,6 +36,12 @@ export interface AgentTasksModule {
   sendInput(id: string, input: AgentTaskInput): Promise<void>
   /** Lists persisted messages. Defaults: page 0, size 50, sort createdAt. */
   listMessages(id: string, options?: PageOptions): Promise<Page<AgentMessage>>
+  /**
+   * Asks the Copilot where the chat is served. It holds the request while the box boots and
+   * answers with the box socket, or null (202) when it offers none. Optional so hand-written
+   * modules keep compiling; a module without it never takes the direct channel.
+   */
+  channel?(id: string): Promise<AgentTaskChannel | null>
 }
 
 export function createAgentTasksModule(
@@ -98,6 +111,13 @@ export function createAgentTasksModule(
         "Agent message page response",
         errors,
         expectAgentMessage,
+      )
+    },
+    async channel(id) {
+      return expectAgentTaskChannel(
+        await transport.request<unknown>(`${path(id)}/channel`, { method: "POST" }),
+        "Agent task channel response",
+        errors,
       )
     },
   }

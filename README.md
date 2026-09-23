@@ -33,14 +33,15 @@ The package contains:
 - business agents and workflows
 - integration configs, resources, templates, tests, proxying, and executions
 - Copilot tasks, messages, credentials, models, and app connections
-- a transport-agnostic Agent task live-session state machine with bounded queue and `sendAndWait`
+- an Agent task live-session state machine with bounded queue and `sendAndWait`, and the direct
+  channel to the chat's box
 - Messenger notifications and composed safe app context
 - anonymous public Function execution
 - a minimal transport interface injected by each concrete SDK
 
 The package does not contain:
 
-- `fetch` or any other HTTP implementation
+- `fetch` or any other HTTP implementation, or a WebSocket implementation
 - tokens, authorization headers, or environment variables
 - login, sign-up, logout, refresh, browser storage, or auth listeners
 - retry, redirect, timeout, or client lifecycle policy
@@ -49,8 +50,9 @@ Those concerns stay in the concrete SDK because browser sessions and Server Func
 
 ## Agent task live sessions
 
-Core owns the state machine but never opens a network connection. A concrete SDK implements
-`AgentTaskEventSource`, then composes it with the REST task module:
+Core owns the state machine and the direct channel to the chat's box. A concrete SDK implements
+`AgentTaskEventSource`, the Copilot stream a chat falls back to, then composes it with the REST
+task module:
 
 ```typescript
 import {
@@ -63,7 +65,11 @@ import {
 declare const eventSource: AgentTaskEventSource
 declare const core: SdkCore
 
-const sessions = createAgentTaskSessionManager({ tasks: core.agentTasks, eventSource })
+const sessions = createAgentTaskSessionManager({
+  tasks: core.agentTasks,
+  eventSource,
+  directChannel: { apiUrl: "https://api.mitralab.ai" },
+})
 const agentTasks = withAgentTaskSessions(core.agentTasks, sessions)
 const session = agentTasks.session({ taskId: "task-id", transport: "http" })
 const result = await session.sendAndWait("Summarize the app", { timeoutMs: 120_000 })
@@ -77,13 +83,49 @@ reconnection and reconciles persisted messages; live deltas across that gap are 
 be lossless. Abort and timeout stop the local `sendAndWait` waiter but do not interrupt the remote
 turn. Use `cancel()` when interruption is intended.
 
+### Direct channel
+
+On `auto` and `websocket` sessions Core asks the Copilot once where the chat is served
+(`POST /api/v1/tasks/{id}/channel`, through `agentTasks.channel`) and talks to the box that
+answers. The box runs the turn; the Copilot hands out the channel, admits every turn and receives
+the box log. A new chat is created with `runtime: "T3"` so it is born on its box, unless the
+session names a runtime.
+
+- **Host rule.** The channel URL carries a grant, so Core only dials the API gateway host
+  (`directChannel.apiUrl`) or a fleet box host over `wss:` (`*.e2b.app`,
+  `*.e2b-<env>.mitralab.ai`).
+- **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
+  `/channel`, such as one older than the box), the body has no `wsUrl`, the host is outside the
+  rule, or no WebSocket is available, the session stays on the event source and REST inputs and
+  first emits a raw `channelDeclined` event with `reason` `unavailable`, `body`, `host`, or
+  `websocket`. `http` sessions never ask for the channel.
+- **WebSocket outside the browser.** Core uses `directChannel.WebSocket` when given, otherwise
+  `globalThis.WebSocket`. Node 18 and 20 have no global one: inject an implementation such as
+  `ws`. The type only asks for `readyState`, the four `on*` handlers, `send`, and `close`.
+- **Admission.** A message goes out on the box socket, and the session counts it as sent only
+  when the box answers for it. `stepStart` is the box starting the turn the Copilot admitted;
+  the session then emits `accepted`, and from there the turn runs and reaches the Copilot's log
+  even if this process goes away. An `error` frame is a refusal, reported once through `error`.
+  A box silent for 30 s fails the send. Over REST, `accepted` follows the Copilot's 202. A
+  caller that does not wait for the answer, such as a Serverless Function, awaits `accepted`
+  before it returns.
+- **Drops.** A socket lost in the middle of a turn, or while a message waits for admission, is
+  redialed with backoff (1, 2, 4, 8, 16 s), asking the Copilot for the channel on each attempt
+  and replaying the box log from the last sequence seen, so an admission that happened during
+  the drop still arrives. The raw `channelReconnecting` and `channelConnected` events report the
+  redial. An idle socket that closes, a socket superseded by another open (4409), a redial that
+  gives up, or a Copilot that stops offering the channel is a disconnect for the session.
+  Opening never replays: what an idle chat missed is history.
+- Interrupts go on the socket too; approvals stay on REST.
+
 ## Installation
 
 ```bash
 npm install @mitralab.io/sdk-core
 ```
 
-Node.js 18 or newer is required. The package has no runtime dependencies.
+Node.js 18 or newer is required. The package has no runtime dependencies; the direct channel
+needs a WebSocket implementation on runtimes without a global one.
 
 ## Transport contract
 
