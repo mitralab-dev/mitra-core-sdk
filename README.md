@@ -85,7 +85,9 @@ turn. Use `cancel()` when interruption is intended.
 
 ### Direct channel
 
-Every session asks the Copilot once where the chat is served (`POST /api/v1/tasks/{id}/channel`,
+The direct channel is on when the concrete SDK passes `directChannel.apiUrl`; without it the
+session stays on the event source and REST inputs, with no channel request and no T3 default.
+Every session then asks the Copilot once where the chat is served (`POST /api/v1/tasks/{id}/channel`,
 through `agentTasks.channel`) and talks to the box that answers. The box runs the turn; the
 Copilot hands out the channel, admits every turn and receives the box log. A new chat is created
 with `runtime: "T3"` so it is born on its box, unless the session names a runtime.

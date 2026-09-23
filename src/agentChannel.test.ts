@@ -297,6 +297,28 @@ describe("Agent direct channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("stays as before, with no T3 and no channel request, when the SDK gives no apiUrl", async () => {
+    const tasks = createTasks(offer())
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ create: true, agentType: "CLAUDE" })
+    const raw: AgentTaskEvent[] = []
+    session.on("raw", (event) => raw.push(event))
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
+    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(fallback.observers).toHaveLength(1)
+    expect(raw).toEqual([])
+  })
+
   it("declines a channel outside the host rule and stays on the event source", async () => {
     const tasks = createTasks(offer("wss://attacker.example.com/chat?grant=secret"))
     const { session, fallback, raw } = open(tasks)

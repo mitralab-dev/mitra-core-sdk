@@ -53,7 +53,8 @@ export type AgentWebSocketConstructor = new (url: string) => AgentWebSocket
 export interface AgentDirectChannelOptions {
   /**
    * API base URL of the SDK. A channel on this same host is the gateway proxying the box; any
-   * other host must be a fleet box over `wss:`. Without it only fleet boxes are accepted.
+   * other host must be a fleet box over `wss:`. Required: without it the direct channel is off
+   * and the session stays on the event source and REST inputs.
    */
   apiUrl?: string
   /**
@@ -359,7 +360,16 @@ export class AgentDirectChannel implements AgentTaskEventSource {
 
   /** Whether an open would try the box at all: the Copilot can be asked and the box reached. */
   canDial(transport?: AgentSessionTransport): boolean {
-    return this.tasks.channel !== undefined && this.modeFor(transport) !== null
+    return this.enabled() && this.modeFor(transport) !== null
+  }
+
+  /**
+   * Off until the SDK says where it talks to: without `apiUrl` the host of an offer cannot be
+   * checked, and asking for a channel that will not be followed would still move the chat to a
+   * box. The session then stays exactly as before the direct channel.
+   */
+  private enabled(): boolean {
+    return this.options.apiUrl !== undefined && this.tasks.channel !== undefined
   }
 
   async open(
@@ -368,9 +378,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
   ): Promise<AgentTaskEventConnection> {
-    if (this.tasks.channel === undefined) {
-      return this.fallback.open(taskId, observer, signal, transport)
-    }
+    if (!this.enabled()) return this.fallback.open(taskId, observer, signal, transport)
     const mode = this.modeFor(transport)
     const answer: AgentTaskChannel | ChannelDeclined = mode
       ? await this.requestChannel(taskId)
