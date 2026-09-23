@@ -19,6 +19,8 @@ All notable changes to this project are documented in this file.
   the HTTP POST), and emit the new `accepted` session event then, or after the Copilot's 202 on
   REST. A refusal in the HTTP answer rejects with `AgentTaskTurnError` and the box's code.
 - Create new chats with `runtime: "T3"` when the session can reach the box and names no runtime.
+- The HTTP transport is not yet proven against a real box: it waits for the box routes
+  (t3code-mitra#180) and a gateway route behind the dev proxy.
 - Publish contract corpus `0.2.9-beta.0` with the same parity cases.
 
 ## 0.2.0-beta.1

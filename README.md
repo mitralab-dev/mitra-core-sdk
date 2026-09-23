@@ -133,6 +133,11 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   Copilot that stops offering the channel is a disconnect for the session. Opening never replays
   older frames: what an idle chat missed is history.
 - Interrupts go to the box too; approvals stay on REST.
+- **Status of the HTTP transport.** Not yet proven against a real box. It needs the box HTTP
+  routes in the t3code-mitra fork (mitralab-dev/t3code-mitra#180, in progress) and, behind the
+  dev proxy, a gateway route for them: the gateway only routes `.../api/mitra/chat/ws` today.
+  Until both ship, an `http` session, or an `auto` one without WebSocket, falls back to the
+  Copilot with `channelDeclined`. The WebSocket transport was proven against a dev box.
 
 ## Installation
 
