@@ -826,20 +826,19 @@ export class AgentDirectChannel implements AgentTaskEventSource {
               admission.settle(true)
               return
             }
-            if (response.status === 504) {
-              admission.fail(new Error("The Agent box got no admission for the turn (504)."))
-              return
-            }
+            // Every refusal carries `{error_code, message}`: 409 not admitted, 400 bad frame, 413
+            // too large, 503 nobody to admit, 504 no admission or turn within 30 s.
             const body = asObject(await response.json().catch(() => null))
             const code = errorCodeOf(body)
             if (isGrantRejection(response.status) && code === undefined) {
               admission.fail(new GrantRejectedError(response.status))
               return
             }
-            const message =
-              typeof body?.message === "string"
-                ? body.message
+            const fallback =
+              response.status === 504
+                ? "The Agent box got no admission for the turn (504)."
                 : `The Agent box refused the message (${response.status}).`
+            const message = typeof body?.message === "string" ? body.message : fallback
             admission.fail(new AgentTaskTurnError(message, code))
           },
           (error: unknown) => {

@@ -724,32 +724,37 @@ describe("Agent direct channel over HTTP", () => {
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
 
-  it("rejects the prompt with the box's refusal, reported once and never accepted", async () => {
-    const box = new FakeBoxHttp()
-    box.answer = async () => ({
-      status: 403,
-      body: { error_code: "PLAN_LIMIT", message: "Plan limit reached" },
-    })
-    const tasks = createTasks(offer())
-    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
-    const accepted = vi.fn()
-    const errors: unknown[] = []
-    session.on("accepted", accepted)
-    session.on("error", (error) => errors.push(error))
+  it.each([
+    [409, "NOT_ADMITTED", "Plan limit reached"],
+    [400, "INVALID_MESSAGE", "Message content is required"],
+    [413, "MESSAGE_TOO_LARGE", "Message content is too long"],
+    [503, "SANDBOX_UNAVAILABLE", "No chat host is attached to this conversation"],
+    [504, "ADMISSION_TIMEOUT", "The chat host did not answer in time"],
+    [403, "PLAN_LIMIT", "A 403 that names a code is a refusal too"],
+  ])(
+    "rejects the prompt with the box's %i refusal, once, never accepted, never renewed",
+    async (status, code, message) => {
+      const box = new FakeBoxHttp()
+      box.answer = async () => ({ status, body: { error_code: code, message } })
+      const tasks = createTasks(offer())
+      const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+      const accepted = vi.fn()
+      const errors: unknown[] = []
+      session.on("accepted", accepted)
+      session.on("error", (error) => errors.push(error))
 
-    await expect(session.sendAndWait("Over quota")).rejects.toEqual(
-      new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"),
-    )
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(errors).toEqual([
-      { code: "PLAN_LIMIT", error: "Failed to send Agent prompt: Plan limit reached" },
-    ])
-    expect(accepted).not.toHaveBeenCalled()
-    expect(tasks.sendInput).not.toHaveBeenCalled()
-    expect(session.status).toBe("idle")
-    expect(box.posts).toHaveLength(1)
-    expect(tasks.channel).toHaveBeenCalledOnce()
-  })
+      await expect(session.sendAndWait("hello")).rejects.toEqual(
+        new AgentTaskTurnError(message, code),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(errors).toEqual([{ code, error: `Failed to send Agent prompt: ${message}` }])
+      expect(accepted).not.toHaveBeenCalled()
+      expect(tasks.sendInput).not.toHaveBeenCalled()
+      expect(session.status).toBe("idle")
+      expect(box.posts).toHaveLength(1)
+      expect(tasks.channel).toHaveBeenCalledOnce()
+    },
+  )
 
   it("renews a stale grant once when the POST gets 401 and sends on the fresh URL", async () => {
     const box = new FakeBoxHttp()
@@ -871,7 +876,7 @@ describe("Agent direct channel over HTTP", () => {
     })
   })
 
-  it("fails the prompt when the box got no admission in time (504)", async () => {
+  it("fails the prompt on a 504 with no body", async () => {
     const box = new FakeBoxHttp()
     box.answer = async () => ({ status: 504 })
     const tasks = createTasks(offer())
