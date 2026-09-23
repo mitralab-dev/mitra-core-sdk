@@ -373,6 +373,17 @@ function isGrantRejection(status: number): boolean {
   return status === 401 || status === 403
 }
 
+/** The `error_code` of a box answer: present on a refusal, absent on a stale grant. */
+function errorCodeOf(body: unknown): string | undefined {
+  const code = asObject(body)?.error_code
+  return typeof code === "string" ? code : undefined
+}
+
+/** A response whose body was already read, answering `json()` with what was read. */
+function withBody(response: AgentFetchResponse, body: unknown): AgentFetchResponse {
+  return { ok: response.ok, status: response.status, body: response.body, json: async () => body }
+}
+
 /**
  * The chat's direct channel to its box. The Copilot hands out the box address, admits every turn
  * and receives the box log; the box runs the turn. The box is reached over its WebSocket or over
@@ -729,8 +740,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * asked, and each message is a POST the box answers once the turn was admitted.
    *
    * The URLs carry a grant that lasts 10 minutes and, behind the dev proxy, a ticket that lasts
-   * 60 seconds. A 401 or 403 is that grant gone stale: the Copilot is asked for the channel again
-   * and the request goes once more on the fresh URLs. A second rejection is an error.
+   * 60 seconds. A 401 or 403 without an `error_code` is that grant gone stale: the Copilot is
+   * asked for the channel again and the request goes once more on the fresh URLs. A second
+   * rejection is an error. With an `error_code` it is a refusal, answered once as it came.
    */
   private async openHttp(
     taskId: string,
@@ -778,9 +790,13 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         // The URL carries the grant: a redirect would hand it to wherever it points.
         redirect: "error",
       })
+    // A 401 or 403 that names an `error_code` is the box refusing the turn, which a fresh
+    // grant would not change: it is answered once, as it is. Only one without a code renews.
     const post = async (input: AgentTaskInput) => {
       const response = await postOnce(input)
       if (!isGrantRejection(response.status)) return response
+      const body = await response.json().catch(() => null)
+      if (errorCodeOf(body) !== undefined) return withBody(response, body)
       await renew()
       return postOnce(input)
     }
@@ -805,7 +821,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
               return
             }
             const body = asObject(await response.json().catch(() => null))
-            const code = typeof body?.error_code === "string" ? body.error_code : undefined
+            const code = errorCodeOf(body)
             if (isGrantRejection(response.status) && code === undefined) {
               admission.fail(new GrantRejectedError(response.status))
               return
@@ -861,7 +877,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     if (!response.ok || !response.body) {
       close()
       if (response.status === 404) throw new HttpUnsupportedError(response.status)
-      if (isGrantRejection(response.status)) throw new GrantRejectedError(response.status)
+      if (isGrantRejection(response.status)) {
+        const body = await response.json().catch(() => null)
+        if (errorCodeOf(body) === undefined) throw new GrantRejectedError(response.status)
+      }
       throw new Error(`Agent box event stream failed (${response.status}).`)
     }
     const lost = (error: Error) => {

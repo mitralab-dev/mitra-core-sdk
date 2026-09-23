@@ -544,6 +544,7 @@ class FakeBoxHttp {
   eventsStatus = 200
   /** Statuses the next event stream requests answer, before `eventsStatus` applies. */
   readonly eventsStatuses: number[] = []
+  eventsBody: unknown = {}
   /** Answers the next POSTs get, before `answer` applies. */
   readonly answers: { status: number; body?: unknown }[] = []
   answer: () => Promise<{ status: number; body?: unknown }> = async () => ({
@@ -560,7 +561,7 @@ class FakeBoxHttp {
     this.eventUrls.push(url)
     const eventsStatus = this.eventsStatuses.shift() ?? this.eventsStatus
     if (eventsStatus !== 200) {
-      return { ok: false, status: eventsStatus, json: async () => ({}), body: null }
+      return { ok: false, status: eventsStatus, json: async () => this.eventsBody, body: null }
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
@@ -640,7 +641,7 @@ describe("Agent direct channel over HTTP", () => {
   it("rejects the prompt with the box's refusal, reported once and never accepted", async () => {
     const box = new FakeBoxHttp()
     box.answer = async () => ({
-      status: 429,
+      status: 403,
       body: { error_code: "PLAN_LIMIT", message: "Plan limit reached" },
     })
     const tasks = createTasks(offer())
@@ -660,6 +661,8 @@ describe("Agent direct channel over HTTP", () => {
     expect(accepted).not.toHaveBeenCalled()
     expect(tasks.sendInput).not.toHaveBeenCalled()
     expect(session.status).toBe("idle")
+    expect(box.posts).toHaveLength(1)
+    expect(tasks.channel).toHaveBeenCalledOnce()
   })
 
   it("renews a stale grant once when the POST gets 401 and sends on the fresh URL", async () => {
@@ -762,6 +765,24 @@ describe("Agent direct channel over HTTP", () => {
     })
     expect(box.eventUrls).toHaveLength(2)
     expect(fallback.transports).toEqual(["http"])
+  })
+
+  it("does not renew an event stream refused with an error_code, and falls back visibly", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsStatuses.push(403)
+    box.eventsBody = { error_code: "CHAT_FORBIDDEN", message: "Not your chat" }
+    const tasks = createTasks(offer())
+    const { session, raw } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(box.eventUrls).toHaveLength(1)
+    expect(tasks.channel).toHaveBeenCalledOnce()
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "Agent box event stream failed (403)." },
+    })
   })
 
   it("fails the prompt when the box got no admission in time (504)", async () => {
