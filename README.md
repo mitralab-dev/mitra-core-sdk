@@ -95,6 +95,13 @@ receives the box log. A new business agent's chat is created with `runtime: "T3"
 on its box, unless the session names a runtime; the Copilot refuses T3 for any other chat
 (`RUNTIME_REQUIRES_AGENT_APP`).
 
+`session({ taskId })` reads the task before it opens anything, so the same rule holds for an
+existing chat: with no `agentId` it never asks for `/channel`; with an `agentId` it asks and the
+Copilot decides. A chat the Copilot will not serve on its box (not on T3, answered for example
+with `RUNTIME_NOT_T3`) is a raw `channelDeclined` with `reason: "unavailable"` and the Copilot's
+message, and the session goes on through the event source and REST inputs, with no `error`
+event for the app.
+
 - **Transport.** `websocket` uses the box socket. `http` uses the box's HTTP routes next to the
   socket path: `POST .../api/mitra/chat/messages` to send and `GET .../api/mitra/chat/events`
   (SSE, from a sequence) to read, keeping the `grant` and `ticket` query of the channel URL.

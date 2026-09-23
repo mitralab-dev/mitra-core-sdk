@@ -597,8 +597,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) return Promise.reject(new Error("Agent task has not been created."))
     const abort = new AbortController()
     this.connectionAbort = abort
-    // Only a business agent's chat has a box: any other chat never asks for the channel and
-    // stays on the concrete SDK's stream, as it was before the direct channel.
+    // Only a business agent's chat has a box. The task is always loaded by now (created here,
+    // or read by `openExisting` for `session({ taskId })`), so its `agentId` decides: a chat
+    // with no agent never asks for the channel and stays on the concrete SDK's stream, as it
+    // was before the direct channel. A chat with an agent asks, and the Copilot has the last
+    // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
     this.connectionPromise = source
       .open(
