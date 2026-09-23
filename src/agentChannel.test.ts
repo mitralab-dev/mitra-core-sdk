@@ -600,6 +600,8 @@ describe("Agent direct channel", () => {
   })
 })
 
+const JSON_HEADERS = new Headers({ "content-type": "application/json" })
+
 class FakeBoxHttp {
   readonly eventUrls: string[] = []
   readonly posts: { url: string; body: unknown }[] = []
@@ -608,6 +610,7 @@ class FakeBoxHttp {
   /** Statuses the next event stream requests answer, before `eventsStatus` applies. */
   readonly eventsStatuses: number[] = []
   eventsBody: unknown = {}
+  eventsContentType = "text/event-stream; charset=utf-8"
   /** Answers the next POSTs get, before `answer` applies. */
   readonly answers: { status: number; body?: unknown }[] = []
   answer: () => Promise<{ status: number; body?: unknown }> = async () => ({
@@ -619,12 +622,18 @@ class FakeBoxHttp {
     if (init.method === "POST") {
       this.posts.push({ url, body: JSON.parse(init.body ?? "null") })
       const { status, body } = this.answers.shift() ?? (await this.answer())
-      return { ok: status < 300, status, json: async () => body, body: null }
+      return { ok: status < 300, status, headers: JSON_HEADERS, json: async () => body, body: null }
     }
     this.eventUrls.push(url)
     const eventsStatus = this.eventsStatuses.shift() ?? this.eventsStatus
     if (eventsStatus !== 200) {
-      return { ok: false, status: eventsStatus, json: async () => this.eventsBody, body: null }
+      return {
+        ok: false,
+        status: eventsStatus,
+        headers: JSON_HEADERS,
+        json: async () => this.eventsBody,
+        body: null,
+      }
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
@@ -640,7 +649,13 @@ class FakeBoxHttp {
         // Already closed.
       }
     })
-    return { ok: true, status: 200, json: async () => ({}), body: stream }
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": this.eventsContentType }),
+      json: async () => ({}),
+      body: stream,
+    }
   })
 
   push(type: string, payload: unknown = {}, sequence?: number): void {
@@ -865,6 +880,26 @@ describe("Agent direct channel over HTTP", () => {
     await expect(session.sendAndWait("Slow host")).rejects.toThrow(
       "no admission for the turn (504)",
     )
+  })
+
+  it("takes a 200 that is not an event stream for a box without the HTTP routes", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsContentType = "text/html; charset=utf-8"
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: {
+        reason: "http_unsupported",
+        error: "The Agent box has no HTTP chat routes (text/html; charset=utf-8).",
+      },
+    })
+    expect(fallback.transports).toEqual(["http"])
+    expect(box.posts).toHaveLength(0)
   })
 
   it("falls back to the Copilot, visibly, when the box has no HTTP routes", async () => {

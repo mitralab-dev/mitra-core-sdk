@@ -73,6 +73,7 @@ export interface AgentDirectChannelOptions {
 export interface AgentFetchResponse {
   readonly ok: boolean
   readonly status: number
+  readonly headers: { get(name: string): string | null }
   json(): Promise<unknown>
   readonly body: {
     getReader(): {
@@ -345,9 +346,12 @@ function channelEvent(
   return { type, payload, timestamp: Date.now() }
 }
 
-/** Raised when the box answers 404 on its HTTP routes: a template older than the HTTP channel. */
+/**
+ * Raised when the box has no HTTP chat routes: a 404, or a 200 that is not an event stream (a
+ * template older than the routes answers the path with its web page).
+ */
 class HttpUnsupportedError extends Error {
-  constructor(status: number) {
+  constructor(status: number | string) {
     super(`The Agent box has no HTTP chat routes (${status}).`)
     this.name = "HttpUnsupportedError"
   }
@@ -381,7 +385,13 @@ function errorCodeOf(body: unknown): string | undefined {
 
 /** A response whose body was already read, answering `json()` with what was read. */
 function withBody(response: AgentFetchResponse, body: unknown): AgentFetchResponse {
-  return { ok: response.ok, status: response.status, body: response.body, json: async () => body }
+  return {
+    ok: response.ok,
+    status: response.status,
+    headers: response.headers,
+    body: response.body,
+    json: async () => body,
+  }
 }
 
 /**
@@ -882,6 +892,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         if (errorCodeOf(body) === undefined) throw new GrantRejectedError(response.status)
       }
       throw new Error(`Agent box event stream failed (${response.status}).`)
+    }
+    const contentType = response.headers.get("content-type") ?? ""
+    if (!/^text\/event-stream\b/i.test(contentType)) {
+      close()
+      throw new HttpUnsupportedError(contentType || "no content type")
     }
     const lost = (error: Error) => {
       if (intentionalClose) return
