@@ -88,6 +88,7 @@ export type AgentFetch = (
     headers?: Record<string, string>
     body?: string
     signal?: AbortSignal
+    redirect?: "error"
   },
 ) => Promise<AgentFetchResponse>
 
@@ -693,6 +694,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
+        // The URL carries the grant: a redirect would hand it to wherever it points.
+        redirect: "error",
       })
     return {
       close,
@@ -753,6 +756,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       response = await fetch(url, {
         headers: { Accept: "text/event-stream" },
         signal: abort.signal,
+        redirect: "error",
       })
     } catch (error) {
       close()

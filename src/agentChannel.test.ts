@@ -511,6 +511,8 @@ describe("Agent direct channel over HTTP", () => {
     box.push("stepFinish", { reason: "endTurn", lifecycle: { turnId: "turn-1" } }, 5)
 
     await expect(result).resolves.toMatchObject({ content: "Hello", reason: "endTurn" })
+    const inits = vi.mocked(box.fetch).mock.calls.map(([, init]) => init.redirect)
+    expect(inits).toEqual(["error", "error"])
   })
 
   it("takes HTTP on an auto session when the runtime has no WebSocket", async () => {
