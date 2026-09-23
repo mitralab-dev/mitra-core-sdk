@@ -17,10 +17,12 @@ import { createAgentTasksModule, type AgentTasksModule } from "./modules/agentTa
 import type { Transport } from "./transport"
 import type { AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
 
+const AGENT_ID = "agent-1"
+
 const TASK: AgentTask = {
   id: "task-1",
   appId: "app-1",
-  agentId: null,
+  agentId: AGENT_ID,
   userId: "user-1",
   title: "Task",
   agentType: "CLAUDE",
@@ -112,7 +114,7 @@ class FallbackSource implements AgentTaskEventSource {
 function createTasks(channel: AgentTasksModule["channel"]) {
   return {
     list: vi.fn(async () => EMPTY_PAGE),
-    get: vi.fn(async () => TASK),
+    get: vi.fn<AgentTasksModule["get"]>(async () => TASK),
     create: vi.fn<AgentTasksModule["create"]>(async () => TASK),
     rename: vi.fn(async () => TASK),
     archive: vi.fn(async () => undefined),
@@ -149,6 +151,7 @@ function open(
   const session = manager.session({
     create: true,
     agentType: "CLAUDE",
+    agentId: AGENT_ID,
     ...(options.transport ? { transport: options.transport } : {}),
   })
   const raw: AgentTaskEvent[] = []
@@ -173,7 +176,11 @@ describe("Agent direct channel", () => {
     const result = session.sendAndWait("Analyze", { reasoningEffort: "high" })
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
 
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
+    })
     expect(tasks.channel).toHaveBeenCalledWith("task-1")
     expect(FakeWebSocket.last().url).toBe(BOX_URL)
     expect(FakeWebSocket.last().sent).toEqual([
@@ -402,6 +409,62 @@ describe("Agent direct channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("creates a chat with no agent as before: no T3, no channel request", async () => {
+    const tasks = createTasks(offer())
+    tasks.create.mockResolvedValue({ ...TASK, agentId: null })
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ create: true, agentType: "CLAUDE" })
+    const raw: AgentTaskEvent[] = []
+    session.on("raw", (event) => raw.push(event))
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
+    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(fallback.transports).toEqual([undefined])
+    expect(raw).toEqual([])
+  })
+
+  it("keeps an existing chat with no agent on the event source", async () => {
+    const tasks = createTasks(offer())
+    tasks.get.mockResolvedValue({ ...TASK, agentId: null })
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(fallback.observers).toHaveLength(1)
+  })
+
+  it("takes the box for an existing chat of a business agent", async () => {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    expect(tasks.channel).toHaveBeenCalledWith("task-1")
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
   it("stays as before, with no T3 and no channel request, when the SDK gives no apiUrl", async () => {
     const tasks = createTasks(offer())
     const fallback = new FallbackSource()
@@ -531,7 +594,7 @@ describe("Agent direct channel", () => {
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
     expect(tasks.channel).not.toHaveBeenCalled()
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", agentId: AGENT_ID })
     expect(raw[0]).toMatchObject({ type: "channelDeclined", payload: { reason: "websocket" } })
     expect(fallback.transports).toEqual(["websocket"])
   })
@@ -605,7 +668,11 @@ describe("Agent direct channel over HTTP", () => {
     const result = session.sendAndWait("Analyze", { reasoningEffort: "high" })
     await vi.waitFor(() => expect(box.posts).toHaveLength(1))
 
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
+    })
     expect(box.eventUrls).toEqual([
       "https://49999-box1.e2b.app/api/mitra/chat/events?grant=secret&fromSequence=2",
     ])
@@ -634,7 +701,11 @@ describe("Agent direct channel over HTTP", () => {
 
     session.send("from a Serverless Function")
     await vi.waitFor(() => expect(box.posts).toHaveLength(1))
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
+    })
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
 

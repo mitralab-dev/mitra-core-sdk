@@ -246,16 +246,20 @@ export function createAgentTaskSessionManager(
         const current = sessions.get(requested.taskId)
         if (current && current.status !== "closed") return current
       }
-      // A chat that will talk to its box is born there, instead of being moved on the first
-      // channel request, which made the first open wait for a boot. An explicit runtime wins.
+      // A business agent's chat that will talk to its box is born there, instead of being moved
+      // on the first channel request, which made the first open wait for a boot. The Copilot
+      // refuses T3 for any other chat (RUNTIME_REQUIRES_AGENT_APP). An explicit runtime wins.
       const sessionOptions: AgentTaskSessionOptions =
-        "create" in requested && !requested.runtime && channel.canDial(requested.transport)
+        "create" in requested &&
+        requested.agentId &&
+        !requested.runtime &&
+        channel.canDial(requested.transport)
           ? { ...requested, runtime: "T3" }
           : requested
 
       const session = new CoreAgentTaskSession(sessionOptions, {
         tasks: options.tasks,
-        eventSource: channel,
+        eventSource: options.eventSource,
         channel,
         onTaskId: (taskId, value) => sessions.set(taskId, value),
         onClose: (taskId, value) => {
@@ -593,7 +597,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) return Promise.reject(new Error("Agent task has not been created."))
     const abort = new AbortController()
     this.connectionAbort = abort
-    this.connectionPromise = this.dependencies.eventSource
+    // Only a business agent's chat has a box: any other chat never asks for the channel and
+    // stays on the concrete SDK's stream, as it was before the direct channel.
+    const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
+    this.connectionPromise = source
       .open(
         this._taskId,
         {
