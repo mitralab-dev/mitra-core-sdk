@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "current": "0.2.9-beta.0",
+  "current": "0.2.9-beta.1",
   "versions": [
     {
       "version": "0.1.0",
@@ -75,6 +75,11 @@
       "version": "0.2.9-beta.0",
       "path": "v0.2.9-beta.0/sdk-parity.json",
       "sha256": "393142e56660b2fd90d51ab5e00fadd8c4454164783da23f0c1fbb264ccf92e0"
+    },
+    {
+      "version": "0.2.9-beta.1",
+      "path": "v0.2.9-beta.1/sdk-parity.json",
+      "sha256": "f0ec4130c399f7102ad20b6dc54ed50da957003d19d3ab811d013ce89b5cde06"
     }
   ]
 }

@@ -73,6 +73,7 @@ export interface AgentDirectChannelOptions {
 export interface AgentFetchResponse {
   readonly ok: boolean
   readonly status: number
+  readonly headers: { get(name: string): string | null }
   json(): Promise<unknown>
   readonly body: {
     getReader(): {
@@ -345,9 +346,12 @@ function channelEvent(
   return { type, payload, timestamp: Date.now() }
 }
 
-/** Raised when the box answers 404 on its HTTP routes: a template older than the HTTP channel. */
+/**
+ * Raised when the box has no HTTP chat routes: a 404, or a 200 that is not an event stream (a
+ * template older than the routes answers the path with its web page).
+ */
 class HttpUnsupportedError extends Error {
-  constructor(status: number) {
+  constructor(status: number | string) {
     super(`The Agent box has no HTTP chat routes (${status}).`)
     this.name = "HttpUnsupportedError"
   }
@@ -381,7 +385,13 @@ function errorCodeOf(body: unknown): string | undefined {
 
 /** A response whose body was already read, answering `json()` with what was read. */
 function withBody(response: AgentFetchResponse, body: unknown): AgentFetchResponse {
-  return { ok: response.ok, status: response.status, body: response.body, json: async () => body }
+  return {
+    ok: response.ok,
+    status: response.status,
+    headers: response.headers,
+    body: response.body,
+    json: async () => body,
+  }
 }
 
 /**
@@ -816,20 +826,19 @@ export class AgentDirectChannel implements AgentTaskEventSource {
               admission.settle(true)
               return
             }
-            if (response.status === 504) {
-              admission.fail(new Error("The Agent box got no admission for the turn (504)."))
-              return
-            }
+            // Every refusal carries `{error_code, message}`: 409 not admitted, 400 bad frame, 413
+            // too large, 503 nobody to admit, 504 no admission or turn within 30 s.
             const body = asObject(await response.json().catch(() => null))
             const code = errorCodeOf(body)
             if (isGrantRejection(response.status) && code === undefined) {
               admission.fail(new GrantRejectedError(response.status))
               return
             }
-            const message =
-              typeof body?.message === "string"
-                ? body.message
+            const fallback =
+              response.status === 504
+                ? "The Agent box got no admission for the turn (504)."
                 : `The Agent box refused the message (${response.status}).`
+            const message = typeof body?.message === "string" ? body.message : fallback
             admission.fail(new AgentTaskTurnError(message, code))
           },
           (error: unknown) => {
@@ -882,6 +891,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         if (errorCodeOf(body) === undefined) throw new GrantRejectedError(response.status)
       }
       throw new Error(`Agent box event stream failed (${response.status}).`)
+    }
+    const contentType = response.headers.get("content-type") ?? ""
+    if (!/^text\/event-stream\b/i.test(contentType)) {
+      close()
+      throw new HttpUnsupportedError(contentType || "no content type")
     }
     const lost = (error: Error) => {
       if (intentionalClose) return

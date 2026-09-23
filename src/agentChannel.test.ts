@@ -17,10 +17,12 @@ import { createAgentTasksModule, type AgentTasksModule } from "./modules/agentTa
 import type { Transport } from "./transport"
 import type { AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
 
+const AGENT_ID = "agent-1"
+
 const TASK: AgentTask = {
   id: "task-1",
   appId: "app-1",
-  agentId: null,
+  agentId: AGENT_ID,
   userId: "user-1",
   title: "Task",
   agentType: "CLAUDE",
@@ -112,7 +114,7 @@ class FallbackSource implements AgentTaskEventSource {
 function createTasks(channel: AgentTasksModule["channel"]) {
   return {
     list: vi.fn(async () => EMPTY_PAGE),
-    get: vi.fn(async () => TASK),
+    get: vi.fn<AgentTasksModule["get"]>(async () => TASK),
     create: vi.fn<AgentTasksModule["create"]>(async () => TASK),
     rename: vi.fn(async () => TASK),
     archive: vi.fn(async () => undefined),
@@ -149,6 +151,7 @@ function open(
   const session = manager.session({
     create: true,
     agentType: "CLAUDE",
+    agentId: AGENT_ID,
     ...(options.transport ? { transport: options.transport } : {}),
   })
   const raw: AgentTaskEvent[] = []
@@ -173,7 +176,11 @@ describe("Agent direct channel", () => {
     const result = session.sendAndWait("Analyze", { reasoningEffort: "high" })
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
 
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
+    })
     expect(tasks.channel).toHaveBeenCalledWith("task-1")
     expect(FakeWebSocket.last().url).toBe(BOX_URL)
     expect(FakeWebSocket.last().sent).toEqual([
@@ -402,6 +409,62 @@ describe("Agent direct channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("creates a chat with no agent as before: no T3, no channel request", async () => {
+    const tasks = createTasks(offer())
+    tasks.create.mockResolvedValue({ ...TASK, agentId: null })
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ create: true, agentType: "CLAUDE" })
+    const raw: AgentTaskEvent[] = []
+    session.on("raw", (event) => raw.push(event))
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
+    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(fallback.transports).toEqual([undefined])
+    expect(raw).toEqual([])
+  })
+
+  it("keeps an existing chat with no agent on the event source", async () => {
+    const tasks = createTasks(offer())
+    tasks.get.mockResolvedValue({ ...TASK, agentId: null })
+    const fallback = new FallbackSource()
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(fallback.observers).toHaveLength(1)
+  })
+
+  it("takes the box for an existing chat of a business agent", async () => {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    expect(tasks.channel).toHaveBeenCalledWith("task-1")
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
   it("stays as before, with no T3 and no channel request, when the SDK gives no apiUrl", async () => {
     const tasks = createTasks(offer())
     const fallback = new FallbackSource()
@@ -531,11 +594,13 @@ describe("Agent direct channel", () => {
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
     expect(tasks.channel).not.toHaveBeenCalled()
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", agentId: AGENT_ID })
     expect(raw[0]).toMatchObject({ type: "channelDeclined", payload: { reason: "websocket" } })
     expect(fallback.transports).toEqual(["websocket"])
   })
 })
+
+const JSON_HEADERS = new Headers({ "content-type": "application/json" })
 
 class FakeBoxHttp {
   readonly eventUrls: string[] = []
@@ -545,6 +610,7 @@ class FakeBoxHttp {
   /** Statuses the next event stream requests answer, before `eventsStatus` applies. */
   readonly eventsStatuses: number[] = []
   eventsBody: unknown = {}
+  eventsContentType = "text/event-stream; charset=utf-8"
   /** Answers the next POSTs get, before `answer` applies. */
   readonly answers: { status: number; body?: unknown }[] = []
   answer: () => Promise<{ status: number; body?: unknown }> = async () => ({
@@ -556,12 +622,18 @@ class FakeBoxHttp {
     if (init.method === "POST") {
       this.posts.push({ url, body: JSON.parse(init.body ?? "null") })
       const { status, body } = this.answers.shift() ?? (await this.answer())
-      return { ok: status < 300, status, json: async () => body, body: null }
+      return { ok: status < 300, status, headers: JSON_HEADERS, json: async () => body, body: null }
     }
     this.eventUrls.push(url)
     const eventsStatus = this.eventsStatuses.shift() ?? this.eventsStatus
     if (eventsStatus !== 200) {
-      return { ok: false, status: eventsStatus, json: async () => this.eventsBody, body: null }
+      return {
+        ok: false,
+        status: eventsStatus,
+        headers: JSON_HEADERS,
+        json: async () => this.eventsBody,
+        body: null,
+      }
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
@@ -577,7 +649,13 @@ class FakeBoxHttp {
         // Already closed.
       }
     })
-    return { ok: true, status: 200, json: async () => ({}), body: stream }
+    return {
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": this.eventsContentType }),
+      json: async () => ({}),
+      body: stream,
+    }
   })
 
   push(type: string, payload: unknown = {}, sequence?: number): void {
@@ -605,7 +683,11 @@ describe("Agent direct channel over HTTP", () => {
     const result = session.sendAndWait("Analyze", { reasoningEffort: "high" })
     await vi.waitFor(() => expect(box.posts).toHaveLength(1))
 
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
+    })
     expect(box.eventUrls).toEqual([
       "https://49999-box1.e2b.app/api/mitra/chat/events?grant=secret&fromSequence=2",
     ])
@@ -634,36 +716,45 @@ describe("Agent direct channel over HTTP", () => {
 
     session.send("from a Serverless Function")
     await vi.waitFor(() => expect(box.posts).toHaveLength(1))
-    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
-    expect(tasks.sendInput).not.toHaveBeenCalled()
-  })
-
-  it("rejects the prompt with the box's refusal, reported once and never accepted", async () => {
-    const box = new FakeBoxHttp()
-    box.answer = async () => ({
-      status: 403,
-      body: { error_code: "PLAN_LIMIT", message: "Plan limit reached" },
+    expect(tasks.create).toHaveBeenCalledWith({
+      agentType: "CLAUDE",
+      agentId: AGENT_ID,
+      runtime: "T3",
     })
-    const tasks = createTasks(offer())
-    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
-    const accepted = vi.fn()
-    const errors: unknown[] = []
-    session.on("accepted", accepted)
-    session.on("error", (error) => errors.push(error))
-
-    await expect(session.sendAndWait("Over quota")).rejects.toEqual(
-      new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"),
-    )
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(errors).toEqual([
-      { code: "PLAN_LIMIT", error: "Failed to send Agent prompt: Plan limit reached" },
-    ])
-    expect(accepted).not.toHaveBeenCalled()
     expect(tasks.sendInput).not.toHaveBeenCalled()
-    expect(session.status).toBe("idle")
-    expect(box.posts).toHaveLength(1)
-    expect(tasks.channel).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    [409, "NOT_ADMITTED", "Plan limit reached"],
+    [400, "INVALID_MESSAGE", "Message content is required"],
+    [413, "MESSAGE_TOO_LARGE", "Message content is too long"],
+    [503, "SANDBOX_UNAVAILABLE", "No chat host is attached to this conversation"],
+    [504, "ADMISSION_TIMEOUT", "The chat host did not answer in time"],
+    [403, "PLAN_LIMIT", "A 403 that names a code is a refusal too"],
+  ])(
+    "rejects the prompt with the box's %i refusal, once, never accepted, never renewed",
+    async (status, code, message) => {
+      const box = new FakeBoxHttp()
+      box.answer = async () => ({ status, body: { error_code: code, message } })
+      const tasks = createTasks(offer())
+      const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+      const accepted = vi.fn()
+      const errors: unknown[] = []
+      session.on("accepted", accepted)
+      session.on("error", (error) => errors.push(error))
+
+      await expect(session.sendAndWait("hello")).rejects.toEqual(
+        new AgentTaskTurnError(message, code),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(errors).toEqual([{ code, error: `Failed to send Agent prompt: ${message}` }])
+      expect(accepted).not.toHaveBeenCalled()
+      expect(tasks.sendInput).not.toHaveBeenCalled()
+      expect(session.status).toBe("idle")
+      expect(box.posts).toHaveLength(1)
+      expect(tasks.channel).toHaveBeenCalledOnce()
+    },
+  )
 
   it("renews a stale grant once when the POST gets 401 and sends on the fresh URL", async () => {
     const box = new FakeBoxHttp()
@@ -785,7 +876,7 @@ describe("Agent direct channel over HTTP", () => {
     })
   })
 
-  it("fails the prompt when the box got no admission in time (504)", async () => {
+  it("fails the prompt on a 504 with no body", async () => {
     const box = new FakeBoxHttp()
     box.answer = async () => ({ status: 504 })
     const tasks = createTasks(offer())
@@ -794,6 +885,26 @@ describe("Agent direct channel over HTTP", () => {
     await expect(session.sendAndWait("Slow host")).rejects.toThrow(
       "no admission for the turn (504)",
     )
+  })
+
+  it("takes a 200 that is not an event stream for a box without the HTTP routes", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsContentType = "text/html; charset=utf-8"
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: {
+        reason: "http_unsupported",
+        error: "The Agent box has no HTTP chat routes (text/html; charset=utf-8).",
+      },
+    })
+    expect(fallback.transports).toEqual(["http"])
+    expect(box.posts).toHaveLength(0)
   })
 
   it("falls back to the Copilot, visibly, when the box has no HTTP routes", async () => {

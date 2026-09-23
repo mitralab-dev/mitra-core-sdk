@@ -85,12 +85,15 @@ turn. Use `cancel()` when interruption is intended.
 
 ### Direct channel
 
-The direct channel is on when the concrete SDK passes `directChannel.apiUrl`; without it the
-session stays on the event source and REST inputs, with no channel request and no T3 default.
-Every session then asks the Copilot once where the chat is served (`POST /api/v1/tasks/{id}/channel`,
-through `agentTasks.channel`) and talks to the box that answers. The box runs the turn; the
-Copilot hands out the channel, admits every turn and receives the box log. A new chat is created
-with `runtime: "T3"` so it is born on its box, unless the session names a runtime.
+The direct channel is on when the concrete SDK passes `directChannel.apiUrl`, and it serves a
+business agent's chat, the one with an `agentId`: only those have a box. Any other chat, or any
+chat without `apiUrl`, stays on the event source and REST inputs, with no channel request and
+no T3 default. A business agent's chat asks the Copilot once where it is served
+(`POST /api/v1/tasks/{id}/channel`, through `agentTasks.channel`) and talks to the box that
+answers. The box runs the turn; the Copilot hands out the channel, admits every turn and
+receives the box log. A new business agent's chat is created with `runtime: "T3"` so it is born
+on its box, unless the session names a runtime; the Copilot refuses T3 for any other chat
+(`RUNTIME_REQUIRES_AGENT_APP`).
 
 - **Transport.** `websocket` uses the box socket. `http` uses the box's HTTP routes next to the
   socket path: `POST .../api/mitra/chat/messages` to send and `GET .../api/mitra/chat/events`
@@ -107,8 +110,8 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
 - **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
   `/channel`), the body has no `wsUrl`, the host is outside the rule, a `websocket` session has
   no WebSocket, the box cannot be reached (a handshake that times out or is refused, a proxy
-  blocking its host, a network error on the HTTP stream), or the box answers 404 on its HTTP
-  routes (a template older than them), the
+  blocking its host, a network error on the HTTP stream), or the box has no HTTP routes (a 404,
+  or a stream that is not `text/event-stream`, from a template older than them), the
   session stays on the event source and REST inputs and first emits a raw `channelDeclined`
   event with `reason` `unavailable`, `body`, `host`, `websocket`, or `http_unsupported`.
 - **Runtimes without WebSocket.** Core uses `directChannel.WebSocket` when given, otherwise
@@ -119,9 +122,10 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   `stepStart` frame on the stream, or the 200 of the HTTP POST, both the box starting the turn
   the Copilot admitted. The session then emits `accepted`, and from there the turn runs and
   reaches the Copilot's log even if this process goes away. A refusal is reported once through
-  `error`: an `error` frame on the stream, or the 4xx of the POST, which also rejects
-  `sendAndWait` with `AgentTaskTurnError` and the box's `error_code`. A 504, or a box silent for
-  35 s with the wire up, fails the send; a redial pauses that clock and a successful one
+  `error`: an `error` frame on the stream, or a POST answered 409 (not admitted), 400 (bad
+  frame), 413 (too large), 503 (nobody to admit) or 504 (no admission or turn within 30 s), each
+  with `{error_code, message}`, which rejects `sendAndWait` with `AgentTaskTurnError` carrying
+  that code and message. A box silent for 35 s with the wire up fails the send; a redial pauses that clock and a successful one
   restarts it. Over REST, `accepted` follows the Copilot's 202. A caller that does not
   wait for the answer, such as a Serverless Function, awaits `accepted` before it returns;
   `sendAndWait` waits for the whole turn.
