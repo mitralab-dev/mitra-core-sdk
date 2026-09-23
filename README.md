@@ -98,7 +98,7 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   `auto` uses the socket when a WebSocket implementation is available and HTTP otherwise, which
   is the case of a Serverless Function.
 - **Host rule.** The channel URL carries a grant, so Core only reaches the API gateway host
-  (`directChannel.apiUrl`) or a fleet box host over `wss:` (`*.e2b.app`,
+  (`directChannel.apiUrl`, over `wss:` when the API is `https:`) or a fleet box host over `wss:` (`*.e2b.app`,
   `*.e2b-<env>.mitralab.ai`), on either transport.
 - **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
   `/channel`), the body has no `wsUrl`, the host is outside the rule, a `websocket` session has

@@ -167,13 +167,18 @@ function hostOf(url: string): string | undefined {
 /**
  * The address has to be the gateway this SDK already talks to (proxy mode) or a fleet box
  * (direct mode). The channel answer is trusted, but it carries a grant in the query: following
- * an arbitrary host would hand that grant to whoever returned the body.
+ * an arbitrary host would hand that grant to whoever returned the body. The host is the parsed
+ * one, so userinfo (`api@evil.com`) and look-alike suffixes (`x.e2b.app.evil.com`) do not pass.
  */
 export function isChannelHostAllowed(candidate: string, apiUrl?: string): boolean {
   try {
     const target = new URL(candidate)
     if (target.protocol !== "ws:" && target.protocol !== "wss:") return false
-    if (apiUrl !== undefined && target.host === new URL(apiUrl).host) return true
+    const api = apiUrl === undefined ? undefined : new URL(apiUrl)
+    // The grant never goes in clear text to a gateway the SDK itself reaches over TLS.
+    if (api && target.host === api.host) {
+      return api.protocol !== "https:" || target.protocol === "wss:"
+    }
     return target.protocol === "wss:" && FLEET_BOX_HOST.test(target.host)
   } catch {
     return false

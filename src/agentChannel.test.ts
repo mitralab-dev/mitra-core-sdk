@@ -337,6 +337,21 @@ describe("Agent direct channel", () => {
     expect(accepted).toHaveBeenCalledOnce()
   })
 
+  it("declines the API host over ws: when the SDK talks to it over https", async () => {
+    const tasks = createTasks(offer("ws://api.mitralab.ai/__ide/box/api/mitra/chat/ws?grant=g"))
+    const { session, raw, fallback } = open(tasks)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "host", host: "api.mitralab.ai" },
+    })
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(fallback.observers).toHaveLength(1)
+  })
+
   it("falls back to REST, visibly, when the Copilot has no channel endpoint", async () => {
     const notFound = Object.assign(new Error("Not Found"), { status: 404 })
     const tasks = createTasks(async () => {
@@ -652,6 +667,17 @@ describe("Agent channel host rule", () => {
     expect(isChannelHostAllowed("wss://api.mitralab.ai/copilot/ws/box")).toBe(false)
     expect(isChannelHostAllowed("https://49999-box1.e2b.app/chat")).toBe(false)
     expect(isChannelHostAllowed("not a url")).toBe(false)
+  })
+
+  it("refuses clear text on a TLS gateway and hosts that only look allowed", () => {
+    expect(isChannelHostAllowed("ws://api.mitralab.ai/__ide/box/api/mitra/chat/ws", API_URL)).toBe(
+      false,
+    )
+    expect(isChannelHostAllowed("ws://localhost:8080/chat", "http://localhost:8080")).toBe(true)
+    expect(isChannelHostAllowed("wss://x.e2b.app.evil.com/chat", API_URL)).toBe(false)
+    expect(isChannelHostAllowed("wss://api.mitralab.ai@evil.com/chat", API_URL)).toBe(false)
+    expect(isChannelHostAllowed("wss://evil.com/chat?host=box.e2b.app", API_URL)).toBe(false)
+    expect(isChannelHostAllowed("wss://api.mitralab.ai.evil.com/chat", API_URL)).toBe(false)
   })
 })
 
