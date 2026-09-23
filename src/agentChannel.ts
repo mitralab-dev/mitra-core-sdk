@@ -21,9 +21,11 @@ export const SILENCE_TIMEOUT_MS = 60_000
  */
 export const RECONNECT_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000]
 /**
- * How long a message handed to the box waits for the box to say the turn was admitted. The box
- * gives the Copilot 20 s on the socket and 30 s on HTTP, then answers with an `error` frame or a
- * 504, so this only fires on a box that went quiet with the wire still up.
+ * How long a message handed to the box waits for the box to say the turn was admitted, counted
+ * while the wire is up. The box gives the Copilot 20 s on the socket and 30 s on HTTP, then
+ * answers with an `error` frame or a 504, so this only fires on a box that went quiet with the
+ * wire still up. A redial pauses the count and a successful one starts it again, so the answer
+ * can still arrive in the replay however long the redial took.
  */
 export const ADMISSION_TIMEOUT_MS = 35_000
 /** The box closes the older socket with this code when the same chat is opened elsewhere. */
@@ -138,6 +140,10 @@ type ReopenOutcome =
 interface PendingAdmission {
   settle(admitted: boolean): void
   fail(error: Error): void
+  /** Stops the admission clock while the wire is being redialed. */
+  hold(): void
+  /** Starts the admission clock again on a wire that is back. */
+  rearm(): void
 }
 
 /** The direct channel of one open chat. */
@@ -435,13 +441,17 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     link.admission?.fail(new Error("A newer message replaced the one waiting for the box."))
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        admission.fail(
-          new Error(
-            `The Agent box did not confirm the turn within ${ADMISSION_TIMEOUT_MS / 1000}s.`,
-          ),
-        )
-      }, ADMISSION_TIMEOUT_MS)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const arm = () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => {
+          admission.fail(
+            new Error(
+              `The Agent box did not confirm the turn within ${ADMISSION_TIMEOUT_MS / 1000}s.`,
+            ),
+          )
+        }, ADMISSION_TIMEOUT_MS)
+      }
       const done = () => {
         clearTimeout(timer)
         if (link.admission === admission) link.admission = null
@@ -455,7 +465,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           done()
           reject(error)
         },
+        hold: () => clearTimeout(timer),
+        rearm: arm,
       }
+      arm()
     })
     link.admission = admission
     if (!link.wire.message(input, admission)) {
@@ -552,6 +565,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         observer.onDisconnect(error)
         return
       }
+      link.admission?.hold()
       void this.redial(taskId, mode, error, abort.signal, observer, {
         onFrame,
         onLost,
@@ -566,7 +580,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         // A message still waiting when the channel is gone for good fails out loud: the caller
         // that fires and leaves must not take a lost message for a sent one.
         if (outcome instanceof Error) link.admission?.fail(outcome)
-        else if (outcome) link.wire = outcome
+        else if (outcome) {
+          link.wire = outcome
+          link.admission?.rearm()
+        }
       })
     }
 

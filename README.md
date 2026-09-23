@@ -117,7 +117,8 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   reaches the Copilot's log even if this process goes away. A refusal is reported once through
   `error`: an `error` frame on the stream, or the 4xx of the POST, which also rejects
   `sendAndWait` with `AgentTaskTurnError` and the box's `error_code`. A 504, or a box silent for
-  35 s, fails the send. Over REST, `accepted` follows the Copilot's 202. A caller that does not
+  35 s with the wire up, fails the send; a redial pauses that clock and a successful one
+  restarts it. Over REST, `accepted` follows the Copilot's 202. A caller that does not
   wait for the answer, such as a Serverless Function, awaits `accepted` before it returns;
   `sendAndWait` waits for the whole turn.
 - **Drops.** A socket or stream lost in the middle of a turn, or while a message waits for

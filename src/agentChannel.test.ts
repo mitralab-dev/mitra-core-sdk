@@ -284,6 +284,69 @@ describe("Agent direct channel", () => {
     session.close()
   })
 
+  it("keeps waiting for admission through two redials longer than the admission window", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session, raw } = open(tasks)
+    const accepted = vi.fn()
+    const errors: unknown[] = []
+    session.on("accepted", accepted)
+    session.on("error", (error) => errors.push(error))
+
+    session.send("Survive two drops")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    await vi.advanceTimersByTimeAsync(20_000)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    await vi.advanceTimersByTimeAsync(20_000)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    expect(accepted).not.toHaveBeenCalled()
+    expect(errors).toEqual([])
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 3 }])
+    expect(raw.filter((event) => event.type === "channelConnected")).toHaveLength(2)
+
+    FakeWebSocket.last().receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    session.close()
+  })
+
+  it("does not count a long redial against the admission window", async () => {
+    vi.useFakeTimers()
+    const down = new Error("Copilot restarting")
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockRejectedValueOnce(down)
+      .mockRejectedValueOnce(down)
+      .mockRejectedValueOnce(down)
+      .mockRejectedValueOnce(down)
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    const errors: unknown[] = []
+    session.on("accepted", accepted)
+    session.on("error", (error) => errors.push(error))
+
+    session.send("Survive a long redial")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    await vi.advanceTimersByTimeAsync(30_000)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(31_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    expect(errors).toEqual([])
+    FakeWebSocket.last().receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    session.close()
+  })
+
   it("fails a waiting message out loud when another open supersedes the socket", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
