@@ -85,38 +85,46 @@ turn. Use `cancel()` when interruption is intended.
 
 ### Direct channel
 
-On `auto` and `websocket` sessions Core asks the Copilot once where the chat is served
-(`POST /api/v1/tasks/{id}/channel`, through `agentTasks.channel`) and talks to the box that
-answers. The box runs the turn; the Copilot hands out the channel, admits every turn and receives
-the box log. A new chat is created with `runtime: "T3"` so it is born on its box, unless the
-session names a runtime.
+Every session asks the Copilot once where the chat is served (`POST /api/v1/tasks/{id}/channel`,
+through `agentTasks.channel`) and talks to the box that answers. The box runs the turn; the
+Copilot hands out the channel, admits every turn and receives the box log. A new chat is created
+with `runtime: "T3"` so it is born on its box, unless the session names a runtime.
 
-- **Host rule.** The channel URL carries a grant, so Core only dials the API gateway host
+- **Transport.** `websocket` uses the box socket. `http` uses the box's HTTP routes next to the
+  socket path: `POST .../api/mitra/chat/messages` to send and `GET .../api/mitra/chat/events`
+  (SSE, from a sequence) to read, keeping the `grant` and `ticket` query of the channel URL.
+  `auto` uses the socket when a WebSocket implementation is available and HTTP otherwise, which
+  is the case of a Serverless Function.
+- **Host rule.** The channel URL carries a grant, so Core only reaches the API gateway host
   (`directChannel.apiUrl`) or a fleet box host over `wss:` (`*.e2b.app`,
-  `*.e2b-<env>.mitralab.ai`).
+  `*.e2b-<env>.mitralab.ai`), on either transport.
 - **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
-  `/channel`, such as one older than the box), the body has no `wsUrl`, the host is outside the
-  rule, or no WebSocket is available, the session stays on the event source and REST inputs and
-  first emits a raw `channelDeclined` event with `reason` `unavailable`, `body`, `host`, or
-  `websocket`. `http` sessions never ask for the channel.
-- **WebSocket outside the browser.** Core uses `directChannel.WebSocket` when given, otherwise
-  `globalThis.WebSocket`. Node 18 and 20 have no global one: inject an implementation such as
-  `ws`. The type only asks for `readyState`, the four `on*` handlers, `send`, and `close`.
-- **Admission.** A message goes out on the box socket, and the session counts it as sent only
-  when the box answers for it. `stepStart` is the box starting the turn the Copilot admitted;
-  the session then emits `accepted`, and from there the turn runs and reaches the Copilot's log
-  even if this process goes away. An `error` frame is a refusal, reported once through `error`.
-  A box silent for 30 s fails the send. Over REST, `accepted` follows the Copilot's 202. A
-  caller that does not wait for the answer, such as a Serverless Function, awaits `accepted`
-  before it returns.
-- **Drops.** A socket lost in the middle of a turn, or while a message waits for admission, is
-  redialed with backoff (1, 2, 4, 8, 16 s), asking the Copilot for the channel on each attempt
-  and replaying the box log from the last sequence seen, so an admission that happened during
-  the drop still arrives. The raw `channelReconnecting` and `channelConnected` events report the
-  redial. An idle socket that closes, a socket superseded by another open (4409), a redial that
-  gives up, or a Copilot that stops offering the channel is a disconnect for the session.
-  Opening never replays: what an idle chat missed is history.
-- Interrupts go on the socket too; approvals stay on REST.
+  `/channel`), the body has no `wsUrl`, the host is outside the rule, a `websocket` session has
+  no WebSocket, or the box answers 404 on its HTTP routes (a template older than them), the
+  session stays on the event source and REST inputs and first emits a raw `channelDeclined`
+  event with `reason` `unavailable`, `body`, `host`, `websocket`, or `http_unsupported`.
+- **Runtimes without WebSocket.** Core uses `directChannel.WebSocket` when given, otherwise
+  `globalThis.WebSocket`; Node 18 and 20 have none, so inject one such as `ws` or let `auto` take
+  HTTP. The socket type only asks for `readyState`, the four `on*` handlers, `send`, and `close`.
+  HTTP uses `directChannel.fetch` when given, otherwise `globalThis.fetch`.
+- **Admission.** The session counts a message as sent only when the box answers for it: the
+  `stepStart` frame on the stream, or the 200 of the HTTP POST, both the box starting the turn
+  the Copilot admitted. The session then emits `accepted`, and from there the turn runs and
+  reaches the Copilot's log even if this process goes away. A refusal is reported once through
+  `error`: an `error` frame on the stream, or the 4xx of the POST, which also rejects
+  `sendAndWait` with `AgentTaskTurnError` and the box's `error_code`. A 504, or a box silent for
+  35 s, fails the send. Over REST, `accepted` follows the Copilot's 202. A caller that does not
+  wait for the answer, such as a Serverless Function, awaits `accepted` before it returns;
+  `sendAndWait` waits for the whole turn.
+- **Drops.** A socket or stream lost in the middle of a turn, or while a message waits for
+  admission, is redialed with backoff (1, 2, 4, 8, 16 s), asking the Copilot for the channel on
+  each attempt and replaying the box log from the last sequence seen, so an admission that
+  happened during the drop still arrives. A POST the network lost is not sent again for the same
+  reason. The raw `channelReconnecting` and `channelConnected` events report the redial. An idle
+  wire that closes, a socket superseded by another open (4409), a redial that gives up, or a
+  Copilot that stops offering the channel is a disconnect for the session. Opening never replays
+  older frames: what an idle chat missed is history.
+- Interrupts go to the box too; approvals stay on REST.
 
 ## Installation
 

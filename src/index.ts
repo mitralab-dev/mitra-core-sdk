@@ -29,6 +29,8 @@ export type {
 } from "./agentSession"
 export type {
   AgentDirectChannelOptions,
+  AgentFetch,
+  AgentFetchResponse,
   AgentWebSocket,
   AgentWebSocketConstructor,
 } from "./agentChannel"

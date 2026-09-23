@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { isChannelHostAllowed, type AgentWebSocketConstructor } from "./agentChannel"
+import {
+  boxRoute,
+  isChannelHostAllowed,
+  type AgentFetch,
+  type AgentWebSocketConstructor,
+} from "./agentChannel"
 import { AgentTaskTurnError, createAgentTaskSessionManager } from "./agentSession"
 import type {
   AgentSessionTransport,
@@ -25,7 +30,7 @@ const TASK: AgentTask = {
   updatedAt: "2026-01-01T00:00:00Z",
 }
 
-const BOX_URL = "wss://49999-box1.e2b.app/api/mitra/chat?grant=secret"
+const BOX_URL = "wss://49999-box1.e2b.app/api/mitra/chat/ws?grant=secret"
 const API_URL = "https://api.mitralab.ai"
 
 const EMPTY_PAGE: Page<never> = {
@@ -114,7 +119,11 @@ function offer(wsUrl = BOX_URL, lastSequence = 0) {
 
 function open(
   tasks: ReturnType<typeof createTasks>,
-  options: { WebSocket?: AgentWebSocketConstructor; transport?: AgentSessionTransport } = {
+  options: {
+    WebSocket?: AgentWebSocketConstructor
+    fetch?: AgentFetch
+    transport?: AgentSessionTransport
+  } = {
     WebSocket: WebSocketImpl,
   },
 ): { session: AgentTaskSession; fallback: FallbackSource; raw: AgentTaskEvent[] } {
@@ -125,6 +134,7 @@ function open(
     directChannel: {
       apiUrl: API_URL,
       ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
     },
   })
   const session = manager.session({
@@ -271,9 +281,9 @@ describe("Agent direct channel", () => {
     const { session } = open(tasks)
 
     const result = session.sendAndWait("Nobody home")
-    const settled = expect(result).rejects.toThrow("did not confirm the turn within 30s")
+    const settled = expect(result).rejects.toThrow("did not confirm the turn within 35s")
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(35_000)
 
     await settled
     expect(session.status).toBe("idle")
@@ -325,10 +335,10 @@ describe("Agent direct channel", () => {
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
 
-  it("says so and skips the Copilot's channel when no WebSocket can be had", async () => {
+  it("declines a websocket session when no WebSocket can be had", async () => {
     vi.stubGlobal("WebSocket", undefined)
     const tasks = createTasks(offer())
-    const { session, raw } = open(tasks, {})
+    const { session, raw, fallback } = open(tasks, { transport: "websocket" })
 
     session.send("hello")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
@@ -336,17 +346,212 @@ describe("Agent direct channel", () => {
     expect(tasks.channel).not.toHaveBeenCalled()
     expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE" })
     expect(raw[0]).toMatchObject({ type: "channelDeclined", payload: { reason: "websocket" } })
+    expect(fallback.transports).toEqual(["websocket"])
+  })
+})
+
+class FakeBoxHttp {
+  readonly eventUrls: string[] = []
+  readonly posts: { url: string; body: unknown }[] = []
+  private readonly streams: ReadableStreamDefaultController<Uint8Array>[] = []
+  eventsStatus = 200
+  answer: () => Promise<{ status: number; body?: unknown }> = async () => ({
+    status: 200,
+    body: { accepted: true, turnId: "turn-1", sequence: 1 },
   })
 
-  it("keeps an http session on the event source without asking for the channel", async () => {
+  readonly fetch: AgentFetch = vi.fn(async (url: string, init: Parameters<AgentFetch>[1]) => {
+    if (init.method === "POST") {
+      this.posts.push({ url, body: JSON.parse(init.body ?? "null") })
+      const { status, body } = await this.answer()
+      return { ok: status < 300, status, json: async () => body, body: null }
+    }
+    this.eventUrls.push(url)
+    if (this.eventsStatus !== 200) {
+      return { ok: false, status: this.eventsStatus, json: async () => ({}), body: null }
+    }
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const stream = new ReadableStream<Uint8Array>({
+      start: (value) => {
+        controller = value
+      },
+    })
+    this.streams.push(controller)
+    init.signal?.addEventListener("abort", () => {
+      try {
+        controller.error(new Error("aborted"))
+      } catch {
+        // Already closed.
+      }
+    })
+    return { ok: true, status: 200, json: async () => ({}), body: stream }
+  })
+
+  push(type: string, payload: unknown = {}, sequence?: number): void {
+    const frame = JSON.stringify({ type, payload, timestamp: 1, ...(sequence ? { sequence } : {}) })
+    this.streams.at(-1)?.enqueue(new TextEncoder().encode(`: ping\n\ndata: ${frame}\n\n`))
+  }
+
+  end(): void {
+    this.streams.at(-1)?.close()
+  }
+}
+
+describe("Agent direct channel over HTTP", () => {
+  it("sends by POST and reads by SSE on an http session, with the grant kept", async () => {
+    const box = new FakeBoxHttp()
+    const tasks = createTasks(offer(BOX_URL, 2))
+    const { session } = open(tasks, {
+      WebSocket: WebSocketImpl,
+      fetch: box.fetch,
+      transport: "http",
+    })
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    const result = session.sendAndWait("Analyze", { reasoningEffort: "high" })
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(box.eventUrls).toEqual([
+      "https://49999-box1.e2b.app/api/mitra/chat/events?grant=secret&fromSequence=2",
+    ])
+    expect(box.posts[0]).toEqual({
+      url: "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=secret",
+      body: { type: "message", content: "Analyze", reasoningEffort: "high" },
+    })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+
+    box.push("stepStart", { lifecycle: { turnId: "turn-1" } }, 3)
+    box.push("textChunk", { text: "Hello", kind: "text", lifecycle: { turnId: "turn-1" } }, 4)
+    box.push("stepFinish", { reason: "endTurn", lifecycle: { turnId: "turn-1" } }, 5)
+
+    await expect(result).resolves.toMatchObject({ content: "Hello", reason: "endTurn" })
+  })
+
+  it("takes HTTP on an auto session when the runtime has no WebSocket", async () => {
+    vi.stubGlobal("WebSocket", undefined)
+    const box = new FakeBoxHttp()
     const tasks = createTasks(offer())
-    const { session, fallback } = open(tasks, { WebSocket: WebSocketImpl, transport: "http" })
+    const { session } = open(tasks, { fetch: box.fetch })
+
+    session.send("from a Serverless Function")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    expect(tasks.create).toHaveBeenCalledWith({ agentType: "CLAUDE", runtime: "T3" })
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
+  it("rejects the prompt with the box's refusal, reported once and never accepted", async () => {
+    const box = new FakeBoxHttp()
+    box.answer = async () => ({
+      status: 403,
+      body: { error_code: "PLAN_LIMIT", message: "Plan limit reached" },
+    })
+    const tasks = createTasks(offer())
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+    const accepted = vi.fn()
+    const errors: unknown[] = []
+    session.on("accepted", accepted)
+    session.on("error", (error) => errors.push(error))
+
+    await expect(session.sendAndWait("Over quota")).rejects.toEqual(
+      new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(errors).toEqual([
+      { code: "PLAN_LIMIT", error: "Failed to send Agent prompt: Plan limit reached" },
+    ])
+    expect(accepted).not.toHaveBeenCalled()
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(session.status).toBe("idle")
+  })
+
+  it("fails the prompt when the box got no admission in time (504)", async () => {
+    const box = new FakeBoxHttp()
+    box.answer = async () => ({ status: 504 })
+    const tasks = createTasks(offer())
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    await expect(session.sendAndWait("Slow host")).rejects.toThrow(
+      "no admission for the turn (504)",
+    )
+  })
+
+  it("falls back to the Copilot, visibly, when the box has no HTTP routes", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsStatus = 404
+    const tasks = createTasks(offer())
+    const { session, raw, fallback } = open(tasks, { fetch: box.fetch, transport: "http" })
 
     session.send("hello")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    expect(tasks.channel).not.toHaveBeenCalled()
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "http_unsupported" },
+    })
     expect(fallback.transports).toEqual(["http"])
+    expect(box.posts).toHaveLength(0)
+  })
+
+  it("finds the admission in the replay when the POST and the stream were lost", async () => {
+    vi.useFakeTimers()
+    const box = new FakeBoxHttp()
+    box.answer = () => Promise.reject(new Error("socket hang up"))
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session, raw } = open(tasks, { fetch: box.fetch, transport: "http" })
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    session.send("Survive the drop")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    box.end()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(box.eventUrls).toHaveLength(2))
+
+    expect(box.eventUrls[1]).toBe(
+      "https://49999-box1.e2b.app/api/mitra/chat/events?grant=secret&fromSequence=3",
+    )
+    expect(raw.map((event) => event.type)).toEqual(["channelReconnecting", "channelConnected"])
+    expect(accepted).not.toHaveBeenCalled()
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+
+    box.push("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    session.close()
+  })
+
+  it("posts an interrupt to the box", async () => {
+    const box = new FakeBoxHttp()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("long task")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    box.push("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    await session.cancel()
+
+    expect(box.posts[1]?.body).toEqual({ type: "interrupt" })
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    session.close()
+  })
+})
+
+describe("Agent box HTTP routes", () => {
+  it("sits next to the socket path and keeps the grant and the proxy ticket", () => {
+    expect(
+      boxRoute(
+        "wss://dev.mitralab.io/__ide/3773-box.e2b-dev.mitralab.ai/api/mitra/chat/ws?grant=g&ticket=t",
+        "messages",
+      ),
+    ).toBe(
+      "https://dev.mitralab.io/__ide/3773-box.e2b-dev.mitralab.ai/api/mitra/chat/messages?grant=g&ticket=t",
+    )
+    expect(boxRoute("ws://localhost:3773/api/mitra/chat/ws?grant=g", "events")).toBe(
+      "http://localhost:3773/api/mitra/chat/events?grant=g",
+    )
   })
 })
 

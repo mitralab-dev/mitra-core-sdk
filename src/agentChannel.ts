@@ -4,6 +4,7 @@ import type {
   AgentTaskEventObserver,
   AgentTaskEventSource,
 } from "./agentSession"
+import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentTaskChannel, AgentTaskEvent, AgentTaskInput } from "./types"
 
@@ -20,11 +21,11 @@ export const SILENCE_TIMEOUT_MS = 60_000
  */
 export const RECONNECT_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000]
 /**
- * How long a message written on the box socket waits for the box to say the turn was admitted.
- * The box gives the Copilot 20 s to rule and answers with an `error` frame when it does not, so
- * this only fires on a box that went quiet with the socket still open.
+ * How long a message handed to the box waits for the box to say the turn was admitted. The box
+ * gives the Copilot 20 s on the socket and 30 s on HTTP, then answers with an `error` frame or a
+ * 504, so this only fires on a box that went quiet with the wire still up.
  */
-export const ADMISSION_TIMEOUT_MS = 30_000
+export const ADMISSION_TIMEOUT_MS = 35_000
 /** The box closes the older socket with this code when the same chat is opened elsewhere. */
 const SUPERSEDED_CLOSE_CODE = 4409
 /** `WebSocket.OPEN`, read as a literal so an injected implementation without the static works. */
@@ -61,12 +62,40 @@ export interface AgentDirectChannelOptions {
    * `channelDeclined` event with reason `websocket` says so.
    */
   WebSocket?: AgentWebSocketConstructor
+  /** fetch for the box's HTTP routes. Defaults to `globalThis.fetch`. */
+  fetch?: AgentFetch
 }
+
+/** The part of a fetch response the HTTP channel reads. */
+export interface AgentFetchResponse {
+  readonly ok: boolean
+  readonly status: number
+  json(): Promise<unknown>
+  readonly body: {
+    getReader(): {
+      read(): Promise<{ done: boolean; value?: Uint8Array | undefined }>
+      cancel(): Promise<void>
+      releaseLock(): void
+    }
+  } | null
+}
+
+export type AgentFetch = (
+  url: string,
+  init: {
+    method?: string
+    headers?: Record<string, string>
+    body?: string
+    signal?: AbortSignal
+  },
+) => Promise<AgentFetchResponse>
+
+type DirectMode = "websocket" | "http"
 
 /** Why the Copilot's offer was not followed. Surfaced to the app as a `channelDeclined` event. */
 interface ChannelDeclined {
   readonly declined: {
-    readonly reason: "host" | "body" | "unavailable" | "websocket"
+    readonly reason: "host" | "body" | "unavailable" | "websocket" | "http_unsupported"
     readonly host?: string
     readonly error?: string
   }
@@ -86,8 +115,21 @@ interface DialOptions {
   onLost(error: Error, code?: number): void
 }
 
+/** The box, reached over its socket or its HTTP routes, as the session's sends see it. */
+interface Wire {
+  close(): void
+  /** Null when the wire cannot carry it right now. */
+  interrupt(input: AgentTaskInput): Promise<boolean> | null
+  /** False when the message was not handed over; the admission is settled by the wire or stream. */
+  message(input: AgentTaskInput, admission: PendingAdmission): boolean
+}
+
+interface ReopenHandlers extends Pick<DialOptions, "onFrame" | "onLost"> {
+  replayFrom(channel: AgentTaskChannel): number | undefined
+}
+
 type ReopenOutcome =
-  | { readonly kind: "socket"; readonly socket: LiveSocket; readonly channel: AgentTaskChannel }
+  | { readonly kind: "wire"; readonly wire: Wire }
   | { readonly kind: "refused" }
   | { readonly kind: "failed"; readonly error: Error }
 
@@ -96,9 +138,9 @@ interface PendingAdmission {
   fail(error: Error): void
 }
 
-/** The box socket of one open chat, as the session's sends see it. */
+/** The direct channel of one open chat. */
 interface DirectLink {
-  socket: LiveSocket | null
+  wire: Wire | null
   inTurn: boolean
   admission: PendingAdmission | null
 }
@@ -141,6 +183,68 @@ export function isChannelHostAllowed(candidate: string, apiUrl?: string): boolea
 function boxAddress(wsUrl: string): string {
   const url = new URL(wsUrl)
   return `${url.origin}${url.pathname}`
+}
+
+/** A box HTTP route next to the socket path, keeping the grant (and ticket) in the query. */
+export function boxRoute(wsUrl: string, route: "messages" | "events"): string {
+  const url = new URL(wsUrl)
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:"
+  url.pathname = `${url.pathname.replace(/\/api\/mitra\/chat\/ws\/?$/, "")}/api/mitra/chat/${route}`
+  return url.toString()
+}
+
+/**
+ * Reads a box event stream until it ends. Each `data:` block is a frame as the socket carries
+ * it; `: ping` comments keep it alive. Silence past the window is the stream being gone: the
+ * read is raced against it because not every fetch fails a pending read when it goes half-open.
+ */
+async function readSse(
+  reader: ReturnType<NonNullable<AgentFetchResponse["body"]>["getReader"]>,
+  onFrame: (event: AgentTaskEvent) => void,
+): Promise<void> {
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const silence = () =>
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(`Agent box event stream went silent for ${SILENCE_TIMEOUT_MS / 1000}s.`),
+          ),
+        SILENCE_TIMEOUT_MS,
+      )
+    })
+  try {
+    for (;;) {
+      let chunk: { done: boolean; value?: Uint8Array | undefined }
+      try {
+        chunk = await Promise.race([reader.read(), silence()])
+      } catch (error) {
+        await reader.cancel().catch(() => undefined)
+        throw error
+      } finally {
+        clearTimeout(timer)
+      }
+      if (chunk.done) return
+      buffer += decoder.decode(chunk.value, { stream: true })
+      let separator = /\r?\n\r?\n/.exec(buffer)
+      while (separator) {
+        const block = buffer.slice(0, separator.index)
+        buffer = buffer.slice(separator.index + separator[0].length)
+        const data = block
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).replace(/^ /, ""))
+          .join("\n")
+        const event = data ? parseEvent(data) : null
+        if (event) onFrame(event)
+        separator = /\r?\n\r?\n/.exec(buffer)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -228,11 +332,21 @@ function channelEvent(
   return { type, payload, timestamp: Date.now() }
 }
 
+/** Raised when the box answers 404 on its HTTP routes: a template older than the HTTP channel. */
+class HttpUnsupportedError extends Error {
+  constructor(status: number) {
+    super(`The Agent box has no HTTP chat routes (${status}).`)
+    this.name = "HttpUnsupportedError"
+  }
+}
+
 /**
- * The chat's direct channel to its box. The Copilot hands out the box socket, admits every turn
- * and receives the box log; the box runs the turn. When the Copilot offers no channel, or the
- * offer cannot be followed, the chat stays on the concrete SDK's event source and REST inputs,
- * and a `channelDeclined` event says why: that fallback is never silent.
+ * The chat's direct channel to its box. The Copilot hands out the box address, admits every turn
+ * and receives the box log; the box runs the turn. The box is reached over its WebSocket or over
+ * its HTTP routes (POST to send, SSE to read), which is what a runtime without WebSocket uses.
+ * When the Copilot offers no channel, or the offer cannot be followed, the chat stays on the
+ * concrete SDK's event source and REST inputs, and a `channelDeclined` event says why: that
+ * fallback is never silent.
  */
 export class AgentDirectChannel implements AgentTaskEventSource {
   private readonly links = new Map<string, DirectLink>()
@@ -243,9 +357,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     private readonly options: AgentDirectChannelOptions = {},
   ) {}
 
-  /** Whether an open would try the box at all: the Copilot can be asked and a socket dialed. */
+  /** Whether an open would try the box at all: the Copilot can be asked and the box reached. */
   canDial(transport?: AgentSessionTransport): boolean {
-    return transport !== "http" && this.tasks.channel !== undefined && this.webSocket() !== null
+    return this.tasks.channel !== undefined && this.modeFor(transport) !== null
   }
 
   async open(
@@ -254,41 +368,49 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
   ): Promise<AgentTaskEventConnection> {
-    if (transport === "http" || this.tasks.channel === undefined) {
+    if (this.tasks.channel === undefined) {
       return this.fallback.open(taskId, observer, signal, transport)
     }
-    const answer = this.webSocket()
+    const mode = this.modeFor(transport)
+    const answer: AgentTaskChannel | ChannelDeclined = mode
       ? await this.requestChannel(taskId)
-      : ({ declined: { reason: "websocket" } } satisfies ChannelDeclined)
+      : { declined: { reason: transport === "websocket" ? "websocket" : "http_unsupported" } }
     if (signal?.aborted) throw signal.reason ?? new Error("Agent channel request aborted.")
-    if ("declined" in answer) {
-      observer.onEvent(channelEvent("channelDeclined", answer.declined))
+    if ("declined" in answer || !mode) {
+      if ("declined" in answer) observer.onEvent(channelEvent("channelDeclined", answer.declined))
       return this.fallback.open(taskId, observer, signal, transport)
     }
-    return this.openDirect(taskId, answer, observer, signal)
+    try {
+      return await this.openDirect(taskId, mode, answer, observer, signal)
+    } catch (error) {
+      if (!(error instanceof HttpUnsupportedError)) throw error
+      observer.onEvent(
+        channelEvent("channelDeclined", { reason: "http_unsupported", error: error.message }),
+      )
+      return this.fallback.open(taskId, observer, signal, transport)
+    }
   }
 
   /**
-   * Writes a message or an interrupt on the box socket when the chat is on the direct channel
-   * and that socket is open right now. Null sends the caller to REST: no direct channel, a
-   * socket lost or mid-redial, or an approval, which stays on REST.
+   * Hands a message or an interrupt to the box when the chat is on the direct channel and its
+   * wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
+   * mid-redial, or an approval, which stays on REST.
    *
-   * A message resolves only when the box answers for it. `stepStart` is the box starting the
-   * turn the Copilot admitted: from then on the turn runs and reaches the Copilot's log whether
-   * or not this process is still around, so a Serverless Function may return. An `error`
-   * frame is a refusal the session already reports from the stream, and resolves false.
+   * A message resolves only when the box answers for it. `stepStart` on the stream, or the 200 of
+   * the HTTP route, is the box starting the turn the Copilot admitted: from then on the turn runs
+   * and reaches the Copilot's log whether or not this process is still around, so a Serverless
+   * Function may return. An `error` frame is a refusal the session already reports from the
+   * stream, and resolves false; a refusal in the HTTP answer rejects with `AgentTaskTurnError`.
    *
-   * A frame written on a socket that closes before the box answers is not sent again over REST:
-   * the box may have admitted the turn, and a second copy would start it twice. The redial
-   * replays the box log, where the `stepStart` of an admitted turn is.
+   * A message whose wire drops before the box answers is not sent again over REST: the box may
+   * have admitted the turn, and a second copy would start it twice. The redial replays the box
+   * log, where the `stepStart` of an admitted turn is.
    */
   send(taskId: string, input: AgentTaskInput): Promise<boolean> | null {
     if (input.type === "approval_response") return null
     const link = this.links.get(taskId)
-    if (!link?.socket) return null
-    if (input.type !== "message") {
-      return link.socket.send(JSON.stringify(input)) ? Promise.resolve(true) : null
-    }
+    if (!link?.wire) return null
+    if (input.type !== "message") return link.wire.interrupt(input)
     link.admission?.settle(false)
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
@@ -315,7 +437,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       }
     })
     link.admission = admission
-    if (!link.socket.send(JSON.stringify(input))) {
+    if (!link.wire.message(input, admission)) {
       admission.settle(false)
       return null
     }
@@ -323,10 +445,26 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     return admitted
   }
 
+  /** `websocket` needs a socket; `http` needs fetch; `auto` prefers the socket. */
+  private modeFor(transport?: AgentSessionTransport): DirectMode | null {
+    const socket = this.webSocket() !== null
+    const http = this.fetcher() !== null
+    if (transport === "websocket") return socket ? "websocket" : null
+    if (transport === "http") return http ? "http" : null
+    if (socket) return "websocket"
+    return http ? "http" : null
+  }
+
   private webSocket(): AgentWebSocketConstructor | null {
     if (this.options.WebSocket) return this.options.WebSocket
     const global = (globalThis as { WebSocket?: unknown }).WebSocket
     return typeof global === "function" ? (global as AgentWebSocketConstructor) : null
+  }
+
+  private fetcher(): AgentFetch | null {
+    if (this.options.fetch) return this.options.fetch
+    const global = (globalThis as { fetch?: unknown }).fetch
+    return typeof global === "function" ? (global as AgentFetch) : null
   }
 
   /**
@@ -360,16 +498,18 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * only when the redial gives up, when the Copilot no longer offers the box, or when there is
    * no turn to resume: dialing an idle box again would wake it for nobody.
    *
-   * Opening never asks for a replay. What an idle chat missed is history, which the session
-   * loads by REST; replaying from an older cursor would put old turns on screen as live text.
+   * Opening never asks for an older replay. What an idle chat missed is history, which the
+   * session loads by REST; replaying from an older cursor would put old turns on screen as live
+   * text. The HTTP stream opens from the sequence the Copilot reported, which is the same thing.
    */
   private async openDirect(
     taskId: string,
+    mode: DirectMode,
     channel: AgentTaskChannel,
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
   ): Promise<AgentTaskEventConnection> {
-    const link: DirectLink = { socket: null, inTurn: false, admission: null }
+    const link: DirectLink = { wire: null, inTurn: false, admission: null }
     let box = boxAddress(channel.wsUrl)
     let cursor = channel.lastSequence
     const abort = new AbortController()
@@ -384,14 +524,14 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       else if (event.type === "error") link.admission?.settle(false)
     }
     const onLost = (error: Error, code?: number) => {
-      link.socket = null
+      link.wire = null
       if (abort.signal.aborted) return
       if (!link.inTurn || code === SUPERSEDED_CLOSE_CODE) {
         link.admission?.settle(false)
         observer.onDisconnect(error)
         return
       }
-      void this.redial(taskId, error, abort.signal, observer, {
+      void this.redial(taskId, mode, error, abort.signal, observer, {
         onFrame,
         onLost,
         replayFrom: (next) => {
@@ -401,35 +541,53 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           cursor = next.lastSequence
           return undefined
         },
-      }).then((socket) => {
-        if (socket) link.socket = socket
+      }).then((wire) => {
+        if (wire) link.wire = wire
         else link.admission?.settle(false)
       })
     }
 
-    link.socket = await this.dial(channel.wsUrl, { signal: abort.signal, onFrame, onLost })
+    try {
+      link.wire = await this.connect(mode, channel, { signal: abort.signal, onFrame, onLost })
+    } catch (error) {
+      signal?.removeEventListener("abort", onAbort)
+      throw error
+    }
     this.links.set(taskId, link)
     return {
       close: () => {
         signal?.removeEventListener("abort", onAbort)
         abort.abort()
-        link.socket?.close()
-        link.socket = null
+        link.wire?.close()
+        link.wire = null
         link.admission?.settle(false)
         if (this.links.get(taskId) === link) this.links.delete(taskId)
       },
     }
   }
 
+  private async connect(
+    mode: DirectMode,
+    channel: AgentTaskChannel,
+    options: DialOptions,
+  ): Promise<Wire> {
+    if (mode === "http") return this.openHttp(channel, options)
+    const socket = await this.dial(channel.wsUrl, options)
+    return {
+      close: () => socket.close(),
+      interrupt: (input) => (socket.send(JSON.stringify(input)) ? Promise.resolve(true) : null),
+      message: (input) => socket.send(JSON.stringify(input)),
+    }
+  }
+
   private async redial(
     taskId: string,
+    mode: DirectMode,
     cause: Error,
     signal: AbortSignal,
     observer: AgentTaskEventObserver,
-    handlers: Pick<DialOptions, "onFrame" | "onLost"> & {
-      replayFrom(channel: AgentTaskChannel): number | undefined
-    },
-  ): Promise<LiveSocket | null> {
+    handlers: ReopenHandlers,
+  ): Promise<Wire | null> {
     let lastError = cause
     for (const [index, delayMs] of RECONNECT_DELAYS_MS.entries()) {
       const attempt = index + 1
@@ -442,14 +600,14 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       )
       await sleep(delayMs, signal)
       if (signal.aborted) return null
-      const outcome = await this.reopenOnce(taskId, signal, handlers)
+      const outcome = await this.reopenOnce(taskId, mode, signal, handlers)
       if (signal.aborted) {
-        if (outcome.kind === "socket") outcome.socket.close()
+        if (outcome.kind === "wire") outcome.wire.close()
         return null
       }
-      if (outcome.kind === "socket") {
+      if (outcome.kind === "wire") {
         observer.onEvent(channelEvent("channelConnected", { attempt }))
-        return outcome.socket
+        return outcome.wire
       }
       if (outcome.kind === "refused") {
         observer.onDisconnect(
@@ -471,10 +629,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   // rather than thrown, so the caller decides between another attempt and giving up.
   private async reopenOnce(
     taskId: string,
+    mode: DirectMode,
     signal: AbortSignal,
-    handlers: Pick<DialOptions, "onFrame" | "onLost"> & {
-      replayFrom(channel: AgentTaskChannel): number | undefined
-    },
+    handlers: ReopenHandlers,
   ): Promise<ReopenOutcome> {
     let channel: AgentTaskChannel | null
     try {
@@ -487,16 +644,117 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     }
     try {
       const replayFrom = handlers.replayFrom(channel)
-      const socket = await this.dial(channel.wsUrl, {
+      const wire = await this.connect(mode, channel, {
         onFrame: handlers.onFrame,
         onLost: handlers.onLost,
         signal,
         ...(replayFrom === undefined ? {} : { replayFrom }),
       })
-      return { kind: "socket", socket, channel }
+      return { kind: "wire", wire }
     } catch (error) {
+      if (error instanceof HttpUnsupportedError) return { kind: "refused" }
       return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }
     }
+  }
+
+  /**
+   * The box over HTTP: the event stream reads what the socket would carry, from the sequence
+   * asked, and each message is a POST the box answers once the turn was admitted.
+   */
+  private async openHttp(channel: AgentTaskChannel, options: DialOptions): Promise<Wire> {
+    const fetch = this.fetcher()
+    if (!fetch) throw new TypeError("fetch is not available.")
+    const messagesUrl = boxRoute(channel.wsUrl, "messages")
+    const eventsUrl = new URL(boxRoute(channel.wsUrl, "events"))
+    eventsUrl.searchParams.set("fromSequence", String(options.replayFrom ?? channel.lastSequence))
+    const close = await this.readEvents(fetch, eventsUrl.toString(), options)
+
+    const post = (input: AgentTaskInput) =>
+      fetch(messagesUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      })
+    return {
+      close,
+      interrupt: (input) =>
+        post(input).then((response) => {
+          if (!response.ok) {
+            throw new Error(`The Agent box refused the interrupt (${response.status}).`)
+          }
+          return true
+        }),
+      message: (input, admission) => {
+        // A request the network lost may still have been admitted: its `stepStart` on the
+        // stream, or the admission timeout, settles it then.
+        post(input).then(
+          async (response) => {
+            if (response.ok) {
+              admission.settle(true)
+              return
+            }
+            if (response.status === 504) {
+              admission.fail(new Error("The Agent box got no admission for the turn (504)."))
+              return
+            }
+            const body = asObject(await response.json().catch(() => null))
+            const code = typeof body?.error_code === "string" ? body.error_code : undefined
+            const message =
+              typeof body?.message === "string"
+                ? body.message
+                : `The Agent box refused the message (${response.status}).`
+            admission.fail(new AgentTaskTurnError(message, code))
+          },
+          () => undefined,
+        )
+        return true
+      },
+    }
+  }
+
+  /** Opens the box event stream; resolves once the box answered, with the way to close it. */
+  private async readEvents(
+    fetch: AgentFetch,
+    url: string,
+    options: DialOptions,
+  ): Promise<() => void> {
+    if (options.signal?.aborted) throw new Error("Agent box event stream aborted.")
+    const abort = new AbortController()
+    let intentionalClose = false
+    const close = () => {
+      if (intentionalClose) return
+      intentionalClose = true
+      options.signal?.removeEventListener("abort", close)
+      abort.abort()
+    }
+    options.signal?.addEventListener("abort", close, { once: true })
+    const handshake = setTimeout(() => abort.abort(), CONNECT_TIMEOUT_MS)
+    let response: AgentFetchResponse
+    try {
+      response = await fetch(url, {
+        headers: { Accept: "text/event-stream" },
+        signal: abort.signal,
+      })
+    } catch (error) {
+      close()
+      throw error instanceof Error ? error : new Error(String(error))
+    } finally {
+      clearTimeout(handshake)
+    }
+    if (!response.ok || !response.body) {
+      close()
+      if (response.status === 404) throw new HttpUnsupportedError(response.status)
+      throw new Error(`Agent box event stream failed (${response.status}).`)
+    }
+    const lost = (error: Error) => {
+      if (intentionalClose) return
+      close()
+      options.onLost(error)
+    }
+    void readSse(response.body.getReader(), (event) => options.onFrame(asDelta(event)))
+      .then(() => lost(new Error("Agent box event stream ended.")))
+      .catch((error: unknown) => lost(error instanceof Error ? error : new Error(String(error))))
+    return close
   }
 
   private dial(url: string, options: DialOptions): Promise<LiveSocket> {

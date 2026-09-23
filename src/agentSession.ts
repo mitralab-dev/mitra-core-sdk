@@ -1,4 +1,5 @@
 import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
+import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type {
   AgentCredentialScope,
@@ -8,6 +9,8 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
 } from "./types"
+
+export { AgentTaskTurnError }
 
 const AGENT_QUEUE_LIMIT = 10
 const CANCEL_SAFETY_MS = 10_000
@@ -49,8 +52,9 @@ export interface NewAgentTaskSessionOptions {
   /** Credential scope the task resolves against. Omitted means the Copilot server default. */
   scope?: AgentCredentialScope
   /**
-   * `auto` and `websocket` take the box's direct channel when the Copilot offers it and fall
-   * back to the event source otherwise; `http` stays on the event source and REST inputs.
+   * How the session reaches the box the Copilot offers: `websocket` on its socket, `http` on its
+   * HTTP routes, `auto` on the socket when available and HTTP otherwise. Without an offer the
+   * session falls back to the event source.
    */
   transport?: AgentSessionTransport
 }
@@ -98,16 +102,6 @@ export interface AgentTurnResult {
   task: AgentTask
   content: string
   reason: string
-}
-
-export class AgentTaskTurnError extends Error {
-  readonly code: string | undefined
-
-  constructor(message: string, code?: string) {
-    super(message)
-    this.name = "AgentTaskTurnError"
-    this.code = code
-  }
 }
 
 export interface AgentTaskSessionEventMap {

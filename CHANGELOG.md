@@ -4,19 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## 0.2.9-beta.0
 
-- Take the chat's direct channel to its box as the default Agent session transport. `auto` and
-  `websocket` sessions ask the Copilot for the channel (`agentTasks.channel`, `POST
-/api/v1/tasks/{id}/channel`), dial the box, and send messages and interrupts on its socket.
+- Take the chat's direct channel to its box as the Agent session transport. Sessions ask the
+  Copilot for the channel (`agentTasks.channel`, `POST /api/v1/tasks/{id}/channel`) and send
+  messages and interrupts to the box: on its socket for `websocket`, on its HTTP routes (POST to
+  send, SSE to read) for `http`, and on the socket when available or HTTP otherwise for `auto`.
   Same host rule, redial with backoff and replay, and raw `channelDeclined`,
   `channelReconnecting` and `channelConnected` events as the platform SDK 1.2.0.
 - Fall back to the concrete SDK's event source and REST inputs only when the channel cannot be
   followed, and always say so with `channelDeclined` (`unavailable`, `body`, `host`,
-  `websocket`).
-- Accept a WebSocket implementation through `directChannel.WebSocket` for runtimes without a
-  global one (Node 18 and 20, the Serverless Function runtime). No new dependency.
-- Count a message on the box socket as sent only when the box starts the admitted turn
-  (`stepStart`), and emit the new `accepted` session event then, or after the Copilot's 202 on
-  REST.
+  `websocket`, `http_unsupported`).
+- Accept a WebSocket implementation through `directChannel.WebSocket` and a fetch through
+  `directChannel.fetch` for runtimes without a global one. No new dependency.
+- Count a message as sent only when the box starts the admitted turn (`stepStart`, or the 200 of
+  the HTTP POST), and emit the new `accepted` session event then, or after the Copilot's 202 on
+  REST. A refusal in the HTTP answer rejects with `AgentTaskTurnError` and the box's code.
 - Create new chats with `runtime: "T3"` when the session can reach the box and names no runtime.
 - Publish contract corpus `0.2.9-beta.0` with the same parity cases.
 
