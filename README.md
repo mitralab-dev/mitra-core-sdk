@@ -97,6 +97,9 @@ with `runtime: "T3"` so it is born on its box, unless the session names a runtim
   (SSE, from a sequence) to read, keeping the `grant` and `ticket` query of the channel URL.
   `auto` uses the socket when a WebSocket implementation is available and HTTP otherwise, which
   is the case of a Serverless Function.
+  The grant in those URLs lasts 10 minutes and the dev proxy ticket 60 seconds: a 401 or 403 on
+  the POST or on opening the stream asks the Copilot for the channel again and retries once on
+  the fresh URLs; a second rejection is an error.
 - **Host rule.** The channel URL carries a grant, so Core only reaches the API gateway host
   (`directChannel.apiUrl`, over `wss:` when the API is `https:`) or a fleet box host over `wss:` (`*.e2b.app`,
   `*.e2b-<env>.mitralab.ai`), on either transport.

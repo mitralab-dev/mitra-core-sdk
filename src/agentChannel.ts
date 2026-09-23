@@ -353,6 +353,26 @@ class HttpUnsupportedError extends Error {
   }
 }
 
+/** 401 or 403 on a box HTTP route: the grant (10 min) or the proxy ticket (60 s) went stale. */
+class GrantRejectedError extends Error {
+  constructor(status: number) {
+    super(`The Agent box rejected the channel grant (${status}).`)
+    this.name = "GrantRejectedError"
+  }
+}
+
+/** The grant was rejected and a fresh channel could not be had: the message never reached the box. */
+class ChannelRenewalError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ChannelRenewalError"
+  }
+}
+
+function isGrantRejection(status: number): boolean {
+  return status === 401 || status === 403
+}
+
 /**
  * The chat's direct channel to its box. The Copilot hands out the box address, admits every turn
  * and receives the box log; the box runs the turn. The box is reached over its WebSocket or over
@@ -588,7 +608,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     }
 
     try {
-      link.wire = await this.connect(mode, channel, { signal: abort.signal, onFrame, onLost })
+      link.wire = await this.connect(taskId, mode, channel, {
+        signal: abort.signal,
+        onFrame,
+        onLost,
+      })
     } catch (error) {
       signal?.removeEventListener("abort", onAbort)
       throw error
@@ -609,11 +633,12 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   private async connect(
+    taskId: string,
     mode: DirectMode,
     channel: AgentTaskChannel,
     options: DialOptions,
   ): Promise<Wire> {
-    if (mode === "http") return this.openHttp(channel, options)
+    if (mode === "http") return this.openHttp(taskId, channel, options)
     const socket = await this.dial(channel.wsUrl, options)
     return {
       close: () => socket.close(),
@@ -686,7 +711,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     }
     try {
       const replayFrom = handlers.replayFrom(channel)
-      const wire = await this.connect(mode, channel, {
+      const wire = await this.connect(taskId, mode, channel, {
         onFrame: handlers.onFrame,
         onLost: handlers.onLost,
         signal,
@@ -702,23 +727,63 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   /**
    * The box over HTTP: the event stream reads what the socket would carry, from the sequence
    * asked, and each message is a POST the box answers once the turn was admitted.
+   *
+   * The URLs carry a grant that lasts 10 minutes and, behind the dev proxy, a ticket that lasts
+   * 60 seconds. A 401 or 403 is that grant gone stale: the Copilot is asked for the channel again
+   * and the request goes once more on the fresh URLs. A second rejection is an error.
    */
-  private async openHttp(channel: AgentTaskChannel, options: DialOptions): Promise<Wire> {
+  private async openHttp(
+    taskId: string,
+    channel: AgentTaskChannel,
+    options: DialOptions,
+  ): Promise<Wire> {
     const fetch = this.fetcher()
     if (!fetch) throw new TypeError("fetch is not available.")
-    const messagesUrl = boxRoute(channel.wsUrl, "messages")
-    const eventsUrl = new URL(boxRoute(channel.wsUrl, "events"))
-    eventsUrl.searchParams.set("fromSequence", String(options.replayFrom ?? channel.lastSequence))
-    const close = await this.readEvents(fetch, eventsUrl.toString(), options)
+    const fromSequence = String(options.replayFrom ?? channel.lastSequence)
+    let current = channel
+    const renew = async () => {
+      let next: AgentTaskChannel | null
+      try {
+        next = await this.tasks.channel!(taskId)
+      } catch (error) {
+        throw new ChannelRenewalError(
+          `The Agent box channel could not be renewed: ${errorMessage(error)}`,
+        )
+      }
+      if (!next || !isChannelHostAllowed(next.wsUrl, this.options.apiUrl)) {
+        throw new ChannelRenewalError("The Copilot no longer offers the box channel.")
+      }
+      current = next
+    }
+    const eventsUrl = () => {
+      const url = new URL(boxRoute(current.wsUrl, "events"))
+      url.searchParams.set("fromSequence", fromSequence)
+      return url.toString()
+    }
 
-    const post = (input: AgentTaskInput) =>
-      fetch(messagesUrl, {
+    let close: () => void
+    try {
+      close = await this.readEvents(fetch, eventsUrl(), options)
+    } catch (error) {
+      if (!(error instanceof GrantRejectedError)) throw error
+      await renew()
+      close = await this.readEvents(fetch, eventsUrl(), options)
+    }
+
+    const postOnce = (input: AgentTaskInput) =>
+      fetch(boxRoute(current.wsUrl, "messages"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
         // The URL carries the grant: a redirect would hand it to wherever it points.
         redirect: "error",
       })
+    const post = async (input: AgentTaskInput) => {
+      const response = await postOnce(input)
+      if (!isGrantRejection(response.status)) return response
+      await renew()
+      return postOnce(input)
+    }
     return {
       close,
       interrupt: (input) =>
@@ -729,8 +794,6 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           return true
         }),
       message: (input, admission) => {
-        // A request the network lost may still have been admitted: its `stepStart` on the
-        // stream, or the admission timeout, settles it then.
         post(input).then(
           async (response) => {
             if (response.ok) {
@@ -743,13 +806,22 @@ export class AgentDirectChannel implements AgentTaskEventSource {
             }
             const body = asObject(await response.json().catch(() => null))
             const code = typeof body?.error_code === "string" ? body.error_code : undefined
+            if (isGrantRejection(response.status) && code === undefined) {
+              admission.fail(new GrantRejectedError(response.status))
+              return
+            }
             const message =
               typeof body?.message === "string"
                 ? body.message
                 : `The Agent box refused the message (${response.status}).`
             admission.fail(new AgentTaskTurnError(message, code))
           },
-          () => undefined,
+          (error: unknown) => {
+            // A request the network lost may still have been admitted: its `stepStart` on the
+            // stream, or the admission timeout, settles it then. A rejected grant that could not
+            // be renewed means the message never reached the box.
+            if (error instanceof ChannelRenewalError) admission.fail(error)
+          },
         )
         return true
       },
@@ -789,6 +861,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     if (!response.ok || !response.body) {
       close()
       if (response.status === 404) throw new HttpUnsupportedError(response.status)
+      if (isGrantRejection(response.status)) throw new GrantRejectedError(response.status)
       throw new Error(`Agent box event stream failed (${response.status}).`)
     }
     const lost = (error: Error) => {

@@ -32,6 +32,7 @@ const TASK: AgentTask = {
 }
 
 const BOX_URL = "wss://49999-box1.e2b.app/api/mitra/chat/ws?grant=secret"
+const FRESH_BOX_URL = "wss://49999-box1.e2b.app/api/mitra/chat/ws?grant=fresh"
 const API_URL = "https://api.mitralab.ai"
 
 const EMPTY_PAGE: Page<never> = {
@@ -541,6 +542,10 @@ class FakeBoxHttp {
   readonly posts: { url: string; body: unknown }[] = []
   private readonly streams: ReadableStreamDefaultController<Uint8Array>[] = []
   eventsStatus = 200
+  /** Statuses the next event stream requests answer, before `eventsStatus` applies. */
+  readonly eventsStatuses: number[] = []
+  /** Answers the next POSTs get, before `answer` applies. */
+  readonly answers: { status: number; body?: unknown }[] = []
   answer: () => Promise<{ status: number; body?: unknown }> = async () => ({
     status: 200,
     body: { accepted: true, turnId: "turn-1", sequence: 1 },
@@ -549,12 +554,13 @@ class FakeBoxHttp {
   readonly fetch: AgentFetch = vi.fn(async (url: string, init: Parameters<AgentFetch>[1]) => {
     if (init.method === "POST") {
       this.posts.push({ url, body: JSON.parse(init.body ?? "null") })
-      const { status, body } = await this.answer()
+      const { status, body } = this.answers.shift() ?? (await this.answer())
       return { ok: status < 300, status, json: async () => body, body: null }
     }
     this.eventUrls.push(url)
-    if (this.eventsStatus !== 200) {
-      return { ok: false, status: this.eventsStatus, json: async () => ({}), body: null }
+    const eventsStatus = this.eventsStatuses.shift() ?? this.eventsStatus
+    if (eventsStatus !== 200) {
+      return { ok: false, status: eventsStatus, json: async () => ({}), body: null }
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
@@ -634,7 +640,7 @@ describe("Agent direct channel over HTTP", () => {
   it("rejects the prompt with the box's refusal, reported once and never accepted", async () => {
     const box = new FakeBoxHttp()
     box.answer = async () => ({
-      status: 403,
+      status: 429,
       body: { error_code: "PLAN_LIMIT", message: "Plan limit reached" },
     })
     const tasks = createTasks(offer())
@@ -654,6 +660,108 @@ describe("Agent direct channel over HTTP", () => {
     expect(accepted).not.toHaveBeenCalled()
     expect(tasks.sendInput).not.toHaveBeenCalled()
     expect(session.status).toBe("idle")
+  })
+
+  it("renews a stale grant once when the POST gets 401 and sends on the fresh URL", async () => {
+    const box = new FakeBoxHttp()
+    box.answers.push({ status: 401 })
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+
+    expect(box.posts.map((post) => post.url)).toEqual([
+      "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=secret",
+      "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=fresh",
+    ])
+    expect(tasks.channel).toHaveBeenCalledTimes(2)
+  })
+
+  it("fails the prompt out loud when the renewed grant is rejected again", async () => {
+    const box = new FakeBoxHttp()
+    box.answers.push({ status: 401 }, { status: 403 })
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+    const errors: unknown[] = []
+    session.on("error", (error) => errors.push(error))
+
+    await expect(session.sendAndWait("hello")).rejects.toThrow(
+      "The Agent box rejected the channel grant (403).",
+    )
+    expect(box.posts).toHaveLength(2)
+    expect(errors).toEqual([
+      { error: "Failed to send Agent prompt: The Agent box rejected the channel grant (403)." },
+    ])
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
+  it("fails the prompt when the grant is rejected and the Copilot offers no channel anymore", async () => {
+    const box = new FakeBoxHttp()
+    box.answers.push({ status: 401 })
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue(null)
+    const tasks = createTasks(channel)
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    await expect(session.sendAndWait("hello")).rejects.toThrow(
+      "The Copilot no longer offers the box channel.",
+    )
+    expect(box.posts).toHaveLength(1)
+  })
+
+  it("renews a stale grant once when the event stream gets 403", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsStatuses.push(403)
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session, raw } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+
+    expect(box.eventUrls).toEqual([
+      "https://49999-box1.e2b.app/api/mitra/chat/events?grant=secret&fromSequence=0",
+      "https://49999-box1.e2b.app/api/mitra/chat/events?grant=fresh&fromSequence=0",
+    ])
+    expect(box.posts[0]?.url).toBe("https://49999-box1.e2b.app/api/mitra/chat/messages?grant=fresh")
+    expect(raw.some((event) => event.type === "channelDeclined")).toBe(false)
+  })
+
+  it("falls back, visibly, when the event stream rejects the renewed grant too", async () => {
+    const box = new FakeBoxHttp()
+    box.eventsStatuses.push(401, 401)
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session, raw, fallback } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    expect(raw[0]).toMatchObject({
+      type: "channelDeclined",
+      payload: { reason: "unavailable", error: "The Agent box rejected the channel grant (401)." },
+    })
+    expect(box.eventUrls).toHaveLength(2)
+    expect(fallback.transports).toEqual(["http"])
   })
 
   it("fails the prompt when the box got no admission in time (504)", async () => {
