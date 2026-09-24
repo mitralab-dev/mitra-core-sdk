@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.9` is the stable release of the `0.2.9-beta.1` surface: the direct box channel on the
+  Agent session, limited to business agent chats. Same parity cases; the version exists so a
+  consumer pinning the stable package can pin a corpus with the same number.
+
 - `0.2.9-beta.1` is the `0.2.9-beta.0` parity surface republished with the direct channel
   limited to business agent chats and the box refusals of the final contract. Same parity
   cases; the version exists so a consumer pinning the package can pin a corpus with the same number.
