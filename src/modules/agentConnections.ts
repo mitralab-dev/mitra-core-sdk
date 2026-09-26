@@ -10,12 +10,14 @@ import {
   expectObjectArray,
 } from "../response"
 import type { Transport } from "../transport"
+import { readUsage } from "./agentCredentials"
 import type {
   AgentConnection,
   AgentConnectionCreateInput,
   AgentConnectionCustomProviderInput,
   AuthenticationResult,
   CopilotProvider,
+  CredentialUsage,
   DeviceAuthorization,
   OAuthExchangeInput,
   OAuthStartResult,
@@ -28,6 +30,11 @@ export interface AgentConnectionsModule {
   /** Lists app connections with safe per-provider status and no credentials. */
   list(): Promise<AgentConnection[]>
   get(id: string): Promise<AgentConnection>
+  /**
+   * The last subscription window a chat on this connection's provider login reported. Null until
+   * one has.
+   */
+  usage(id: string, provider: CopilotProvider): Promise<CredentialUsage | null>
   /** Creates an unauthenticated provider container. */
   create(name: string): Promise<AgentConnection>
   /**
@@ -84,6 +91,13 @@ export function createAgentConnectionsModule(
       return expectAgentConnection(
         await transport.request<unknown>(path(id), { method: "GET" }),
         "Connection response",
+        errors,
+      )
+    },
+    async usage(id, provider) {
+      return readUsage(
+        transport.request<unknown>(`${providerPath(id, provider)}/usage`, { method: "GET" }),
+        "Connection usage response",
         errors,
       )
     },

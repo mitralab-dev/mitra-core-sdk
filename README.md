@@ -32,7 +32,8 @@ The package contains:
 - Function scheduling composed into single-Function create, patch, get, and list
 - business agents and workflows
 - integration configs, resources, templates, tests, proxying, and executions
-- Copilot tasks, messages, credentials, models, and app connections
+- Copilot tasks, messages, credentials and the last subscription window each one reported, models,
+  and app connections
 - an Agent task live-session state machine with bounded queue and `sendAndWait`, and the direct
   channel to the chat's box
 - Messenger notifications and composed safe app context

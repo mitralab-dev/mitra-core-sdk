@@ -7,6 +7,7 @@ export {
   withAgentTaskSessions,
 } from "./agentSession"
 export type {
+  AgentProviderUsage,
   AgentQueueItem,
   AgentSendAndWaitOptions,
   AgentSendOptions,
@@ -252,6 +253,7 @@ export type {
   ColumnInput,
   CopilotProvider,
   CredentialStatus,
+  CredentialUsage,
   CustomQueryDefinition,
   CustomQueryInput,
   CustomQuerySummary,

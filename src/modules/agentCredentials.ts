@@ -6,6 +6,7 @@ import {
   expectAgentModel,
   expectAuthenticationResult,
   expectCredentialStatus,
+  expectCredentialUsage,
   expectDeviceAuthorization,
   expectEmpty,
   expectOAuthStartResult,
@@ -20,6 +21,7 @@ import type {
   AuthenticationResult,
   CopilotProvider,
   CredentialStatus,
+  CredentialUsage,
   DeviceAuthorization,
   OAuthExchangeInput,
   OAuthStartResult,
@@ -32,11 +34,41 @@ export interface AgentCredentialOptions {
 
 const MAX_CUSTOM_PROVIDER_MODELS = 32
 
+const USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"
+
+/**
+ * No reading is an answer, not a failure: the Copilot says so with its own code, which is told
+ * apart from any other 404 so a Copilot without the route still fails loudly.
+ */
+export async function readUsage(
+  request: Promise<unknown>,
+  context: string,
+  errors: SdkCoreErrorFactory,
+): Promise<CredentialUsage | null> {
+  let value: unknown
+  try {
+    value = await request
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === USAGE_NOT_FOUND) return null
+    throw error
+  }
+  return expectCredentialUsage(value, context, errors)
+}
+
 export interface AgentCredentialsModule {
   /** Lists safe credential status. Raw credentials never leave Copilot. */
   list(options?: AgentCredentialOptions): Promise<CredentialStatus[]>
   /** Lists models backed by a usable credential, optionally through a business agent connection. */
   listModels(agentId?: string, options?: AgentCredentialOptions): Promise<AgentModel[]>
+  /**
+   * The last subscription window a chat on this credential reported, readable with no chat open.
+   * Resolves to null until a turn on the provider's subscription login has reported one; an API
+   * key never has a window.
+   */
+  usage(
+    provider: CopilotProvider,
+    options?: AgentCredentialOptions,
+  ): Promise<CredentialUsage | null>
   /** Validates and stores a write-only API key. */
   saveApiKey(
     provider: CopilotProvider,
@@ -107,6 +139,16 @@ export function createAgentCredentialsModule(
         "Agent model response",
         errors,
         expectAgentModel,
+      )
+    },
+    async usage(provider, options) {
+      return readUsage(
+        transport.request<unknown>(`/api/v1/credentials/${providerSegment(provider)}/usage`, {
+          method: "GET",
+          ...scopeParams(options),
+        }),
+        "Credential usage response",
+        errors,
       )
     },
     async saveApiKey(provider, apiKey, options) {

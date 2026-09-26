@@ -1225,6 +1225,20 @@ export interface CredentialStatus {
   maskedApiKey: string | null
 }
 
+/**
+ * The session window of a provider subscription as a chat on that credential last reported it.
+ * `windowSeconds` and `resetsAt` are null when the harness did not state them.
+ */
+export interface CredentialUsage {
+  /** Share of the window already consumed, 0 to 100. */
+  usedPercent: number
+  windowSeconds: number | null
+  /** ISO instant the window resets. */
+  resetsAt: string | null
+  /** ISO instant the harness reported this reading. */
+  observedAt: string
+}
+
 export interface OAuthStartResult {
   authUrl: string
   state: string

@@ -17,6 +17,7 @@ import type {
   BatchExecution,
   ConnectionTestResult,
   CredentialStatus,
+  CredentialUsage,
   CustomQueryDefinition,
   CustomQuerySummary,
   DataSourceBulkResult,
@@ -1339,6 +1340,21 @@ export function expectCredentialStatus(
     if (!isNullableString(status[field])) invalidField(context, field, errors)
   }
   return status as unknown as CredentialStatus
+}
+
+export function expectCredentialUsage(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): CredentialUsage {
+  const usage = expectObject<JsonObject>(value, context, errors)
+  if (!isInteger(usage.usedPercent)) invalidField(context, "usedPercent", errors)
+  if (usage.windowSeconds !== null && !isInteger(usage.windowSeconds)) {
+    invalidField(context, "windowSeconds", errors)
+  }
+  if (!isNullableString(usage.resetsAt)) invalidField(context, "resetsAt", errors)
+  if (typeof usage.observedAt !== "string") invalidField(context, "observedAt", errors)
+  return usage as unknown as CredentialUsage
 }
 
 export function expectOAuthStartResult(

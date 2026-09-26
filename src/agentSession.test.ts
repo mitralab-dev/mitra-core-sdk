@@ -284,6 +284,41 @@ describe("Agent task session", () => {
     expect(session.content).toBe("resposta inteira")
   })
 
+  it("reports the subscription window the box sends during a turn and ignores an unreadable one", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const readings: unknown[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    const result = session.sendAndWait("quanto falta?", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(
+      event("providerUsage", {
+        harness: "claude",
+        usedPercent: 42,
+        windowSeconds: 18_000,
+        resetsAt: "2026-09-26T15:00:00.000Z",
+        observedAt: "2026-09-26T12:00:00.000Z",
+        lifecycle: { turnId: "turn-1" },
+      }),
+    )
+    source.emit(event("providerUsage", { harness: "claude", usedPercent: "42" }))
+    source.emit(event("textDelta", { text: "ok" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ content: "ok", reason: "endTurn" })
+    expect(readings).toEqual([
+      {
+        harness: "claude",
+        usedPercent: 42,
+        windowSeconds: 18_000,
+        resetsAt: "2026-09-26T15:00:00.000Z",
+        observedAt: "2026-09-26T12:00:00.000Z",
+      },
+    ])
+  })
+
   it("rejects sendAndWait with a typed producer error and continues with the FIFO queue", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")

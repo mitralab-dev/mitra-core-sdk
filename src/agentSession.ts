@@ -122,7 +122,21 @@ export interface AgentTaskSessionEventMap {
   cancelled: Record<string, never>
   queueChange: { queue: readonly AgentQueueItem[] }
   error: { code?: string; error: string }
+  /**
+   * The subscription window the chat's harness reported during a turn. Only a chat on the
+   * person's or the connection's own login reports one; the Copilot keeps the last reading, which
+   * `agentCredentials.usage` reads with no chat open.
+   */
+  providerUsage: AgentProviderUsage
   raw: AgentTaskEvent
+}
+
+export interface AgentProviderUsage {
+  harness: "claude" | "codex" | (string & {})
+  usedPercent: number
+  windowSeconds: number | null
+  resetsAt: string | null
+  observedAt: string | null
 }
 
 export interface AgentTaskSession {
@@ -172,6 +186,21 @@ interface TurnWaiter {
 
 interface InternalQueueItem extends AgentQueueItem {
   waiter?: TurnWaiter
+}
+
+// A reading that does not parse is dropped, not surfaced as an error: the meter is a side
+// channel, and a box speaking a newer shape must not break the conversation.
+function providerUsageOf(payload: Record<string, unknown> | null): AgentProviderUsage | null {
+  if (!payload || typeof payload.harness !== "string") return null
+  const { usedPercent, windowSeconds, resetsAt, observedAt } = payload
+  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) return null
+  return {
+    harness: payload.harness,
+    usedPercent,
+    windowSeconds: typeof windowSeconds === "number" ? windowSeconds : null,
+    resetsAt: typeof resetsAt === "string" ? resetsAt : null,
+    observedAt: typeof observedAt === "string" ? observedAt : null,
+  }
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -731,6 +760,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "workspace":
         this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
         break
+      case "providerUsage": {
+        const usage = providerUsageOf(payload)
+        if (usage) this.emit("providerUsage", usage)
+        break
+      }
       case "stepFinish": {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
         const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined
