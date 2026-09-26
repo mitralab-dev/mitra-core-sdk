@@ -1,6 +1,7 @@
 import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
 import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
+import { expectCredentialUsage } from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
@@ -8,6 +9,7 @@ import type {
   AgentTaskEvent,
   AgentTaskInput,
   AgentTaskRuntime,
+  CredentialUsage,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -122,8 +124,18 @@ export interface AgentTaskSessionEventMap {
   cancelled: Record<string, never>
   queueChange: { queue: readonly AgentQueueItem[] }
   error: { code?: string; error: string }
+  /**
+   * The subscription window the chat's harness reported during a turn. It comes only on the
+   * direct channel of a business agent chat, and only when the turn runs on the person's or the
+   * connection's own login; the Copilot stream a chat falls back to never carries it. The Copilot
+   * keeps the last reading, which `agentCredentials.usage` reads with no chat open.
+   */
+  providerUsage: AgentProviderUsage
   raw: AgentTaskEvent
 }
+
+/** The same shape `agentCredentials.usage` answers with. */
+export type AgentProviderUsage = CredentialUsage
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -172,6 +184,18 @@ interface TurnWaiter {
 
 interface InternalQueueItem extends AgentQueueItem {
   waiter?: TurnWaiter
+}
+
+// A reading that does not parse is dropped, not surfaced as an error: the meter is a side
+// channel, and a box speaking a newer shape must not break the conversation.
+function providerUsageOf(payload: Record<string, unknown> | null): AgentProviderUsage | null {
+  if (!payload) return null
+  try {
+    const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
+    return { harness, observedAt, status, windows }
+  } catch {
+    return null
+  }
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -731,6 +755,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "workspace":
         this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
         break
+      case "providerUsage": {
+        const usage = providerUsageOf(payload)
+        if (usage) this.emit("providerUsage", usage)
+        break
+      }
       case "stepFinish": {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
         const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined

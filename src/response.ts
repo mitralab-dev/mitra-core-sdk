@@ -17,6 +17,7 @@ import type {
   BatchExecution,
   ConnectionTestResult,
   CredentialStatus,
+  CredentialUsage,
   CustomQueryDefinition,
   CustomQuerySummary,
   DataSourceBulkResult,
@@ -1339,6 +1340,49 @@ export function expectCredentialStatus(
     if (!isNullableString(status[field])) invalidField(context, field, errors)
   }
   return status as unknown as CredentialStatus
+}
+
+export function expectCredentialUsage(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): CredentialUsage {
+  const usage = expectObject<JsonObject>(value, context, errors)
+  if (typeof usage.harness !== "string") invalidField(context, "harness", errors)
+  if (typeof usage.observedAt !== "string") invalidField(context, "observedAt", errors)
+  if (!isNullableString(usage.status)) invalidField(context, "status", errors)
+  if (!Array.isArray(usage.windows)) invalidField(context, "windows", errors)
+  for (const window of usage.windows) {
+    if (!isObject(window) || typeof window.kind !== "string")
+      invalidField(context, "windows.kind", errors)
+    if (!isInteger(window.usedPercent)) invalidField(context, "windows.usedPercent", errors)
+    if (!isNullableString(window.resetsAt)) invalidField(context, "windows.resetsAt", errors)
+    if (window.windowSeconds !== null && !isInteger(window.windowSeconds)) {
+      invalidField(context, "windows.windowSeconds", errors)
+    }
+  }
+  return usage as unknown as CredentialUsage
+}
+
+const CREDENTIAL_USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"
+
+/**
+ * No reading is an answer, not a failure: the Copilot says so with its own code, which is told
+ * apart from any other 404 so a Copilot without the route still fails loudly.
+ */
+export async function readCredentialUsage(
+  request: Promise<unknown>,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): Promise<CredentialUsage | null> {
+  let value: unknown
+  try {
+    value = await request
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === CREDENTIAL_USAGE_NOT_FOUND) return null
+    throw error
+  }
+  return expectCredentialUsage(value, context, errors)
 }
 
 export function expectOAuthStartResult(

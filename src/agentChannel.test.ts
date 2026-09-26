@@ -204,6 +204,29 @@ describe("Agent direct channel", () => {
     expect(accepted).toHaveBeenCalledOnce()
   })
 
+  it("hands the subscription reading the box sends during a turn to the session", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const readings: unknown[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const reading = {
+      harness: "claude",
+      observedAt: "2026-09-26T12:00:00.000Z",
+      status: "allowed",
+      windows: [{ kind: "FIVE_HOUR", usedPercent: 22, resetsAt: null, windowSeconds: 18_000 }],
+    }
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    socket.receive("providerUsage", { ...reading, lifecycle: { turnId: "turn-1" } }, 2)
+    socket.receive("stepFinish", { reason: "endTurn", lifecycle: { turnId: "turn-1" } }, 3)
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn" })
+    expect(readings).toEqual([reading])
+  })
+
   it("counts the message as sent only when the box starts the admitted turn", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)

@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.10-beta.0
+
+- `agentCredentials.usage(provider, { scope })` reads the last subscription reading a chat on that
+  credential reported (`GET /api/v1/credentials/{provider}/usage`), with no chat open:
+  `{ harness, observedAt, status, windows: [{ kind, usedPercent, resetsAt, windowSeconds }] }`.
+  `windows` carries every window the provider reports (Claude: `FIVE_HOUR`, `WEEKLY`,
+  `WEEKLY_OPUS` and any other it sends; Codex: its primary and secondary, named by duration) and
+  `status` is the provider's own (Claude: `allowed`, `allowed_warning`, `rejected`; Codex: the
+  limit it reports reached, or null). It resolves to `null` while no turn on the provider's
+  subscription login has reported one (the Copilot's `CREDENTIAL_USAGE_NOT_FOUND`); any other
+  failure, a plain 404 included, still rejects.
+- `agentConnections.usage(id, provider)` reads the same for an app connection
+  (`GET /api/v1/connections/{id}/providers/{provider}/usage`).
+- The Agent session emits `providerUsage`, in the same shape, when the chat's box reports the
+  reading during a turn. It comes only on the direct channel of a business agent chat, never on
+  the Copilot stream a chat falls back to. A reading that does not parse is dropped, never an
+  error.
+
 ## 0.2.9-beta.1
 
 - Only a business agent's chat (one with an `agentId`) is created with `runtime: "T3"` and asks

@@ -1225,6 +1225,35 @@ export interface CredentialStatus {
   maskedApiKey: string | null
 }
 
+/** One window of a provider subscription. `resetsAt` and `windowSeconds` are null when the harness did not state them. */
+export interface CredentialUsageWindow {
+  /**
+   * Stable name in UPPER_SNAKE: FIVE_HOUR, WEEKLY, WEEKLY_OPUS, or the provider's own. A Codex
+   * bucket other than the account's own carries its limit id as a suffix (FIVE_HOUR_GPT_5_5_PRO).
+   */
+  kind: string
+  /** Share of the window already consumed, 0 to 100. */
+  usedPercent: number
+  /** ISO instant the window resets. */
+  resetsAt: string | null
+  windowSeconds: number | null
+}
+
+/**
+ * Every window of a provider subscription as chats on that credential last reported it, with the
+ * provider's own status (Claude: `allowed`, `allowed_warning` or `rejected`; Codex: the limit it
+ * says was reached, or null). Claude reports every window at once. Codex reports only what changed,
+ * so each of its windows is the last one reported for that kind, a window past its reset is dropped,
+ * and the status is the one of the last event, whichever bucket sent it.
+ */
+export interface CredentialUsage {
+  harness: "claude" | "codex" | (string & {})
+  /** ISO instant the harness reported this reading. */
+  observedAt: string
+  status: string | null
+  windows: CredentialUsageWindow[]
+}
+
 export interface OAuthStartResult {
   authUrl: string
   state: string

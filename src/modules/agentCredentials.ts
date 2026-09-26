@@ -10,6 +10,7 @@ import {
   expectEmpty,
   expectOAuthStartResult,
   expectObjectArray,
+  readCredentialUsage,
 } from "../response"
 import type { Transport } from "../transport"
 import type {
@@ -20,6 +21,7 @@ import type {
   AuthenticationResult,
   CopilotProvider,
   CredentialStatus,
+  CredentialUsage,
   DeviceAuthorization,
   OAuthExchangeInput,
   OAuthStartResult,
@@ -37,6 +39,15 @@ export interface AgentCredentialsModule {
   list(options?: AgentCredentialOptions): Promise<CredentialStatus[]>
   /** Lists models backed by a usable credential, optionally through a business agent connection. */
   listModels(agentId?: string, options?: AgentCredentialOptions): Promise<AgentModel[]>
+  /**
+   * The last subscription window a chat on this credential reported, readable with no chat open.
+   * Resolves to null until a turn on the provider's subscription login has reported one; an API
+   * key never has a window.
+   */
+  usage(
+    provider: CopilotProvider,
+    options?: AgentCredentialOptions,
+  ): Promise<CredentialUsage | null>
   /** Validates and stores a write-only API key. */
   saveApiKey(
     provider: CopilotProvider,
@@ -107,6 +118,16 @@ export function createAgentCredentialsModule(
         "Agent model response",
         errors,
         expectAgentModel,
+      )
+    },
+    async usage(provider, options) {
+      return readCredentialUsage(
+        transport.request<unknown>(`/api/v1/credentials/${providerSegment(provider)}/usage`, {
+          method: "GET",
+          ...scopeParams(options),
+        }),
+        "Credential usage response",
+        errors,
       )
     },
     async saveApiKey(provider, apiKey, options) {

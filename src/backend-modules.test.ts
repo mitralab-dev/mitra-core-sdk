@@ -1687,3 +1687,99 @@ describe("specific response validators", () => {
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })
+
+describe("subscription usage", () => {
+  const usage = {
+    harness: "claude",
+    observedAt: "2026-09-26T12:00:00Z",
+    status: "allowed",
+    windows: [
+      {
+        kind: "FIVE_HOUR",
+        usedPercent: 42,
+        resetsAt: "2026-09-26T15:00:00Z",
+        windowSeconds: 18_000,
+      },
+      { kind: "WEEKLY", usedPercent: 65, resetsAt: "2026-10-01T00:00:00Z", windowSeconds: 604_800 },
+    ],
+  }
+
+  class FailingTransport implements Transport {
+    readonly requests: CapturedRequest[] = []
+
+    constructor(private readonly error: unknown) {}
+
+    async request<T>(path: string, options: TransportRequestOptions = {}): Promise<T> {
+      this.requests.push({ path, options })
+      throw this.error
+    }
+  }
+
+  it("reads every window of the credential and the provider status, with the scope", async () => {
+    const transport = new QueueTransport([usage])
+    const credentials = createAgentCredentialsModule(transport)
+
+    await expect(credentials.usage("ANTHROPIC", { scope: "ACCOUNT" })).resolves.toEqual(usage)
+    expect(transport.requests[0]).toStrictEqual({
+      path: "/api/v1/credentials/ANTHROPIC/usage",
+      options: { method: "GET", params: { scope: "ACCOUNT" } },
+    })
+  })
+
+  it("reads a connection's windows by its encoded id", async () => {
+    const codex = {
+      harness: "codex",
+      observedAt: "2026-09-26T12:00:00Z",
+      status: null,
+      windows: [{ kind: "PRIMARY", usedPercent: 7, resetsAt: null, windowSeconds: null }],
+    }
+    const transport = new QueueTransport([codex])
+    const connections = createAgentConnectionsModule(transport)
+
+    await expect(connections.usage("connection/1", "OPENAI")).resolves.toEqual(codex)
+    expect(transport.requests[0]?.path).toBe(
+      "/api/v1/connections/connection%2F1/providers/OPENAI/usage",
+    )
+  })
+
+  it("answers null while no turn has reported a window", async () => {
+    const notFound = Object.assign(new Error("No subscription usage observed"), {
+      status: 404,
+      code: "CREDENTIAL_USAGE_NOT_FOUND",
+    })
+
+    await expect(
+      createAgentCredentialsModule(new FailingTransport(notFound)).usage("ANTHROPIC"),
+    ).resolves.toBeNull()
+    await expect(
+      createAgentConnectionsModule(new FailingTransport(notFound)).usage("c-1", "ANTHROPIC"),
+    ).resolves.toBeNull()
+  })
+
+  // A Copilot without the route answers a plain 404, which is a deployment problem, not "no
+  // reading", and must reach the caller.
+  it("rethrows any other failure", async () => {
+    const missingRoute = Object.assign(new Error("Not Found"), { status: 404, code: "NOT_FOUND" })
+
+    await expect(
+      createAgentCredentialsModule(new FailingTransport(missingRoute)).usage("ANTHROPIC"),
+    ).rejects.toBe(missingRoute)
+  })
+
+  it.each([
+    ["without windows", { ...usage, windows: undefined }],
+    ["without the observation time", { ...usage, observedAt: undefined }],
+    [
+      "with a window whose percentage is text",
+      { ...usage, windows: [{ ...usage.windows[0], usedPercent: "42" }] },
+    ],
+    [
+      "with a window without kind",
+      { ...usage, windows: [{ ...usage.windows[0], kind: undefined }] },
+    ],
+  ])("rejects a reading %s", async (_name, response) => {
+    await expect(
+      createAgentCredentialsModule(new QueueTransport([response])).usage("ANTHROPIC"),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+})
