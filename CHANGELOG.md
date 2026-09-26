@@ -11,9 +11,10 @@ All notable changes to this project are documented in this file.
   Any other failure, a plain 404 included, still rejects.
 - `agentConnections.usage(id, provider)` reads the same for an app connection
   (`GET /api/v1/connections/{id}/providers/{provider}/usage`).
-- The Agent session emits `providerUsage` (`{ harness, usedPercent, windowSeconds, resetsAt,
-observedAt }`) when the chat's box reports the window during a turn. A reading that does not
-  parse is dropped, never an error.
+- The Agent session emits `providerUsage` with `harness`, `usedPercent`, `windowSeconds`,
+  `resetsAt` and `observedAt` when the chat's box reports the window during a turn. It comes only
+  on the direct channel of a business agent chat, never on the Copilot stream a chat falls back
+  to. A reading that does not parse is dropped, never an error.
 
 ## 0.2.9-beta.1
 

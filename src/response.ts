@@ -1357,6 +1357,27 @@ export function expectCredentialUsage(
   return usage as unknown as CredentialUsage
 }
 
+const CREDENTIAL_USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"
+
+/**
+ * No reading is an answer, not a failure: the Copilot says so with its own code, which is told
+ * apart from any other 404 so a Copilot without the route still fails loudly.
+ */
+export async function readCredentialUsage(
+  request: Promise<unknown>,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): Promise<CredentialUsage | null> {
+  let value: unknown
+  try {
+    value = await request
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === CREDENTIAL_USAGE_NOT_FOUND) return null
+    throw error
+  }
+  return expectCredentialUsage(value, context, errors)
+}
+
 export function expectOAuthStartResult(
   value: unknown,
   context: string,

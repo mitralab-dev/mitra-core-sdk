@@ -123,9 +123,10 @@ export interface AgentTaskSessionEventMap {
   queueChange: { queue: readonly AgentQueueItem[] }
   error: { code?: string; error: string }
   /**
-   * The subscription window the chat's harness reported during a turn. Only a chat on the
-   * person's or the connection's own login reports one; the Copilot keeps the last reading, which
-   * `agentCredentials.usage` reads with no chat open.
+   * The subscription window the chat's harness reported during a turn. It comes only on the
+   * direct channel of a business agent chat, and only when the turn runs on the person's or the
+   * connection's own login; the Copilot stream a chat falls back to never carries it. The Copilot
+   * keeps the last reading, which `agentCredentials.usage` reads with no chat open.
    */
   providerUsage: AgentProviderUsage
   raw: AgentTaskEvent

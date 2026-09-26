@@ -8,9 +8,9 @@ import {
   expectEmpty,
   expectOAuthStartResult,
   expectObjectArray,
+  readCredentialUsage,
 } from "../response"
 import type { Transport } from "../transport"
-import { readUsage } from "./agentCredentials"
 import type {
   AgentConnection,
   AgentConnectionCreateInput,
@@ -95,7 +95,7 @@ export function createAgentConnectionsModule(
       )
     },
     async usage(id, provider) {
-      return readUsage(
+      return readCredentialUsage(
         transport.request<unknown>(`${providerPath(id, provider)}/usage`, { method: "GET" }),
         "Connection usage response",
         errors,

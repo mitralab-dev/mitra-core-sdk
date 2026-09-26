@@ -6,11 +6,11 @@ import {
   expectAgentModel,
   expectAuthenticationResult,
   expectCredentialStatus,
-  expectCredentialUsage,
   expectDeviceAuthorization,
   expectEmpty,
   expectOAuthStartResult,
   expectObjectArray,
+  readCredentialUsage,
 } from "../response"
 import type { Transport } from "../transport"
 import type {
@@ -33,27 +33,6 @@ export interface AgentCredentialOptions {
 }
 
 const MAX_CUSTOM_PROVIDER_MODELS = 32
-
-const USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"
-
-/**
- * No reading is an answer, not a failure: the Copilot says so with its own code, which is told
- * apart from any other 404 so a Copilot without the route still fails loudly.
- */
-export async function readUsage(
-  request: Promise<unknown>,
-  context: string,
-  errors: SdkCoreErrorFactory,
-): Promise<CredentialUsage | null> {
-  let value: unknown
-  try {
-    value = await request
-  } catch (error) {
-    if ((error as { code?: unknown } | null)?.code === USAGE_NOT_FOUND) return null
-    throw error
-  }
-  return expectCredentialUsage(value, context, errors)
-}
 
 export interface AgentCredentialsModule {
   /** Lists safe credential status. Raw credentials never leave Copilot. */
@@ -142,7 +121,7 @@ export function createAgentCredentialsModule(
       )
     },
     async usage(provider, options) {
-      return readUsage(
+      return readCredentialUsage(
         transport.request<unknown>(`/api/v1/credentials/${providerSegment(provider)}/usage`, {
           method: "GET",
           ...scopeParams(options),
