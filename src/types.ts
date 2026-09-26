@@ -1227,7 +1227,10 @@ export interface CredentialStatus {
 
 /** One window of a provider subscription. `resetsAt` and `windowSeconds` are null when the harness did not state them. */
 export interface CredentialUsageWindow {
-  /** Stable name in UPPER_SNAKE: FIVE_HOUR, WEEKLY, WEEKLY_OPUS, or the provider's own. */
+  /**
+   * Stable name in UPPER_SNAKE: FIVE_HOUR, WEEKLY, WEEKLY_OPUS, or the provider's own. A Codex
+   * bucket other than the account's own carries its limit id as a suffix (FIVE_HOUR_GPT_5_5_PRO).
+   */
   kind: string
   /** Share of the window already consumed, 0 to 100. */
   usedPercent: number
