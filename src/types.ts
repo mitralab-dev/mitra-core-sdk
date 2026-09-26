@@ -1240,9 +1240,11 @@ export interface CredentialUsageWindow {
 }
 
 /**
- * Every window of a provider subscription as a chat on that credential last reported it, with the
+ * Every window of a provider subscription as chats on that credential last reported it, with the
  * provider's own status (Claude: `allowed`, `allowed_warning` or `rejected`; Codex: the limit it
- * says was reached, or null).
+ * says was reached, or null). Claude reports every window at once. Codex reports only what changed,
+ * so each of its windows is the last one reported for that kind, a window past its reset is dropped,
+ * and the status is the one of the last event, whichever bucket sent it.
  */
 export interface CredentialUsage {
   harness: "claude" | "codex" | (string & {})
