@@ -1225,11 +1225,7 @@ export interface CredentialStatus {
   maskedApiKey: string | null
 }
 
-/**
- * The session window of a provider subscription as a chat on that credential last reported it.
- * `windowSeconds` and `resetsAt` are null when the harness did not state them.
- */
-/** One window of a provider subscription. */
+/** One window of a provider subscription. `resetsAt` and `windowSeconds` are null when the harness did not state them. */
 export interface CredentialUsageWindow {
   /** Stable name in UPPER_SNAKE: FIVE_HOUR, WEEKLY, WEEKLY_OPUS, or the provider's own. */
   kind: string
