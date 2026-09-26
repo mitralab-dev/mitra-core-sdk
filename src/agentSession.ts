@@ -1,6 +1,7 @@
 import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
 import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
+import { expectCredentialUsage } from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
@@ -8,6 +9,7 @@ import type {
   AgentTaskEvent,
   AgentTaskInput,
   AgentTaskRuntime,
+  CredentialUsage,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -132,13 +134,8 @@ export interface AgentTaskSessionEventMap {
   raw: AgentTaskEvent
 }
 
-export interface AgentProviderUsage {
-  harness: "claude" | "codex" | (string & {})
-  usedPercent: number
-  windowSeconds: number | null
-  resetsAt: string | null
-  observedAt: string | null
-}
+/** The same shape `agentCredentials.usage` answers with. */
+export type AgentProviderUsage = CredentialUsage
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -192,15 +189,12 @@ interface InternalQueueItem extends AgentQueueItem {
 // A reading that does not parse is dropped, not surfaced as an error: the meter is a side
 // channel, and a box speaking a newer shape must not break the conversation.
 function providerUsageOf(payload: Record<string, unknown> | null): AgentProviderUsage | null {
-  if (!payload || typeof payload.harness !== "string") return null
-  const { usedPercent, windowSeconds, resetsAt, observedAt } = payload
-  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) return null
-  return {
-    harness: payload.harness,
-    usedPercent,
-    windowSeconds: typeof windowSeconds === "number" ? windowSeconds : null,
-    resetsAt: typeof resetsAt === "string" ? resetsAt : null,
-    observedAt: typeof observedAt === "string" ? observedAt : null,
+  if (!payload) return null
+  try {
+    const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
+    return { harness, observedAt, status, windows }
+  } catch {
+    return null
   }
 }
 

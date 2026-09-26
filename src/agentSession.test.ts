@@ -293,30 +293,27 @@ describe("Agent task session", () => {
     const result = session.sendAndWait("quanto falta?", { timeoutMs: 2_000 })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    source.emit(
-      event("providerUsage", {
-        harness: "claude",
-        usedPercent: 42,
-        windowSeconds: 18_000,
-        resetsAt: "2026-09-26T15:00:00.000Z",
-        observedAt: "2026-09-26T12:00:00.000Z",
-        lifecycle: { turnId: "turn-1" },
-      }),
-    )
-    source.emit(event("providerUsage", { harness: "claude", usedPercent: "42" }))
+    const reading = {
+      harness: "claude",
+      observedAt: "2026-09-26T12:00:00.000Z",
+      status: "allowed_warning",
+      windows: [
+        {
+          kind: "FIVE_HOUR",
+          usedPercent: 42,
+          resetsAt: "2026-09-26T15:00:00.000Z",
+          windowSeconds: 18_000,
+        },
+        { kind: "WEEKLY_OPUS", usedPercent: 91, resetsAt: null, windowSeconds: 604_800 },
+      ],
+    }
+    source.emit(event("providerUsage", { ...reading, lifecycle: { turnId: "turn-1" } }))
+    source.emit(event("providerUsage", { harness: "claude", windows: [{ kind: "FIVE_HOUR" }] }))
     source.emit(event("textDelta", { text: "ok" }))
     source.emit(event("stepFinish", { reason: "endTurn" }))
 
     await expect(result).resolves.toMatchObject({ content: "ok", reason: "endTurn" })
-    expect(readings).toEqual([
-      {
-        harness: "claude",
-        usedPercent: 42,
-        windowSeconds: 18_000,
-        resetsAt: "2026-09-26T15:00:00.000Z",
-        observedAt: "2026-09-26T12:00:00.000Z",
-      },
-    ])
+    expect(readings).toEqual([reading])
   })
 
   it("rejects sendAndWait with a typed producer error and continues with the FIFO queue", async () => {

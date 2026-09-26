@@ -1690,10 +1690,18 @@ describe("specific response validators", () => {
 
 describe("subscription usage", () => {
   const usage = {
-    usedPercent: 42,
-    windowSeconds: 18_000,
-    resetsAt: "2026-09-26T15:00:00Z",
+    harness: "claude",
     observedAt: "2026-09-26T12:00:00Z",
+    status: "allowed",
+    windows: [
+      {
+        kind: "FIVE_HOUR",
+        usedPercent: 42,
+        resetsAt: "2026-09-26T15:00:00Z",
+        windowSeconds: 18_000,
+      },
+      { kind: "WEEKLY", usedPercent: 65, resetsAt: "2026-10-01T00:00:00Z", windowSeconds: 604_800 },
+    ],
   }
 
   class FailingTransport implements Transport {
@@ -1707,7 +1715,7 @@ describe("subscription usage", () => {
     }
   }
 
-  it("reads the credential's last window with the credential scope", async () => {
+  it("reads every window of the credential and the provider status, with the scope", async () => {
     const transport = new QueueTransport([usage])
     const credentials = createAgentCredentialsModule(transport)
 
@@ -1718,15 +1726,17 @@ describe("subscription usage", () => {
     })
   })
 
-  it("reads a connection's last window by its encoded id", async () => {
-    const transport = new QueueTransport([{ ...usage, windowSeconds: null, resetsAt: null }])
+  it("reads a connection's windows by its encoded id", async () => {
+    const codex = {
+      harness: "codex",
+      observedAt: "2026-09-26T12:00:00Z",
+      status: null,
+      windows: [{ kind: "PRIMARY", usedPercent: 7, resetsAt: null, windowSeconds: null }],
+    }
+    const transport = new QueueTransport([codex])
     const connections = createAgentConnectionsModule(transport)
 
-    await expect(connections.usage("connection/1", "OPENAI")).resolves.toEqual({
-      ...usage,
-      windowSeconds: null,
-      resetsAt: null,
-    })
+    await expect(connections.usage("connection/1", "OPENAI")).resolves.toEqual(codex)
     expect(transport.requests[0]?.path).toBe(
       "/api/v1/connections/connection%2F1/providers/OPENAI/usage",
     )
@@ -1756,16 +1766,20 @@ describe("subscription usage", () => {
     ).rejects.toBe(missingRoute)
   })
 
-  it("rejects a reading without its percentage or observation time", async () => {
+  it.each([
+    ["without windows", { ...usage, windows: undefined }],
+    ["without the observation time", { ...usage, observedAt: undefined }],
+    [
+      "with a window whose percentage is text",
+      { ...usage, windows: [{ ...usage.windows[0], usedPercent: "42" }] },
+    ],
+    [
+      "with a window without kind",
+      { ...usage, windows: [{ ...usage.windows[0], kind: undefined }] },
+    ],
+  ])("rejects a reading %s", async (_name, response) => {
     await expect(
-      createAgentCredentialsModule(new QueueTransport([{ ...usage, usedPercent: "42" }])).usage(
-        "ANTHROPIC",
-      ),
-    ).rejects.toBeInstanceOf(SdkCoreResponseError)
-    await expect(
-      createAgentCredentialsModule(new QueueTransport([{ ...usage, observedAt: undefined }])).usage(
-        "ANTHROPIC",
-      ),
+      createAgentCredentialsModule(new QueueTransport([response])).usage("ANTHROPIC"),
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })

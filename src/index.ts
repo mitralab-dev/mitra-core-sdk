@@ -254,6 +254,7 @@ export type {
   CopilotProvider,
   CredentialStatus,
   CredentialUsage,
+  CredentialUsageWindow,
   CustomQueryDefinition,
   CustomQueryInput,
   CustomQuerySummary,

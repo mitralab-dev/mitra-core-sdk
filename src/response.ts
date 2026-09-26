@@ -1348,12 +1348,19 @@ export function expectCredentialUsage(
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
 ): CredentialUsage {
   const usage = expectObject<JsonObject>(value, context, errors)
-  if (!isInteger(usage.usedPercent)) invalidField(context, "usedPercent", errors)
-  if (usage.windowSeconds !== null && !isInteger(usage.windowSeconds)) {
-    invalidField(context, "windowSeconds", errors)
-  }
-  if (!isNullableString(usage.resetsAt)) invalidField(context, "resetsAt", errors)
+  if (typeof usage.harness !== "string") invalidField(context, "harness", errors)
   if (typeof usage.observedAt !== "string") invalidField(context, "observedAt", errors)
+  if (!isNullableString(usage.status)) invalidField(context, "status", errors)
+  if (!Array.isArray(usage.windows)) invalidField(context, "windows", errors)
+  for (const window of usage.windows) {
+    if (!isObject(window) || typeof window.kind !== "string")
+      invalidField(context, "windows.kind", errors)
+    if (!isInteger(window.usedPercent)) invalidField(context, "windows.usedPercent", errors)
+    if (!isNullableString(window.resetsAt)) invalidField(context, "windows.resetsAt", errors)
+    if (window.windowSeconds !== null && !isInteger(window.windowSeconds)) {
+      invalidField(context, "windows.windowSeconds", errors)
+    }
+  }
   return usage as unknown as CredentialUsage
 }
 

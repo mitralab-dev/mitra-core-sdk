@@ -1229,14 +1229,28 @@ export interface CredentialStatus {
  * The session window of a provider subscription as a chat on that credential last reported it.
  * `windowSeconds` and `resetsAt` are null when the harness did not state them.
  */
-export interface CredentialUsage {
+/** One window of a provider subscription. */
+export interface CredentialUsageWindow {
+  /** Stable name in UPPER_SNAKE: FIVE_HOUR, WEEKLY, WEEKLY_OPUS, or the provider's own. */
+  kind: string
   /** Share of the window already consumed, 0 to 100. */
   usedPercent: number
-  windowSeconds: number | null
   /** ISO instant the window resets. */
   resetsAt: string | null
+  windowSeconds: number | null
+}
+
+/**
+ * Every window of a provider subscription as a chat on that credential last reported it, with the
+ * provider's own status (Claude: `allowed`, `allowed_warning` or `rejected`; Codex: the limit it
+ * says was reached, or null).
+ */
+export interface CredentialUsage {
+  harness: "claude" | "codex" | (string & {})
   /** ISO instant the harness reported this reading. */
   observedAt: string
+  status: string | null
+  windows: CredentialUsageWindow[]
 }
 
 export interface OAuthStartResult {

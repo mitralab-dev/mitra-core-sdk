@@ -25,7 +25,8 @@ publishes.
 ## Versions
 
 - `0.2.10-beta.0` is the `0.2.9` parity surface republished with the subscription window:
-  `agentCredentials.usage`, `agentConnections.usage` and the `providerUsage` session event, which
+  `agentCredentials.usage`, `agentConnections.usage` and the `providerUsage` session event (every
+  window and the provider status), which
   the parity cases do not cover. Same parity cases; the version exists so a consumer pinning the
   package can pin a corpus with the same number.
 
