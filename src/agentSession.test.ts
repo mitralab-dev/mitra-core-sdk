@@ -740,6 +740,37 @@ describe("Agent turn usage", () => {
     expect(ended).toEqual([expected])
   })
 
+  it("cleans the new stepFinish usage fields the same way before turnEnd", async () => {
+    const { session, source, tasks } = createSession()
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          requestCount: 1,
+          requests: [{ model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: 2 }, 42],
+          authMode: "api_key",
+          durationMs: "fast",
+        },
+      }),
+    )
+
+    await expect(result).resolves.toMatchObject({
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        requestCount: 1,
+        requests: [{ model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: 2 }],
+        authMode: "api_key",
+      },
+    })
+    expect((await result).usage).not.toHaveProperty("durationMs")
+  })
+
   it("leaves usage out of a turn whose stepFinish reported none", async () => {
     const { session, source, tasks } = createSession()
 

@@ -90,9 +90,14 @@ Agent message that closed a turn carries the same object as `usage` in `listMess
 `loadHistory` keeps it on that `agent` item. `inputTokens` and `outputTokens` are always there;
 `reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`, `provider`, `costUsd`
 (this turn, USD), `costUsdRaw` (the provider session so far) and `costSource` only when the
-harness reports them (Codex sends no cost or cache). On Claude the cache counts are part of
-`inputTokens`, not added to it. A turn or message without usage has no `usage` field, and a
-value the SDK cannot read is dropped rather than failing the page or the turn.
+harness reports them (Codex sends no cost or cache). `inputTokens` is the input without cache,
+as in the legacy platform; cache is counted apart in `cacheReadTokens` and
+`cacheCreationTokens`. Also optional: `requestCount` and `requests` (`AgentTurnUsageRequest`,
+one entry per provider call or per model), `authMode` (`subscription`, `api_key`,
+`included_ai`, `custom`, `unknown`, or a newer string passed through as is), `durationMs` and
+`requestMessageId`. A turn or message without usage has no `usage` field, and a value the SDK
+cannot read is dropped rather than failing the page or the turn; a bad `requests` item leaves
+the list.
 
 ### Direct channel
 

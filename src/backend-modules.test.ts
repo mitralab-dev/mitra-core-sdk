@@ -1849,4 +1849,77 @@ describe("turn usage on Agent messages", () => {
       { ...closing, id: "message-5" },
     ])
   })
+
+  it("keeps the per-request breakdown, credential mode, duration and opening message", async () => {
+    const usage = {
+      inputTokens: 1_200,
+      outputTokens: 340,
+      cacheReadTokens: 900,
+      requestCount: 2,
+      requests: [
+        { model: "claude-sonnet-4-5", inputTokens: 800, outputTokens: 300, cacheReadTokens: 900 },
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 400,
+          outputTokens: 40,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 50,
+        },
+      ],
+      authMode: "subscription",
+      durationMs: 8_450,
+      requestMessageId: "message-1",
+    }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("keeps partial requests and an authMode this client does not know yet", async () => {
+    const usage = {
+      inputTokens: 500,
+      outputTokens: 20,
+      requests: [{ model: "gpt-5-codex" }, { inputTokens: 500, outputTokens: 20 }],
+      authMode: "enterprise_pool",
+    }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("drops unreadable new fields and bad request items, keeping the rest", async () => {
+    const [message] = await listWith({
+      ...closing,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        requestCount: 1.5,
+        requests: [
+          "call",
+          null,
+          { model: 7, inputTokens: "10" },
+          { model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: Number.NaN },
+        ],
+        authMode: 3,
+        durationMs: "8s",
+        requestMessageId: { id: "message-1" },
+      },
+    })
+
+    expect(message).toEqual({
+      ...closing,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        requests: [{ model: "claude-sonnet-4-5", inputTokens: 10 }],
+      },
+    })
+  })
+
+  it("drops requests that is not a list and a negative requestCount", async () => {
+    const [message] = await listWith({
+      ...closing,
+      usage: { inputTokens: 10, outputTokens: 2, requestCount: -1, requests: { model: "x" } },
+    })
+
+    expect(message).toEqual({ ...closing, usage: { inputTokens: 10, outputTokens: 2 } })
+  })
 })

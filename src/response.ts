@@ -9,6 +9,7 @@ import type {
   AgentTask,
   AgentTaskChannel,
   AgentTurnUsage,
+  AgentTurnUsageRequest,
   AppMember,
   AppDefinition,
   AppDeploy,
@@ -1326,8 +1327,21 @@ const TURN_USAGE_NUMBERS = [
   "cacheCreationTokens",
   "costUsd",
   "costUsdRaw",
+  "durationMs",
 ] as const
-const TURN_USAGE_STRINGS = ["model", "provider", "costSource"] as const
+const TURN_USAGE_STRINGS = [
+  "model",
+  "provider",
+  "costSource",
+  "authMode",
+  "requestMessageId",
+] as const
+const TURN_USAGE_REQUEST_NUMBERS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+] as const
 
 // Lenient on purpose: usage is metering riding on a chat message or a turn frame, so a value
 // this client cannot read loses that value, never the history page or the turn. Without both
@@ -1345,7 +1359,28 @@ export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
     const item = value[field]
     if (typeof item === "string") usage[field] = item
   }
+  if (isInteger(value.requestCount) && value.requestCount >= 0) {
+    usage.requestCount = value.requestCount
+  }
+  if (Array.isArray(value.requests)) {
+    usage.requests = value.requests.flatMap((item) => {
+      const request = agentTurnUsageRequestOf(item)
+      return request ? [request] : []
+    })
+  }
   return usage
+}
+
+// An item with no field this client can read is dropped from the list, not kept as `{}`.
+function agentTurnUsageRequestOf(value: unknown): AgentTurnUsageRequest | undefined {
+  if (!isObject(value)) return undefined
+  const request: AgentTurnUsageRequest = {}
+  if (typeof value.model === "string") request.model = value.model
+  for (const field of TURN_USAGE_REQUEST_NUMBERS) {
+    const item = value[field]
+    if (isFiniteNumber(item)) request[field] = item
+  }
+  return Object.keys(request).length > 0 ? request : undefined
 }
 
 export function expectAgentModel(

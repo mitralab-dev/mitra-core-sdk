@@ -1199,9 +1199,19 @@ export interface AgentTaskChannel {
   lastSequence: number
 }
 
+/** One call to the provider inside a turn, or one model's total when the source gives only that. */
+export interface AgentTurnUsageRequest {
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+}
+
 /**
- * What one Agent turn consumed, as the harness reported it. On Claude the cache counts are part
- * of `inputTokens`, not added on top of it. Codex reports tokens only, with no cost or cache.
+ * What one Agent turn consumed. `inputTokens` is the input without cache, as in the legacy
+ * platform: cache reads and writes are counted apart in `cacheReadTokens` and
+ * `cacheCreationTokens`. Codex reports tokens only, with no cost or cache.
  */
 export interface AgentTurnUsage {
   inputTokens: number
@@ -1216,6 +1226,18 @@ export interface AgentTurnUsage {
   /** Cost the provider reported for its whole session so far, in USD. */
   costUsdRaw?: number
   costSource?: string
+  /** Provider calls made in the turn. */
+  requestCount?: number
+  requests?: AgentTurnUsageRequest[]
+  /**
+   * How the turn's credential was billed. Open to other strings so a mode the Copilot adds later
+   * reaches the caller instead of being dropped.
+   */
+  authMode?: "subscription" | "api_key" | "included_ai" | "custom" | "unknown" | (string & {})
+  /** From the Copilot accepting the turn to the turn closing. */
+  durationMs?: number
+  /** The person's message that opened the turn. */
+  requestMessageId?: string
 }
 
 export interface AgentMessage {

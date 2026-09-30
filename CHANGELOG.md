@@ -7,7 +7,12 @@ All notable changes to this project are documented in this file.
 - Agent turn usage (`AgentTurnUsage`): `inputTokens` and `outputTokens`, and when the harness
   reports them `reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`,
   `provider`, `costUsd` (this turn), `costUsdRaw` (the provider session so far) and
-  `costSource`. On Claude the cache counts are part of `inputTokens`.
+  `costSource`. `inputTokens` is the input without cache, as in the legacy platform; cache is
+  counted apart in `cacheReadTokens` and `cacheCreationTokens`.
+- Also optional on it: `requestCount`, `requests` (`AgentTurnUsageRequest`: `model`,
+  `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens`), `authMode`
+  (`subscription`, `api_key`, `included_ai`, `custom`, `unknown`, or a newer string kept as is),
+  `durationMs` and `requestMessageId`.
 - `AgentMessage.usage` carries it on the Agent message that closed a turn, as the Copilot
   returns it from `GET /api/v1/tasks/{id}/messages`, and `loadHistory` keeps it on that `agent`
   timeline item. A message without it is still valid (older Copilot).
@@ -15,8 +20,8 @@ All notable changes to this project are documented in this file.
   on the direct channel and on the Copilot stream alike. A turn that reported none has no
   `usage`.
 - A usage value the SDK cannot read is dropped, never an error: a field of the wrong type loses
-  that field, and a usage without numeric `inputTokens` and `outputTokens` is dropped whole. The
-  message page and the turn go on.
+  that field, a `requests` item with nothing readable leaves the list, and a usage without
+  numeric `inputTokens` and `outputTokens` is dropped whole. The message page and the turn go on.
 
 ## 0.2.10-beta.0
 
