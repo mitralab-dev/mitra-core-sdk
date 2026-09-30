@@ -1321,14 +1321,14 @@ export function expectAgentMessage(
   return { ...rest, ...(usage ? { usage } : {}) } as unknown as AgentMessage
 }
 
-const TURN_USAGE_NUMBERS = [
+const TURN_USAGE_COUNTS = [
   "reasoningTokens",
   "cacheReadTokens",
   "cacheCreationTokens",
-  "costUsd",
-  "costUsdRaw",
+  "requestCount",
   "durationMs",
 ] as const
+const TURN_USAGE_COSTS = ["costUsd", "costUsdRaw"] as const
 const TURN_USAGE_STRINGS = [
   "model",
   "provider",
@@ -1336,12 +1336,16 @@ const TURN_USAGE_STRINGS = [
   "authMode",
   "requestMessageId",
 ] as const
-const TURN_USAGE_REQUEST_NUMBERS = [
+const TURN_USAGE_REQUEST_COUNTS = [
   "inputTokens",
   "outputTokens",
   "cacheReadTokens",
   "cacheCreationTokens",
 ] as const
+
+function isCount(value: unknown): value is number {
+  return isInteger(value) && value >= 0
+}
 
 // Lenient on purpose: usage is metering riding on a chat message or a turn frame, so a value
 // this client cannot read loses that value, never the history page or the turn. Without both
@@ -1349,18 +1353,19 @@ const TURN_USAGE_REQUEST_NUMBERS = [
 export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
   if (!isObject(value)) return undefined
   const { inputTokens, outputTokens } = value
-  if (!isFiniteNumber(inputTokens) || !isFiniteNumber(outputTokens)) return undefined
+  if (!isCount(inputTokens) || !isCount(outputTokens)) return undefined
   const usage: AgentTurnUsage = { inputTokens, outputTokens }
-  for (const field of TURN_USAGE_NUMBERS) {
+  for (const field of TURN_USAGE_COUNTS) {
+    const item = value[field]
+    if (isCount(item)) usage[field] = item
+  }
+  for (const field of TURN_USAGE_COSTS) {
     const item = value[field]
     if (isFiniteNumber(item)) usage[field] = item
   }
   for (const field of TURN_USAGE_STRINGS) {
     const item = value[field]
     if (typeof item === "string") usage[field] = item
-  }
-  if (isInteger(value.requestCount) && value.requestCount >= 0) {
-    usage.requestCount = value.requestCount
   }
   if (Array.isArray(value.requests)) {
     usage.requests = value.requests.flatMap((item) => {
@@ -1376,9 +1381,9 @@ function agentTurnUsageRequestOf(value: unknown): AgentTurnUsageRequest | undefi
   if (!isObject(value)) return undefined
   const request: AgentTurnUsageRequest = {}
   if (typeof value.model === "string") request.model = value.model
-  for (const field of TURN_USAGE_REQUEST_NUMBERS) {
+  for (const field of TURN_USAGE_REQUEST_COUNTS) {
     const item = value[field]
-    if (isFiniteNumber(item)) request[field] = item
+    if (isCount(item)) request[field] = item
   }
   return Object.keys(request).length > 0 ? request : undefined
 }

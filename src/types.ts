@@ -1211,7 +1211,7 @@ export interface AgentTurnUsageRequest {
 /**
  * What one Agent turn consumed. `inputTokens` is the input without cache, as in the legacy
  * platform: cache reads and writes are counted apart in `cacheReadTokens` and
- * `cacheCreationTokens`. Codex reports tokens only, with no cost or cache.
+ * `cacheCreationTokens`. Codex sends no cost and no cache writes.
  */
 export interface AgentTurnUsage {
   inputTokens: number
@@ -1231,12 +1231,16 @@ export interface AgentTurnUsage {
   requests?: AgentTurnUsageRequest[]
   /**
    * How the turn's credential was billed. Open to other strings so a mode the Copilot adds later
-   * reaches the caller instead of being dropped.
+   * reaches the caller instead of being dropped. Only the Copilot's record has it, so it shows
+   * in the history and in a recovered turn, never in the live `turnEnd`.
    */
   authMode?: "subscription" | "api_key" | "included_ai" | "custom" | "unknown" | (string & {})
-  /** From the Copilot accepting the turn to the turn closing. */
+  /** Provider time, sent by the box in `stepFinish`: live in `turnEnd` and in the history. */
   durationMs?: number
-  /** The person's message that opened the turn. */
+  /**
+   * The person's message that opened the turn. Only the Copilot's record has it, so it shows in
+   * the history and in a recovered turn, never in the live `turnEnd`.
+   */
   requestMessageId?: string
 }
 

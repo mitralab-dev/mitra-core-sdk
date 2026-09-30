@@ -1826,8 +1826,14 @@ describe("turn usage on Agent messages", () => {
     expect(message).not.toHaveProperty("usage")
   })
 
-  it("keeps a partial usage, such as Codex tokens with no cost or cache", async () => {
-    const usage = { inputTokens: 500, outputTokens: 20, model: "gpt-5-codex", provider: "OPENAI" }
+  it("keeps a partial usage, such as Codex with no cost or cache writes", async () => {
+    const usage = {
+      inputTokens: 500,
+      outputTokens: 20,
+      cacheReadTokens: 300,
+      model: "gpt-5-codex",
+      provider: "OPENAI",
+    }
 
     await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
   })
@@ -1921,5 +1927,39 @@ describe("turn usage on Agent messages", () => {
     })
 
     expect(message).toEqual({ ...closing, usage: { inputTokens: 10, outputTokens: 2 } })
+  })
+
+  it("keeps counts only as non-negative integers and costs only as finite numbers", async () => {
+    const messages = await listWith(
+      {
+        ...closing,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          reasoningTokens: -1,
+          cacheReadTokens: 2.5,
+          durationMs: -3,
+          costUsd: Number.POSITIVE_INFINITY,
+          costUsdRaw: 0.25,
+          requests: [{ model: "claude-sonnet-4-5", inputTokens: -10, outputTokens: 1.5 }],
+        },
+      },
+      { ...closing, id: "message-3", usage: { inputTokens: 1.5, outputTokens: 2 } },
+      { ...closing, id: "message-4", usage: { inputTokens: 10, outputTokens: -2 } },
+    )
+
+    expect(messages).toEqual([
+      {
+        ...closing,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          costUsdRaw: 0.25,
+          requests: [{ model: "claude-sonnet-4-5" }],
+        },
+      },
+      { ...closing, id: "message-3" },
+      { ...closing, id: "message-4" },
+    ])
   })
 })

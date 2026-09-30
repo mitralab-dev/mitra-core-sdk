@@ -753,7 +753,6 @@ describe("Agent turn usage", () => {
           outputTokens: 2,
           requestCount: 1,
           requests: [{ model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: 2 }, 42],
-          authMode: "api_key",
           durationMs: "fast",
         },
       }),
@@ -765,7 +764,6 @@ describe("Agent turn usage", () => {
         outputTokens: 2,
         requestCount: 1,
         requests: [{ model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: 2 }],
-        authMode: "api_key",
       },
     })
     expect((await result).usage).not.toHaveProperty("durationMs")
@@ -801,5 +799,28 @@ describe("Agent turn usage", () => {
     source.emit(event("stepFinish", { reason: "endTurn", usage }), 1)
 
     await expect(result).resolves.toMatchObject({ reason: "endTurn", usage })
+  })
+
+  it("prefers the persisted message usage over the stepFinish usage on a recovered turn", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const recorded = { ...usage, authMode: "subscription", requestMessageId: "user-1" }
+    const finalMessage = { ...message("final", "AGENT", "complete answer"), usage: recorded }
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([finalMessage, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(
+      event("stepFinish", { reason: "endTurn", usage: { inputTokens: 1, outputTokens: 1 } }),
+      1,
+    )
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn", usage: recorded })
   })
 })
