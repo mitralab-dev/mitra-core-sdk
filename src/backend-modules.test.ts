@@ -1783,3 +1783,70 @@ describe("subscription usage", () => {
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })
+
+describe("turn usage on Agent messages", () => {
+  const closing = {
+    id: "message-2",
+    sender: "AGENT",
+    type: "TEXT",
+    content: "Done",
+    createdAt: "2026-09-30T12:00:01Z",
+  }
+  const prompt = { ...closing, id: "message-1", sender: "USER", content: "Analyze" }
+
+  async function listWith(...messages: unknown[]) {
+    const tasks = createAgentTasksModule(new QueueTransport([springPage(messages)]))
+    return (await tasks.listMessages("task-1")).content
+  }
+
+  it("keeps the usage the Copilot recorded on the message that closed the turn", async () => {
+    const usage = {
+      inputTokens: 1_200,
+      outputTokens: 340,
+      reasoningTokens: 80,
+      cacheReadTokens: 900,
+      cacheCreationTokens: 100,
+      model: "claude-sonnet-4-5",
+      provider: "ANTHROPIC",
+      costUsd: 0.0123,
+      costUsdRaw: 0.5,
+      costSource: "provider",
+    }
+
+    await expect(listWith(prompt, { ...closing, usage })).resolves.toEqual([
+      prompt,
+      { ...closing, usage },
+    ])
+  })
+
+  it("accepts messages without usage, as an older Copilot sends them", async () => {
+    const [message] = await listWith(closing)
+
+    expect(message).toEqual(closing)
+    expect(message).not.toHaveProperty("usage")
+  })
+
+  it("keeps a partial usage, such as Codex tokens with no cost or cache", async () => {
+    const usage = { inputTokens: 500, outputTokens: 20, model: "gpt-5-codex", provider: "OPENAI" }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("drops only the usage value it cannot read and keeps the rest of the page", async () => {
+    const messages = await listWith(
+      prompt,
+      { ...closing, usage: { inputTokens: 10, outputTokens: 2, costUsd: "0.1", model: 7 } },
+      { ...closing, id: "message-3", usage: { outputTokens: 2 } },
+      { ...closing, id: "message-4", usage: "lots" },
+      { ...closing, id: "message-5", usage: { inputTokens: Number.NaN, outputTokens: 1 } },
+    )
+
+    expect(messages).toEqual([
+      prompt,
+      { ...closing, usage: { inputTokens: 10, outputTokens: 2 } },
+      { ...closing, id: "message-3" },
+      { ...closing, id: "message-4" },
+      { ...closing, id: "message-5" },
+    ])
+  })
+})

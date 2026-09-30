@@ -1254,3 +1254,50 @@ describe("Agent task channel request", () => {
     ).rejects.toMatchObject({ code: "INVALID_RESPONSE" })
   })
 })
+
+describe("Agent turn usage on the direct channel", () => {
+  const usage = { inputTokens: 500, outputTokens: 20, model: "gpt-5-codex", provider: "OPENAI" }
+
+  it("puts the usage the box sends on stepFinish in turnEnd over the socket", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const ended: unknown[] = []
+    session.on("turnEnd", (result) => ended.push(result))
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    socket.receive("textDelta", { text: "Done", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "endTurn", usage, lifecycle: { turnId: "turn-1" } }, 2)
+
+    await expect(result).resolves.toMatchObject({ content: "Done", usage })
+    expect(ended).toEqual([expect.objectContaining({ usage })])
+  })
+
+  it("puts the usage the box sends on stepFinish in turnEnd over HTTP", async () => {
+    const box = new FakeBoxHttp()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks, { fetch: box.fetch, transport: "http" })
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    box.push("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    box.push("stepFinish", { reason: "endTurn", usage, lifecycle: { turnId: "turn-1" } }, 2)
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn", usage })
+  })
+
+  it("leaves usage out of a box turn that reported none", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    socket.receive("stepFinish", { reason: "endTurn", lifecycle: { turnId: "turn-1" } }, 2)
+
+    await expect(result).resolves.not.toHaveProperty("usage")
+  })
+})

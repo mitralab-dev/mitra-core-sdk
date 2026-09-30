@@ -1199,12 +1199,33 @@ export interface AgentTaskChannel {
   lastSequence: number
 }
 
+/**
+ * What one Agent turn consumed, as the harness reported it. On Claude the cache counts are part
+ * of `inputTokens`, not added on top of it. Codex reports tokens only, with no cost or cache.
+ */
+export interface AgentTurnUsage {
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  model?: string
+  provider?: string
+  /** Cost of this turn in USD. */
+  costUsd?: number
+  /** Cost the provider reported for its whole session so far, in USD. */
+  costUsdRaw?: number
+  costSource?: string
+}
+
 export interface AgentMessage {
   id: string
   sender: string
   type: string
   content: string
   createdAt: string
+  /** Present on the Agent message that closed a turn, when the Copilot recorded its usage. */
+  usage?: AgentTurnUsage
 }
 
 export interface AgentModel {

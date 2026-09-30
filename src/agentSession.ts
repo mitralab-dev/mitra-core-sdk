@@ -1,7 +1,7 @@
 import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
 import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
-import { expectCredentialUsage } from "./response"
+import { agentTurnUsageOf, expectCredentialUsage } from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
@@ -9,6 +9,7 @@ import type {
   AgentTaskEvent,
   AgentTaskInput,
   AgentTaskRuntime,
+  AgentTurnUsage,
   CredentialUsage,
 } from "./types"
 
@@ -97,13 +98,22 @@ export interface AgentToolEvent {
 }
 
 export type AgentTimelineItem =
-  | { id: string; kind: "user" | "agent"; text: string; at: string }
+  | {
+      id: string
+      kind: "user" | "agent"
+      text: string
+      at: string
+      /** Only on the `agent` item that closed a turn, when the Copilot recorded its usage. */
+      usage?: AgentTurnUsage
+    }
   | { id: string; kind: "tool"; tool: AgentToolEvent; at: string }
 
 export interface AgentTurnResult {
   task: AgentTask
   content: string
   reason: string
+  /** What the turn consumed, from the box's `stepFinish`; absent when the turn reported none. */
+  usage?: AgentTurnUsage
 }
 
 export interface AgentTaskSessionEventMap {
@@ -256,6 +266,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     kind: message.sender === "USER" ? "user" : "agent",
     text: message.content,
     at: message.createdAt,
+    ...(message.usage ? { usage: message.usage } : {}),
   }
 }
 
@@ -336,6 +347,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private recoveryPromise: Promise<void> | null = null
   private recoveryGeneration = 0
   private recoveredTerminalReason: string | undefined
+  private recoveredTerminalUsage: AgentTurnUsage | undefined
   private cancelTimer: ReturnType<typeof setTimeout> | null = null
   private queueSequence = 0
   private activeWaiter: TurnWaiter | undefined
@@ -581,6 +593,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
+    this.recoveredTerminalUsage = undefined
     this.recoveryGeneration += 1
     this.activeWaiter = waiter
     this.setStatus("streaming")
@@ -719,7 +732,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return true
     }
     this._content = recovered.content
-    this.finishTurn(reason)
+    this.finishTurn(reason, recovered.usage ?? this.recoveredTerminalUsage)
     return true
   }
 
@@ -763,18 +776,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "stepFinish": {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
         const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined
+        const usage = agentTurnUsageOf(payload?.usage)
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
         if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
           this.rememberFinishedTurn(lifecycle)
-          this.finishTurn("interrupted")
+          this.finishTurn("interrupted", usage)
           break
         }
         if (reason === "stop" || reason === "endTurn") {
           this.rememberFinishedTurn(lifecycle)
           if (this.recoveryUsed) {
             this.recoveredTerminalReason = reason
+            this.recoveredTerminalUsage = usage
             if (!this.recoveryPromise) {
               const generation = this.recoveryGeneration
               this.recoveryPromise = this.recoverTurn(generation).finally(() => {
@@ -782,7 +797,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
               })
             }
           } else {
-            this.finishTurn(reason)
+            this.finishTurn(reason, usage)
           }
         }
         break
@@ -842,7 +857,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     })
   }
 
-  private finishTurn(reason: string): void {
+  private finishTurn(reason: string, usage?: AgentTurnUsage): void {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
@@ -856,7 +871,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.setStatus("error")
       return
     }
-    const result = { task, content: this._content, reason }
+    const result: AgentTurnResult = {
+      task,
+      content: this._content,
+      reason,
+      ...(usage ? { usage } : {}),
+    }
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
     this.activeWaiter = undefined

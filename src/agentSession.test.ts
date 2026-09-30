@@ -697,3 +697,78 @@ describe("Agent task session", () => {
     expect(session.history[99]).toMatchObject({ text: "message-150" })
   })
 })
+
+describe("Agent turn usage", () => {
+  const usage = {
+    inputTokens: 1_200,
+    outputTokens: 340,
+    cacheReadTokens: 900,
+    model: "claude-sonnet-4-5",
+    provider: "ANTHROPIC",
+    costUsd: 0.0123,
+    costSource: "provider",
+  }
+
+  it("hands the usage of the closing Agent message to its history item", async () => {
+    const closing = { ...message("agent", "AGENT", "Done"), usage }
+    const prompt = message("user", "USER", "Analyze")
+    const tasks = createTasks({ listMessages: vi.fn(async () => page([closing, prompt])) })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FakeEventSource(),
+    }).session({ taskId: "task-1", transport: "http" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    expect(session.history).toEqual([
+      { id: "user", kind: "user", text: "Analyze", at: prompt.createdAt },
+      { id: "agent", kind: "agent", text: "Done", at: closing.createdAt, usage },
+    ])
+  })
+
+  it("puts the stepFinish usage of the Copilot stream in turnEnd and sendAndWait", async () => {
+    const { session, source, tasks } = createSession()
+    const ended: unknown[] = []
+    session.on("turnEnd", (result) => ended.push(result))
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("textDelta", { text: "Done" }))
+    source.emit(event("stepFinish", { reason: "endTurn", usage }))
+
+    const expected = { task: TASK, content: "Done", reason: "endTurn", usage }
+    await expect(result).resolves.toEqual(expected)
+    expect(ended).toEqual([expected])
+  })
+
+  it("leaves usage out of a turn whose stepFinish reported none", async () => {
+    const { session, source, tasks } = createSession()
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("textDelta", { text: "Done" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    const turn = await result
+    expect(turn).toEqual({ task: TASK, content: "Done", reason: "endTurn" })
+    expect(turn).not.toHaveProperty("usage")
+  })
+
+  it("keeps the stepFinish usage when a recovered turn resolves from the persisted message", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const finalMessage = message("final", "AGENT", "complete persisted answer")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([finalMessage, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(event("stepFinish", { reason: "endTurn", usage }), 1)
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn", usage })
+  })
+})

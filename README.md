@@ -84,6 +84,16 @@ reconnection and reconciles persisted messages; live deltas across that gap are 
 be lossless. Abort and timeout stop the local `sendAndWait` waiter but do not interrupt the remote
 turn. Use `cancel()` when interruption is intended.
 
+**Turn usage.** `turnEnd` and the result of `sendAndWait` carry `usage` (`AgentTurnUsage`) when
+the turn's `stepFinish` reported it, on the direct channel and on the Copilot stream alike. The
+Agent message that closed a turn carries the same object as `usage` in `listMessages`, and
+`loadHistory` keeps it on that `agent` item. `inputTokens` and `outputTokens` are always there;
+`reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`, `provider`, `costUsd`
+(this turn, USD), `costUsdRaw` (the provider session so far) and `costSource` only when the
+harness reports them (Codex sends no cost or cache). On Claude the cache counts are part of
+`inputTokens`, not added to it. A turn or message without usage has no `usage` field, and a
+value the SDK cannot read is dropped rather than failing the page or the turn.
+
 ### Direct channel
 
 The direct channel is on when the concrete SDK passes `directChannel.apiUrl`, and it serves a

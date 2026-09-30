@@ -8,6 +8,7 @@ import type {
   AgentModel,
   AgentTask,
   AgentTaskChannel,
+  AgentTurnUsage,
   AppMember,
   AppDefinition,
   AppDeploy,
@@ -81,6 +82,10 @@ function isInteger(value: unknown): value is number {
 
 function isNullableInteger(value: unknown): value is number | null {
   return value === null || isInteger(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -1309,7 +1314,38 @@ export function expectAgentMessage(
   for (const field of ["id", "sender", "type", "content", "createdAt"] as const) {
     if (typeof message[field] !== "string") invalidField(context, field, errors)
   }
-  return message as unknown as AgentMessage
+  if (message.usage === undefined) return message as unknown as AgentMessage
+  const { usage: rawUsage, ...rest } = message
+  const usage = agentTurnUsageOf(rawUsage)
+  return { ...rest, ...(usage ? { usage } : {}) } as unknown as AgentMessage
+}
+
+const TURN_USAGE_NUMBERS = [
+  "reasoningTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+  "costUsd",
+  "costUsdRaw",
+] as const
+const TURN_USAGE_STRINGS = ["model", "provider", "costSource"] as const
+
+// Lenient on purpose: usage is metering riding on a chat message or a turn frame, so a value
+// this client cannot read loses that value, never the history page or the turn. Without both
+// token counts nothing useful is left, and the whole usage is dropped.
+export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
+  if (!isObject(value)) return undefined
+  const { inputTokens, outputTokens } = value
+  if (!isFiniteNumber(inputTokens) || !isFiniteNumber(outputTokens)) return undefined
+  const usage: AgentTurnUsage = { inputTokens, outputTokens }
+  for (const field of TURN_USAGE_NUMBERS) {
+    const item = value[field]
+    if (isFiniteNumber(item)) usage[field] = item
+  }
+  for (const field of TURN_USAGE_STRINGS) {
+    const item = value[field]
+    if (typeof item === "string") usage[field] = item
+  }
+  return usage
 }
 
 export function expectAgentModel(
