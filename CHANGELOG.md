@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.11-beta.0
 
 - Agent turn usage (`AgentTurnUsage`): `inputTokens` and `outputTokens`, and when the harness
   reports them `reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`,
