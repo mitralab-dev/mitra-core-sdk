@@ -103,15 +103,23 @@ export function createAgentTasksModule(
       )
     },
     async listMessages(id, options = {}) {
-      return expectPage<AgentMessage>(
+      const context = "Agent message page response"
+      const page = expectPage<AgentMessage>(
         await transport.request<unknown>(`${path(id)}/messages`, {
           method: "GET",
           params: { page: options.page, size: options.size, sort: options.sort },
         }),
-        "Agent message page response",
+        context,
         errors,
-        expectAgentMessage,
       )
+      // Mapped rather than passed to expectPage, which only checks items: a message comes back
+      // without the usage it could not read.
+      return {
+        ...page,
+        content: page.content.map((message, position) =>
+          expectAgentMessage(message, `${context} item ${position}`, errors),
+        ),
+      }
     },
     async channel(id) {
       return expectAgentTaskChannel(

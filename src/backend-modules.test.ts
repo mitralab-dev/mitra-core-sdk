@@ -1783,3 +1783,183 @@ describe("subscription usage", () => {
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })
+
+describe("turn usage on Agent messages", () => {
+  const closing = {
+    id: "message-2",
+    sender: "AGENT",
+    type: "TEXT",
+    content: "Done",
+    createdAt: "2026-09-30T12:00:01Z",
+  }
+  const prompt = { ...closing, id: "message-1", sender: "USER", content: "Analyze" }
+
+  async function listWith(...messages: unknown[]) {
+    const tasks = createAgentTasksModule(new QueueTransport([springPage(messages)]))
+    return (await tasks.listMessages("task-1")).content
+  }
+
+  it("keeps the usage the Copilot recorded on the message that closed the turn", async () => {
+    const usage = {
+      inputTokens: 1_200,
+      outputTokens: 340,
+      reasoningTokens: 80,
+      cacheReadTokens: 900,
+      cacheCreationTokens: 100,
+      model: "claude-sonnet-4-5",
+      provider: "ANTHROPIC",
+      costUsd: 0.0123,
+      costUsdRaw: 0.5,
+      costSource: "provider",
+    }
+
+    await expect(listWith(prompt, { ...closing, usage })).resolves.toEqual([
+      prompt,
+      { ...closing, usage },
+    ])
+  })
+
+  it("accepts messages without usage, as an older Copilot sends them", async () => {
+    const [message] = await listWith(closing)
+
+    expect(message).toEqual(closing)
+    expect(message).not.toHaveProperty("usage")
+  })
+
+  it("keeps a partial usage, such as Codex with no cost or cache writes", async () => {
+    const usage = {
+      inputTokens: 500,
+      outputTokens: 20,
+      cacheReadTokens: 300,
+      model: "gpt-5-codex",
+      provider: "OPENAI",
+    }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("drops only the usage value it cannot read and keeps the rest of the page", async () => {
+    const messages = await listWith(
+      prompt,
+      { ...closing, usage: { inputTokens: 10, outputTokens: 2, costUsd: "0.1", model: 7 } },
+      { ...closing, id: "message-3", usage: { outputTokens: 2 } },
+      { ...closing, id: "message-4", usage: "lots" },
+      { ...closing, id: "message-5", usage: { inputTokens: Number.NaN, outputTokens: 1 } },
+    )
+
+    expect(messages).toEqual([
+      prompt,
+      { ...closing, usage: { inputTokens: 10, outputTokens: 2 } },
+      { ...closing, id: "message-3" },
+      { ...closing, id: "message-4" },
+      { ...closing, id: "message-5" },
+    ])
+  })
+
+  it("keeps the per-request breakdown, credential mode, duration and opening message", async () => {
+    const usage = {
+      inputTokens: 1_200,
+      outputTokens: 340,
+      cacheReadTokens: 900,
+      requestCount: 2,
+      requests: [
+        { model: "claude-sonnet-4-5", inputTokens: 800, outputTokens: 300, cacheReadTokens: 900 },
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 400,
+          outputTokens: 40,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 50,
+        },
+      ],
+      authMode: "subscription",
+      durationMs: 8_450,
+      requestMessageId: "message-1",
+    }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("keeps partial requests and an authMode this client does not know yet", async () => {
+    const usage = {
+      inputTokens: 500,
+      outputTokens: 20,
+      requests: [{ model: "gpt-5-codex" }, { inputTokens: 500, outputTokens: 20 }],
+      authMode: "enterprise_pool",
+    }
+
+    await expect(listWith({ ...closing, usage })).resolves.toEqual([{ ...closing, usage }])
+  })
+
+  it("drops unreadable new fields and bad request items, keeping the rest", async () => {
+    const [message] = await listWith({
+      ...closing,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        requestCount: 1.5,
+        requests: [
+          "call",
+          null,
+          { model: 7, inputTokens: "10" },
+          { model: "claude-sonnet-4-5", inputTokens: 10, outputTokens: Number.NaN },
+        ],
+        authMode: 3,
+        durationMs: "8s",
+        requestMessageId: { id: "message-1" },
+      },
+    })
+
+    expect(message).toEqual({
+      ...closing,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        requests: [{ model: "claude-sonnet-4-5", inputTokens: 10 }],
+      },
+    })
+  })
+
+  it("drops requests that is not a list and a negative requestCount", async () => {
+    const [message] = await listWith({
+      ...closing,
+      usage: { inputTokens: 10, outputTokens: 2, requestCount: -1, requests: { model: "x" } },
+    })
+
+    expect(message).toEqual({ ...closing, usage: { inputTokens: 10, outputTokens: 2 } })
+  })
+
+  it("keeps counts only as non-negative integers and costs only as finite numbers", async () => {
+    const messages = await listWith(
+      {
+        ...closing,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          reasoningTokens: -1,
+          cacheReadTokens: 2.5,
+          durationMs: -3,
+          costUsd: Number.POSITIVE_INFINITY,
+          costUsdRaw: 0.25,
+          requests: [{ model: "claude-sonnet-4-5", inputTokens: -10, outputTokens: 1.5 }],
+        },
+      },
+      { ...closing, id: "message-3", usage: { inputTokens: 1.5, outputTokens: 2 } },
+      { ...closing, id: "message-4", usage: { inputTokens: 10, outputTokens: -2 } },
+    )
+
+    expect(messages).toEqual([
+      {
+        ...closing,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          costUsdRaw: 0.25,
+          requests: [{ model: "claude-sonnet-4-5" }],
+        },
+      },
+      { ...closing, id: "message-3" },
+      { ...closing, id: "message-4" },
+    ])
+  })
+})

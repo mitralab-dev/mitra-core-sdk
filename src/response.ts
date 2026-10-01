@@ -8,6 +8,8 @@ import type {
   AgentModel,
   AgentTask,
   AgentTaskChannel,
+  AgentTurnUsage,
+  AgentTurnUsageRequest,
   AppMember,
   AppDefinition,
   AppDeploy,
@@ -81,6 +83,10 @@ function isInteger(value: unknown): value is number {
 
 function isNullableInteger(value: unknown): value is number | null {
   return value === null || isInteger(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -1309,7 +1315,77 @@ export function expectAgentMessage(
   for (const field of ["id", "sender", "type", "content", "createdAt"] as const) {
     if (typeof message[field] !== "string") invalidField(context, field, errors)
   }
-  return message as unknown as AgentMessage
+  if (message.usage === undefined) return message as unknown as AgentMessage
+  const { usage: rawUsage, ...rest } = message
+  const usage = agentTurnUsageOf(rawUsage)
+  return { ...rest, ...(usage ? { usage } : {}) } as unknown as AgentMessage
+}
+
+const TURN_USAGE_COUNTS = [
+  "reasoningTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+  "requestCount",
+  "durationMs",
+] as const
+const TURN_USAGE_COSTS = ["costUsd", "costUsdRaw"] as const
+const TURN_USAGE_STRINGS = [
+  "model",
+  "provider",
+  "costSource",
+  "authMode",
+  "requestMessageId",
+] as const
+const TURN_USAGE_REQUEST_COUNTS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+] as const
+
+function isCount(value: unknown): value is number {
+  return isInteger(value) && value >= 0
+}
+
+// Lenient on purpose: usage is metering riding on a chat message or a turn frame, so a value
+// this client cannot read loses that value, never the history page or the turn. Without both
+// token counts nothing useful is left, and the whole usage is dropped.
+export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
+  if (!isObject(value)) return undefined
+  const { inputTokens, outputTokens } = value
+  if (!isCount(inputTokens) || !isCount(outputTokens)) return undefined
+  const usage: AgentTurnUsage = { inputTokens, outputTokens }
+  for (const field of TURN_USAGE_COUNTS) {
+    const item = value[field]
+    if (isCount(item)) usage[field] = item
+  }
+  for (const field of TURN_USAGE_COSTS) {
+    const item = value[field]
+    if (isFiniteNumber(item)) usage[field] = item
+  }
+  for (const field of TURN_USAGE_STRINGS) {
+    const item = value[field]
+    if (typeof item === "string") usage[field] = item
+  }
+  if (Array.isArray(value.requests)) {
+    usage.requests = value.requests.flatMap((item) => {
+      const request = agentTurnUsageRequestOf(item)
+      return request ? [request] : []
+    })
+  }
+  return usage
+}
+
+// An item with no field this client can read is dropped from the list, not kept as `{}`.
+function agentTurnUsageRequestOf(value: unknown): AgentTurnUsageRequest | undefined {
+  if (!isObject(value)) return undefined
+  const request: AgentTurnUsageRequest = {}
+  if (typeof value.model === "string") request.model = value.model
+  for (const field of TURN_USAGE_REQUEST_COUNTS) {
+    const item = value[field]
+    if (isCount(item)) request[field] = item
+  }
+  return Object.keys(request).length > 0 ? request : undefined
 }
 
 export function expectAgentModel(

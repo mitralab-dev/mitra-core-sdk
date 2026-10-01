@@ -140,6 +140,8 @@ export type {
   AgentTaskInput,
   AgentTaskListOptions,
   AgentTaskRuntime,
+  AgentTurnUsage,
+  AgentTurnUsageRequest,
   AgentUpdateItem,
   AppColor,
   AppContext,

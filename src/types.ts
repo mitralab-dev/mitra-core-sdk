@@ -1199,12 +1199,59 @@ export interface AgentTaskChannel {
   lastSequence: number
 }
 
+/** One call to the provider inside a turn, or one model's total when the source gives only that. */
+export interface AgentTurnUsageRequest {
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+}
+
+/**
+ * What one Agent turn consumed. `inputTokens` is the input without cache, as in the legacy
+ * platform: cache reads and writes are counted apart in `cacheReadTokens` and
+ * `cacheCreationTokens`. Codex sends no cost and no cache writes.
+ */
+export interface AgentTurnUsage {
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  model?: string
+  provider?: string
+  /** Cost of this turn in USD. */
+  costUsd?: number
+  /** Cost the provider reported for its whole session so far, in USD. */
+  costUsdRaw?: number
+  costSource?: string
+  /** Provider calls made in the turn. */
+  requestCount?: number
+  requests?: AgentTurnUsageRequest[]
+  /**
+   * How the turn's credential was billed. Open to other strings so a mode the Copilot adds later
+   * reaches the caller instead of being dropped. Only the Copilot's record has it, so it shows
+   * in the history and in a recovered turn, never in the live `turnEnd`.
+   */
+  authMode?: "subscription" | "api_key" | "included_ai" | "custom" | "unknown" | (string & {})
+  /** Provider time, sent by the box in `stepFinish`: live in `turnEnd` and in the history. */
+  durationMs?: number
+  /**
+   * The person's message that opened the turn. Only the Copilot's record has it, so it shows in
+   * the history and in a recovered turn, never in the live `turnEnd`.
+   */
+  requestMessageId?: string
+}
+
 export interface AgentMessage {
   id: string
   sender: string
   type: string
   content: string
   createdAt: string
+  /** Present on the Agent message that closed a turn, when the Copilot recorded its usage. */
+  usage?: AgentTurnUsage
 }
 
 export interface AgentModel {

@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.11-beta.0
+
+- Agent turn usage (`AgentTurnUsage`): `inputTokens` and `outputTokens`, and when the harness
+  reports them `reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`,
+  `provider`, `costUsd` (this turn), `costUsdRaw` (the provider session so far) and
+  `costSource`. `inputTokens` is the input without cache, as in the legacy platform; cache is
+  counted apart in `cacheReadTokens` and `cacheCreationTokens`.
+- Also optional on it: `requestCount`, `requests` (`AgentTurnUsageRequest`: `model`,
+  `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens`), `authMode`
+  (`subscription`, `api_key`, `included_ai`, `custom`, `unknown`, or a newer string kept as is),
+  `durationMs` and `requestMessageId`. `durationMs` comes from the box in `stepFinish`, live and
+  in the history; `authMode` and `requestMessageId` only from the Copilot's record, so they show
+  in the history and in a recovered turn, never in the live `turnEnd`.
+- `AgentMessage.usage` carries it on the Agent message that closed a turn, as the Copilot
+  returns it from `GET /api/v1/tasks/{id}/messages`, and `loadHistory` keeps it on that `agent`
+  timeline item. A message without it is still valid (older Copilot).
+- `turnEnd`, and the result `sendAndWait` resolves, carry `usage` from the turn's `stepFinish`,
+  on the direct channel and on the Copilot stream alike. A turn that reported none has no
+  `usage`.
+- A usage value the SDK cannot read is dropped, never an error: counts must be non-negative
+  integers and costs finite numbers, an invalid field is lost alone, a `requests` item with
+  nothing readable leaves the list, and a usage without valid `inputTokens` and `outputTokens`
+  is dropped whole. The message page and the turn go on.
+
 ## 0.2.10-beta.0
 
 - `agentCredentials.usage(provider, { scope })` reads the last subscription reading a chat on that
