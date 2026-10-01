@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.2.11` is the stable release of the `0.2.11-beta.0` surface: the agent turn usage in
+  `AgentTurnUsage` on `AgentMessage.usage`, on the `agent` item of `loadHistory` and on `turnEnd`
+  and `sendAndWait`. Same parity cases; the version exists so a consumer pinning the stable package
+  can pin a corpus with the same number.
+
 - `0.2.11-beta.0` is the `0.2.10` parity surface republished with the agent turn usage:
   `AgentTurnUsage` on `AgentMessage.usage`, on the `agent` item of `loadHistory` and on `turnEnd`
   and `sendAndWait`, which the parity cases do not cover. Same parity cases; the version exists so
