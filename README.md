@@ -1,416 +1,91 @@
 # Mitra SDK Core
 
-Environment-neutral TypeScript contracts and API modules shared by Mitra JavaScript SDKs.
+Contratos TypeScript e módulos de API neutros de ambiente, compartilhados pelos SDKs JavaScript da Mitra: entidades, queries, Functions, integrações, Code Studio, agentes, Copilot e Messenger. É dependência de `@mitralab.io/platform-sdk` (browser) e `@mitralab.io/functions-sdk` (Server Functions); código de app instala um desses, não o Core.
 
-Most application and Server Function code should install a concrete SDK instead:
+O Core não tem `fetch` nem WebSocket próprio, não lê variável de ambiente e não guarda credencial. Cada SDK concreto injeta um `Transport` por serviço e cuida de URL base, autenticação, serialização, timeout, retry e erro HTTP. A troca de API key por token também é contrato do Core (`resolveApiKeyToken`), mas quem chama faz a requisição.
 
-- `@mitralab.io/platform-sdk` for browser applications
-- `@mitralab.io/functions-sdk` for Mitra Server Functions
+## Instalação
 
-The core package exists so concrete SDKs build direct backend requests from one
-contract. It exposes the API values returned by each service. It does not expose
-MCP envelopes, `CallToolResult`, or MCP-formatted text.
+```bash
+npm install @mitralab.io/sdk-core
+```
 
-The versioned contract corpus in `contracts/` is the canonical source for the
-MCP, JavaScript, and Python capability matrix. Its manifest identifies the
-current fixture and pins every packaged version with SHA-256. Core executes all
-success operations and response validation. Functions JavaScript inherits those
-checks and owns its HTTP adapter cases. Python consumes all case groups because
-it does not depend on Core, using a digest-pinned snapshot so tests stay offline.
+Node 18 ou mais novo. Publicado em ESM e CommonJS, com tipos para os dois. Sem dependências de runtime.
 
-## Boundary
+## Configuração
 
-The package contains:
+| Opção                                                        | Obrigatória | Uso                                                                                                                                    |
+| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` por serviço (IAM, Data Manager, Functions, Integration); recebe o path local do serviço e devolve o payload já parseado |
+| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles, o módulo correspondente falha com erro de configuração antes de sair a requisição                                            |
+| `transports.publicFunctions`                                 | não         | transporte anônimo para `POST /public/v1/functions/{id}/execute`; não pode enviar `Authorization` nem `X-App-Id`                       |
+| `getAppId`                                                   | não         | devolve o app fixado pelo SDK concreto; usado por `context.getAppContext()`                                                            |
+| `functions.executeInvocationType`                            | não         | `sync` ou `async`, enviado em `X-Invocation-Type` por `functions.execute`; sem valor, vale o default do servidor                       |
+| `functions.emptyInput`                                       | não         | `empty-object` envia `{ "input": {} }` sem input; `omit-body` não envia corpo                                                          |
+| `errors`                                                     | não         | `SdkCoreErrorFactory` para o SDK concreto lançar as próprias classes de erro                                                           |
 
-- common types and data transfer objects
-- safe path segment encoding
-- structural response validation
-- authentication and app members
-- Code Studio apps, files, builds, deploys, versions, and rollback
-- schema, records, custom queries, SQL, imports, and Data Sources
-- Functions, versions, publishing, rollback, executions, visibility, and secrets
-- Function scheduling composed into single-Function create, patch, get, and list
-- business agents and workflows
-- integration configs, resources, templates, tests, proxying, and executions
-- Copilot tasks, messages, credentials and the last subscription window each one reported, models,
-  and app connections
-- an Agent task live-session state machine with bounded queue and `sendAndWait`, and the direct
-  channel to the chat's box
-- Messenger notifications and composed safe app context
-- anonymous public Function execution
-- a minimal transport interface injected by each concrete SDK
+A sessão de agente (`createAgentTaskSessionManager`) recebe `directChannel` com `apiUrl` (URL do gateway; sem ela o canal direto fica desligado), `WebSocket` e `fetch` opcionais.
 
-The package does not contain:
-
-- `fetch` or any other HTTP implementation, or a WebSocket implementation
-- tokens, authorization headers, or environment variables
-- login, sign-up, logout, refresh, browser storage, or auth listeners
-- retry, redirect, timeout, or client lifecycle policy
-
-Those concerns stay in the concrete SDK because browser sessions and Server Function runtime credentials have different security and failure semantics.
-
-## Agent task live sessions
-
-Core owns the state machine and the direct channel to the chat's box. A concrete SDK implements
-`AgentTaskEventSource`, the Copilot stream a chat falls back to, then composes it with the REST
-task module:
+## Uso
 
 ```typescript
 import {
+  createSdkCore,
   createAgentTaskSessionManager,
   withAgentTaskSessions,
-  type AgentTaskEventSource,
-  type SdkCore,
 } from "@mitralab.io/sdk-core"
 
-declare const eventSource: AgentTaskEventSource
-declare const core: SdkCore
+const core = createSdkCore({
+  transports: { auth: iam, dataManager, functions, integration, copilot },
+  getAppId: () => appId,
+  functions: { executeInvocationType: "sync" },
+})
+
+const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ limit: 20 })
 
 const sessions = createAgentTaskSessionManager({
   tasks: core.agentTasks,
   eventSource,
   directChannel: { apiUrl: "https://api.mitralab.ai" },
 })
-const agentTasks = withAgentTaskSessions(core.agentTasks, sessions)
-const session = agentTasks.session({ taskId: "task-id", transport: "http" })
-const result = await session.sendAndWait("Summarize the app", { timeoutMs: 120_000 })
+const session = withAgentTaskSessions(core.agentTasks, sessions).session({ taskId: "task-id" })
+const result = await session.sendAndWait("Resuma o app", { timeoutMs: 120_000 })
 ```
 
-The event source must complete `open()` after its streaming handshake, so Core opens the channel
-before posting the prompt. Core forwards the session's `auto`, `websocket`, or `http` transport
-preference to `open()`; the concrete adapter selects or rejects it. HTTP/SSE has no replay cursor.
-During an active turn Core performs one
-reconnection and reconciles persisted messages; live deltas across that gap are not guaranteed to
-be lossless. Abort and timeout stop the local `sendAndWait` waiter but do not interrupt the remote
-turn. Use `cancel()` when interruption is intended.
+`eventSource` é o `AgentTaskEventSource` do SDK concreto (o stream do Copilot) e precisa concluir `open()` só depois do handshake, porque o Core abre o canal antes de postar o prompt.
 
-**Turn usage.** `turnEnd` and the result of `sendAndWait` carry `usage` (`AgentTurnUsage`) when
-the turn's `stepFinish` reported it, on the direct channel and on the Copilot stream alike. The
-Agent message that closed a turn carries the same object as `usage` in `listMessages`, and
-`loadHistory` keeps it on that `agent` item. `inputTokens` and `outputTokens` are always there;
-`reasoningTokens`, `cacheReadTokens`, `cacheCreationTokens`, `model`, `provider`, `costUsd`
-(this turn, USD), `costUsdRaw` (the provider session so far) and `costSource` only when the
-harness reports them (Codex sends no cost and no cache writes). `inputTokens` is the input
-without cache, as in the legacy platform; cache is counted apart in `cacheReadTokens` and
-`cacheCreationTokens`. Also optional: `requestCount` and `requests` (`AgentTurnUsageRequest`,
-one entry per provider call or per model), `durationMs` (the provider's time, sent by the box
-in `stepFinish`, so it shows in the live `turnEnd` and in the history), and `authMode`
-(`subscription`, `api_key`, `included_ai`, `custom`, `unknown`, or a newer string passed
-through as is) and `requestMessageId`, which only the Copilot's record has: they show in
-`listMessages`, `loadHistory` and a recovered turn, never in the live `turnEnd`. A turn or
-message without usage has no `usage` field. A value the SDK cannot read is dropped rather than
-failing the page or the turn: counts must be non-negative integers, costs finite numbers, and
-a bad `requests` item leaves the list.
+## Contratos e armadilhas
 
-### Direct channel
+- O Core não autoriza nada: o adaptador com escopo de app precisa fixar o `appId` no valor confiável do runtime e não deixar input do chamador escolher outro app. Os endpoints alpha do Code Studio não exigem a claim de app em todo path. A execução de custom query envia só `parameters`; o Data Manager resolve o Data Source pelo JWT (JSON Web Token) do app.
+- `publicFunctions` nunca cai no transporte autenticado de Functions. O `executeAsync` público é fire-and-forget: não existe polling anônimo.
+- `sendAndWait` com `timeoutMs` ou abort só para a espera local; o turno remoto continua. Para interromper, use `cancel()`.
+- O canal direto com a box só vale para chat de agente de negócio (com `agentId`) e só para o host do gateway ou box da frota em `wss:` (`*.e2b.app`, `*.e2b-<env>.mitralab.ai`). Fora disso, ou sem WebSocket no runtime (Node 18 e 20 não têm global), a sessão segue pelo event source e emite `channelDeclined` com o `reason`.
+- `core.entities.Task` resolve qualquer propriedade que não seja método do módulo como nome de tabela; uma tabela chamada `getTable` só é alcançável por `getTable("getTable")`. `deleteMany({})` é recusado, para não apagar a tabela inteira.
+- Segmento de path vazio, `.` ou `..` é recusado antes da requisição; o resto passa por `encodeURIComponent`.
 
-The direct channel is on when the concrete SDK passes `directChannel.apiUrl`, and it serves a
-business agent's chat, the one with an `agentId`: only those have a box. Any other chat, or any
-chat without `apiUrl`, stays on the event source and REST inputs, with no channel request and
-no T3 default. A business agent's chat asks the Copilot once where it is served
-(`POST /api/v1/tasks/{id}/channel`, through `agentTasks.channel`) and talks to the box that
-answers. The box runs the turn; the Copilot hands out the channel, admits every turn and
-receives the box log. A new business agent's chat is created with `runtime: "T3"` so it is born
-on its box, unless the session names a runtime; the Copilot refuses T3 for any other chat
-(`RUNTIME_REQUIRES_AGENT_APP`).
+## Contrato versionado
 
-`session({ taskId })` reads the task before it opens anything, so the same rule holds for an
-existing chat: with no `agentId` it never asks for `/channel`; with an `agentId` it asks and the
-Copilot decides. A chat the Copilot will not serve on its box (not on T3, answered for example
-with `RUNTIME_NOT_T3`) is a raw `channelDeclined` with `reason: "unavailable"` and the Copilot's
-message, and the session goes on through the event source and REST inputs, with no `error`
-event for the app.
+`contracts/` guarda o corpus SDK-PARITY-001, publicado no pacote e usado pelos SDKs JavaScript e Python e pelo MCP. O `manifest.json` aponta a versão `current` e fixa o SHA-256 de cada versão. Versão publicada é imutável: mudança de contrato cria um diretório novo e move `current` junto com a versão do `package.json`, no mesmo PR. Quem consome copia os bytes e fixa o digest, então os testes rodam offline. Detalhes em [contracts/README.md](contracts/README.md).
 
-- **Transport.** `websocket` uses the box socket. `http` uses the box's HTTP routes next to the
-  socket path: `POST .../api/mitra/chat/messages` to send and `GET .../api/mitra/chat/events`
-  (SSE, from a sequence) to read, keeping the `grant` and `ticket` query of the channel URL.
-  `auto` uses the socket when a WebSocket implementation is available and HTTP otherwise, which
-  is the case of a Serverless Function.
-  The grant in those URLs lasts 10 minutes and the dev proxy ticket 60 seconds: a 401 or 403 without
-  an `error_code` on the POST or on opening the stream asks the Copilot for the channel again and
-  retries once on the fresh URLs; a second rejection is an error. One with an `error_code` is a
-  refusal and is answered once, as it came.
-- **Host rule.** The channel URL carries a grant, so Core only reaches the API gateway host
-  (`directChannel.apiUrl`, over `wss:` when the API is `https:`) or a fleet box host over `wss:` (`*.e2b.app`,
-  `*.e2b-<env>.mitralab.ai`), on either transport.
-- **Fallback, always visible.** When the Copilot answers 202 or an error (a Copilot without
-  `/channel`), the body has no `wsUrl`, the host is outside the rule, a `websocket` session has
-  no WebSocket, the box cannot be reached (a handshake that times out or is refused, a proxy
-  blocking its host, a network error on the HTTP stream), or the box has no HTTP routes (a 404,
-  or a stream that is not `text/event-stream`, from a template older than them), the
-  session stays on the event source and REST inputs and first emits a raw `channelDeclined`
-  event with `reason` `unavailable`, `body`, `host`, `websocket`, or `http_unsupported`.
-- **Runtimes without WebSocket.** Core uses `directChannel.WebSocket` when given, otherwise
-  `globalThis.WebSocket`; Node 18 and 20 have none, so inject one such as `ws` or let `auto` take
-  HTTP. The socket type only asks for `readyState`, the four `on*` handlers, `send`, and `close`.
-  HTTP uses `directChannel.fetch` when given, otherwise `globalThis.fetch`.
-- **Admission.** The session counts a message as sent only when the box answers for it: the
-  `stepStart` frame on the stream, or the 200 of the HTTP POST, both the box starting the turn
-  the Copilot admitted. The session then emits `accepted`, and from there the turn runs and
-  reaches the Copilot's log even if this process goes away. A refusal is reported once through
-  `error`: an `error` frame on the stream, or a POST answered 409 (not admitted), 400 (bad
-  frame), 413 (too large), 503 (nobody to admit) or 504 (no admission or turn within 30 s), each
-  with `{error_code, message}`, which rejects `sendAndWait` with `AgentTaskTurnError` carrying
-  that code and message. A box silent for 35 s with the wire up fails the send; a redial pauses that clock and a successful one
-  restarts it. Over REST, `accepted` follows the Copilot's 202. A caller that does not
-  wait for the answer, such as a Serverless Function, awaits `accepted` before it returns;
-  `sendAndWait` waits for the whole turn.
-- **Drops.** A socket or stream lost in the middle of a turn, or while a message waits for
-  admission, is redialed with backoff (1, 2, 4, 8, 16 s), asking the Copilot for the channel on
-  each attempt and replaying the box log from the last sequence seen, so an admission that
-  happened during the drop still arrives. A POST the network lost is not sent again for the same
-  reason. The raw `channelReconnecting` and `channelConnected` events report the redial. An idle
-  wire that closes, a socket superseded by another open (4409), a redial that gives up, or a
-  Copilot that stops offering the channel is a disconnect for the session. Opening never replays
-  older frames: what an idle chat missed is history.
-- Interrupts go to the box too; approvals stay on REST.
-- **Status of the HTTP transport.** Not yet proven against a real box. It needs the box HTTP
-  routes in the t3code-mitra fork (mitralab-dev/t3code-mitra#180, in progress) and, behind the
-  dev proxy, a gateway route for them: the gateway only routes `.../api/mitra/chat/ws` today.
-  Until both ship, an `http` session, or an `auto` one without WebSocket, falls back to the
-  Copilot with `channelDeclined`. The WebSocket transport was proven against a dev box.
+## Erros
 
-## Installation
+| Classe                      | Quando                                                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `SdkCoreConfigurationError` | entrada inválida: path vazio, `deleteMany` sem filtro, transporte opcional ausente, API key ou app vazios |
+| `SdkCoreResponseError`      | resposta fora do contrato; `code` é `INVALID_RESPONSE` e `retryable` é `false`                            |
+| `AgentTaskTurnError`        | a box ou o Copilot recusou ou encerrou o turno com erro; `code` traz o `error_code`, quando veio          |
 
-```bash
-npm install @mitralab.io/sdk-core
-```
+Com `errors` configurado, as duas primeiras situações lançam o que a factory devolver.
 
-Node.js 18 or newer is required. The package has no runtime dependencies; the direct channel
-needs a WebSocket implementation on runtimes without a global one.
-
-## Transport contract
-
-SDK adapters provide one transport per service. A transport receives the service-local path and request options, then returns the parsed response payload.
-
-```typescript
-import { createSdkCore, type Transport } from "@mitralab.io/sdk-core"
-
-declare const iam: Transport
-declare const dataManager: Transport
-declare const functions: Transport
-declare const integration: Transport
-declare const codeStudio: Transport
-declare const copilot: Transport
-declare const messenger: Transport
-declare const publicFunctions: Transport
-
-let appId: string | undefined
-
-const core = createSdkCore({
-  transports: {
-    auth: iam,
-    dataManager,
-    functions,
-    integration,
-    codeStudio,
-    copilot,
-    messenger,
-    publicFunctions,
-  },
-  getAppId: () => appId,
-  functions: {
-    executeInvocationType: "sync",
-    emptyInput: "empty-object",
-  },
-})
-
-const { data: tasks } = await core.entities.getTable("Task").list({ limit: 20 })
-const context = await core.context.getAppContext()
-```
-
-The transport owns URL resolution, authentication, serialization, error parsing, redirects, retries, and timeouts. The core never reads or stores credentials.
-
-List methods return the producer's summary DTO when it differs from the detail
-response. Custom Query summaries omit `sql`, Workflow summaries omit
-`definition`, and integration resource summaries contain only `id`, `name`,
-`method`, and `endpoint`. App, integration template, and template config lists
-likewise expose their producer summary DTOs, while their `get` methods return
-the complete detail DTOs.
-
-Record list and filter methods preserve the Data Manager envelope with `data`,
-`limit`, `skip`, `total`, and `hasMore`. Spring list endpoints from Code Studio,
-Functions, Data Manager, and Copilot use stable pagination metadata under
-`page`. Integration still returns its legacy flat Spring page metadata, so its
-list methods expose `totalElements` at the top level.
-
-The complete DTOs preserve producer field names and nullability. This includes
-Code Studio app routing, domains, color, plan, version, and timestamps;
-Workflow execution scope, trigger, current step, context, and timestamps; and
-Integration template login/request schemas, config metadata, and resource
-parameter schemas. `apps.build()` returns the `AppDeploy` produced by the build
-endpoint. `apps.publish()` continues to return the updated `AppDefinition`.
-
-Code Studio deploys use the producer field names `deployUrl` and
-`errorMessage`, together with `appId`, `appVersionId`, `logs`, `durationMs`,
-`startedAt`, `finishedAt`, and `createdAt`. Integration execution history uses
-`success` rather than a synthetic status and preserves nullable request,
-response, error, source, and duration fields.
-
-Integration configs can be executed by identifier with `integration.execute()`
-or by their app-scoped alias with `integration.executeByAlias()`. Both methods
-send the proxy request unchanged apart from the required `source: "SDK"` audit
-field and validate the same proxy result.
-
-An integration config normally points at a catalog template through `templateId`.
-When the provider has no template, `integrationAdmin.create()`,
-`integrationAdmin.bulkCreate()`, and `integrationAdmin.testCredentials()` accept
-an inline definition instead, in the same shapes the catalog uses:
-
-```typescript
-await integrationAdmin.create({
-  alias: "erp-inline",
-  fieldsSchemaInline: [
-    { key: "base_url", label: "Base URL", type: "url", required: true },
-    { key: "access_key_code", label: "Access Key Code", type: "secret", required: true },
-    { key: "access_key_token", label: "Access Key Token", type: "secret", required: true },
-  ],
-  requestConfigInline: {
-    headers: {
-      "X-Access-Key-Code": "{{access_key_code}}",
-      "X-Access-Key-Token": "{{access_key_token}}",
-    },
-    credential_rules: null,
-  },
-  loginConfigInline: null,
-  values: { base_url: "https://api.example.com", access_key_code: "...", access_key_token: "..." },
-})
-```
-
-Send `templateId` or the inline definition, never both and never neither. The
-Integration service owns that rule and answers 400; Core forwards whatever the
-caller sends. Configs created this way report `templateId: null` and echo the
-three inline fields back on every config response, with secrets in `config`
-masked exactly as they are for template-backed configs.
-
-Inline fields are authored as `IntegrationFieldSchemaInput`, which makes
-`placeholder` and `default` optional because the producer stores an omitted one
-as null. Responses keep the strict `IntegrationFieldSchema`, where both
-properties are always present.
-
-`integrationAdmin.list()` is the native equivalent for listing configured
-integrations. It calls `GET /api/v1/template-configs` and returns the producer's
-paginated `TemplateConfigSummary` values. With an app-scoped token, the
-Integration service filters the page to that app.
-
-`auth`, `dataManager`, `functions`, and `integration` remain required for
-backward compatibility. `codeStudio`, `copilot`, and `messenger` are optional;
-calling their modules without the corresponding transport fails with a
-configuration error before making a request.
-
-`publicFunctions` is deliberately separate and never falls back to the
-authenticated Functions transport. Its adapter must target the Functions public
-base URL and must not attach `Authorization` or `X-App-Id`. It calls
-`POST /public/v1/functions/{id}/execute` with `X-Invocation-Type: sync` or
-`async`. Public async is fire-and-forget because the producer does not expose
-anonymous polling. Callers that need a result use public sync execution, or the
-authenticated `functions.executeAsync` and `functions.getExecution` methods.
-
-## App scope and permissions
-
-Core accepts app identifiers but does not inspect tokens or implement service
-authorization. A concrete app-scoped adapter must fix `appId` to its trusted
-runtime value. It must not let caller input select another app. This is
-especially important for Code Studio because its alpha endpoints do not enforce
-an app claim in every path. `apps.list()` and `apps.create()` are tenant-wide and
-are not available to app-scoped tokens.
-
-`context.getAppContext()` always uses the trusted current app and deliberately
-excludes app members. The Server Function token does not have `MEMBER_READ`, so
-the composed context must not call IAM's member endpoint. `members` remains a
-separate Core module for callers whose token has that permission. Function
-secret operations still require their dedicated permissions. Agent tools that
-resolve a business `agent_id` and the two tenant-wide app collection operations
-are not applicable to an app-scoped token. Messenger delivery also depends on
-a configured channel. These are service authorization constraints, not changes
-to the remaining Core contracts.
-
-Custom Query creation accepts optional `isVirtualTable` and `connectionId`
-fields and forwards them unchanged to the Data Manager. Omitting
-`isVirtualTable` preserves the producer default of `false`; `connectionId` only
-selects an external connection for a Virtual Table.
-
-Custom query execution targets the Data Manager alpha contract and sends only
-`parameters`. Data Manager resolves the Data Source from the authenticated app,
-so the concrete adapter must use the app-scoped JWT and must not accept a caller
-selected Data Source for this operation.
-
-## MCP capability coverage
-
-[`contracts/v0.2.0-beta.0/mcp-tool-parity.json`](contracts/v0.2.0-beta.0/mcp-tool-parity.json)
-maps all 120 `@McpTool` methods from 18 alpha tool classes to the typed Core
-surface. Multiplexed MCP tools map to separate SDK methods. Composition and alias
-tools record equivalence instead of creating duplicate APIs. Git credentials are
-excluded because they are an internal Sandbox endpoint, not an MCP capability.
-The deprecated Functions bridge remains owned by `@mitralab.io/functions-sdk`.
-
-The MCP `bulkUpdateFunctions` tool maps to `functionsAdmin.bulkPatch()` and
-`PATCH /api/v1/functions/bulk`, preserving omitted fields. The separate
-`functionsAdmin.bulkUpdate()` method remains a full replacement over PUT.
-Single-Function create and patch inputs also expose `cronExpression`,
-`cronInputJson`, and `cronEnabled` as one composed scheduling unit. On create,
-omitting all three creates no schedule; supplying any of them requires a
-non-blank `cronExpression`. The new schedule uses `UTC` and starts `ACTIVE`
-unless `cronEnabled` is `false`. On patch, null or omitted schedule fields
-preserve their stored values, an empty `cronInputJson` object clears the input,
-and a blank `cronExpression` removes the schedule. A non-blank expression can
-create a missing schedule in `UTC`; `cronEnabled` explicitly pauses or resumes
-it. These composed writes require `SCHEDULE_WRITE` and `FUNCTION_EXECUTE` in
-addition to the Function write permission.
-
-Function detail and list responses return all three fields when the caller has
-`SCHEDULE_READ`. Without it, all three are null without querying Scheduler. The
-same all-null shape represents a Function that has no schedule, so these
-responses alone cannot distinguish absence from missing read permission. All
-Function bulk create, update, and patch inputs prohibit embedded schedule
-fields; their dedicated types omit them. Compose scheduling only through the
-single-Function create and patch methods.
-
-The MCP `FunctionTools.getExecution` operation maps to
-`functionsAdmin.getExecution(functionId, executionId)` and its nested Function
-execution route. The runtime-only `functions.getExecution(executionId)` remains
-available for callers of the separate global execution endpoint.
-
-Core deliberately exposes no separate schedule facade. The MCP scheduling capability is composed
-through the three cron fields on `functionsAdmin.create()` and `patch()`, with state returned by
-`get()` and `list()`. This keeps one public Function contract instead of duplicating the Scheduler
-producer lifecycle.
-
-Legacy Git credentials and record operations selected by `jdbcConnectionConfigId` have no native
-Core equivalent. Git credential minting is an internal Sandbox operation authenticated between
-services, and the public Data Manager records API resolves the app Data Source from the token
-without accepting a connection selector. Core does not synthesize either behavior through a BFF
-or raw SQL.
-
-## Error mapping
-
-By default, invalid configuration and invalid responses throw `SdkCoreConfigurationError` and `SdkCoreResponseError`. A concrete SDK can inject an `SdkCoreErrorFactory` so these failures keep that SDK's established public error classes.
-
-## Development
+## Desenvolvimento
 
 ```bash
 npm install
 npm run check
 ```
 
-The build produces ESM, CommonJS, `.d.ts`, and `.d.cts` artifacts. Package smoke tests install the generated tarball into a clean consumer and validate both module systems and TypeScript resolution.
+O `check` roda format, lint, typecheck, testes, build, conferência dos exports e do corpus de contrato, e um smoke test que instala o tarball num consumidor limpo.
 
-## Release order
+## Operação
 
-Core is the producer for the concrete SDK adapters, so it publishes first. For a prerelease
-`X.Y.Z-beta.N`, currently `0.2.0-beta.1`:
-
-1. Merge the source, the `package.json` version, and the matching contract corpus version to
-   `main` in the same pull request. The Release workflow bumps nothing.
-2. Run the Release workflow with version `X.Y.Z-beta.N`. It checks that the requested version
-   already matches `package.json`, runs the full package check, then tags and publishes the
-   prerelease under npm's `beta` dist-tag.
-3. Confirm `npm view @mitralab.io/sdk-core@X.Y.Z-beta.N version` returns the same version.
-4. Regenerate each adapter lockfile from the npm registry and pin this repository commit in the
-   adapter's contract-source manifest before publishing that adapter.
-
-Stable `X.Y.Z` releases use npm's default `latest` dist-tag. The workflow accepts only that stable
-form or the prerelease form `X.Y.Z-beta.N`.
-
-Do not publish an adapter against a local tarball or a `file:` dependency. Tarballs are only for
-pre-release validation while the registry artifact does not exist.
+O Core publica antes dos SDKs que dependem dele. O workflow Release roda só da `main`, exige que a versão pedida já seja a do `package.json` e publica `X.Y.Z-beta.N` na dist-tag `beta` do npm e `X.Y.Z` na `latest`. Depois, cada SDK regenera o lockfile a partir do npm e fixa este commit no manifest de contrato dele. Não publique um SDK contra tarball local ou dependência `file:`.
