@@ -1,8 +1,6 @@
 # Mitra SDK Core
 
-Contratos TypeScript e módulos de API neutros de ambiente, compartilhados pelos SDKs JavaScript da Mitra: entidades, queries, Functions, integrações, Code Studio, agentes, Copilot e Messenger. É dependência de `@mitralab.io/platform-sdk` (browser) e `@mitralab.io/functions-sdk` (Server Functions); código de app instala um desses, não o Core.
-
-O Core não tem `fetch` nem WebSocket próprio, não lê variável de ambiente e não guarda credencial. Cada SDK concreto injeta um `Transport` por serviço e cuida de URL base, autenticação, serialização, timeout, retry e erro HTTP. A troca de API key por token também é contrato do Core (`resolveApiKeyToken`), mas quem chama faz a requisição.
+Base comum dos SDKs JavaScript da Mitra: tipos e módulos de API que não dependem de ambiente. **App não instala o Core direto.** No browser, use [`@mitralab.io/platform-sdk`](https://www.npmjs.com/package/@mitralab.io/platform-sdk); dentro de uma Server Function, use [`@mitralab.io/functions-sdk`](https://www.npmjs.com/package/@mitralab.io/functions-sdk). Os dois já trazem o Core. Instale este pacote só para escrever um SDK ou adaptador da Mitra para outro runtime.
 
 ## Instalação
 
@@ -10,82 +8,103 @@ O Core não tem `fetch` nem WebSocket próprio, não lê variável de ambiente e
 npm install @mitralab.io/sdk-core
 ```
 
-Node 18 ou mais novo. Publicado em ESM e CommonJS, com tipos para os dois. Sem dependências de runtime.
+Node 18 ou mais novo. Publicado em ESM e CommonJS, com tipos e sem dependências de runtime.
 
-## Configuração
+## Início rápido
 
-| Opção                                                        | Obrigatória | Uso                                                                                                                                    |
-| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` por serviço (IAM, Data Manager, Functions, Integration); recebe o path local do serviço e devolve o payload já parseado |
-| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles, o módulo correspondente falha com erro de configuração antes de sair a requisição                                            |
-| `transports.publicFunctions`                                 | não         | transporte anônimo para `POST /public/v1/functions/{id}/execute`; não pode enviar `Authorization` nem `X-App-Id`                       |
-| `getAppId`                                                   | não         | devolve o app fixado pelo SDK concreto; usado por `context.getAppContext()`                                                            |
-| `functions.executeInvocationType`                            | não         | `sync` ou `async`, enviado em `X-Invocation-Type` por `functions.execute`; sem valor, vale o default do servidor                       |
-| `functions.emptyInput`                                       | não         | `empty-object` envia `{ "input": {} }` sem input; `omit-body` não envia corpo                                                          |
-| `errors`                                                     | não         | `SdkCoreErrorFactory` para o SDK concreto lançar as próprias classes de erro                                                           |
-
-A sessão de agente (`createAgentTaskSessionManager`) recebe `directChannel` com `apiUrl` (URL do gateway; sem ela o canal direto fica desligado), `WebSocket` e `fetch` opcionais.
-
-## Uso
+O Core não faz HTTP: você entrega um `Transport` por serviço, que recebe o path e as opções e devolve o corpo já parseado. Autenticação, headers, timeout e erro HTTP ficam com ele.
 
 ```typescript
-import {
-  createSdkCore,
-  createAgentTaskSessionManager,
-  withAgentTaskSessions,
-} from "@mitralab.io/sdk-core"
+import { createSdkCore, type Transport, type TransportRequestOptions } from "@mitralab.io/sdk-core"
+
+const apiUrl = process.env.MITRA_API_URL!
+const accessToken = process.env.MITRA_TOKEN!
+const appId = process.env.MITRA_APP_ID!
+
+function fetchTransport(service: string): Transport {
+  return {
+    async request<T>(path: string, options: TransportRequestOptions = {}): Promise<T> {
+      const url = new URL(`${apiUrl}/${service}${path}`)
+      for (const [key, value] of Object.entries(options.params ?? {})) {
+        for (const item of [value].flat()) {
+          if (item !== undefined) url.searchParams.append(key, String(item))
+        }
+      }
+      const response = await fetch(url, {
+        method: options.method ?? "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          "X-App-Id": appId,
+          ...options.headers,
+        },
+        body: options.body === undefined ? null : JSON.stringify(options.body),
+        redirect: "error",
+      })
+      if (!response.ok) throw new Error(`Request failed with status ${response.status}`)
+      const text = await response.text()
+      return (text ? JSON.parse(text) : undefined) as T
+    },
+  }
+}
 
 const core = createSdkCore({
-  transports: { auth: iam, dataManager, functions, integration, copilot },
+  transports: {
+    auth: fetchTransport("iam"),
+    dataManager: fetchTransport("data-manager"),
+    functions: fetchTransport("functions"),
+    integration: fetchTransport("integration"),
+  },
   getAppId: () => appId,
-  functions: { executeInvocationType: "sync" },
 })
 
 const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ limit: 20 })
-
-const sessions = createAgentTaskSessionManager({
-  tasks: core.agentTasks,
-  eventSource,
-  directChannel: { apiUrl: "https://api.mitralab.ai" },
-})
-const session = withAgentTaskSessions(core.agentTasks, sessions).session({ taskId: "task-id" })
-const result = await session.sendAndWait("Resuma o app", { timeoutMs: 120_000 })
 ```
 
-`eventSource` é o `AgentTaskEventSource` do SDK concreto (o stream do Copilot) e precisa concluir `open()` só depois do handshake, porque o Core abre o canal antes de postar o prompt.
+## O que dá para fazer
 
-## Contratos e armadilhas
+- `entities`: CRUD nas tabelas do app, por `getTable(nome)` ou `core.entities.<Tabela>`.
+- `queries`, `customQueries`, `sql` e `schema`: queries salvas, SQL parametrizado e estrutura das tabelas.
+- `functions`, `publicFunctions`, `functionsAdmin` e `workflows`: executar e administrar Server Functions e workflows.
+- `integration`, `integrationAdmin`, `integrationResources` e `integrationTemplates`: chamadas a APIs externas e a configuração delas.
+- `agentTasks`, com `createAgentTaskSessionManager` e `withAgentTaskSessions`: chats de agente com `send`, `sendAndWait`, `cancel` e eventos. O gerenciador recebe `tasks`, o `eventSource` do seu SDK e `directChannel`, com o `apiUrl` do gateway e, se quiser, `WebSocket` e `fetch`.
+- `apps`, `context`, `agents`, `agentConnections`, `agentCredentials`, `members`, `messenger`, `imports`, `dataSources` e `auth`: o app em si, a configuração de agentes e os demais recursos.
+- `resolveApiKeyToken`, `readTokenAppId` e `tokenAuthorizesApp`: contrato da troca de API key por token, para o SDK que autentica por chave.
 
-- O Core não autoriza nada: o adaptador com escopo de app precisa fixar o `appId` no valor confiável do runtime e não deixar input do chamador escolher outro app. Os endpoints alpha do Code Studio não exigem a claim de app em todo path. A execução de custom query envia só `parameters`; o Data Manager resolve o Data Source pelo JWT (JSON Web Token) do app.
-- `publicFunctions` nunca cai no transporte autenticado de Functions. O `executeAsync` público é fire-and-forget: não existe polling anônimo.
-- `sendAndWait` com `timeoutMs` ou abort só para a espera local; o turno remoto continua. Para interromper, use `cancel()`.
-- O canal direto com a box só vale para chat de agente de negócio (com `agentId`) e só para o host do gateway ou box da frota em `wss:` (`*.e2b.app`, `*.e2b-<env>.mitralab.ai`). O `transport` da sessão escolhe o meio: `websocket`, `http` (rotas HTTP da box, com SSE, Server-Sent Events, para ler) ou `auto`, o default, que usa o socket quando há WebSocket e HTTP quando não há (Node 18 e 20 não têm global; injete `directChannel.WebSocket` para ter socket). Se o Copilot não oferece o canal, o host foge da regra ou a box não responde, a sessão segue pelo event source e emite `channelDeclined` com o `reason`.
-- `core.entities.Task` resolve qualquer propriedade que não seja método do módulo como nome de tabela; uma tabela chamada `getTable` só é alcançável por `getTable("getTable")`. `deleteMany({})` é recusado, para não apagar a tabela inteira, e segmento de path vazio, `.` ou `..` é recusado antes da requisição.
-- O agendamento de uma Function vem dos três campos `cronExpression`, `cronInputJson` e `cronEnabled`, só em `functionsAdmin.create` e `patch` (os métodos bulk recusam) e com as permissões `SCHEDULE_WRITE` e `FUNCTION_EXECUTE`. Na leitura, os três nulos tanto podem ser Function sem agendamento quanto falta de `SCHEDULE_READ`.
+## Configuração
 
-## Contrato versionado
-
-`contracts/` guarda o corpus SDK-PARITY-001, publicado no pacote e usado pelos SDKs JavaScript e Python e pelo MCP. O `manifest.json` aponta a versão `current` e fixa o SHA-256 de cada versão. Versão publicada é imutável: mudança de contrato cria um diretório novo e move `current` junto com a versão do `package.json`, no mesmo PR. Quem consome copia os bytes e fixa o digest, então os testes rodam offline. Detalhes em [contracts/README.md](contracts/README.md).
+| Opção                                                        | Obrigatória | Uso                                                                                                                              |
+| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` para cada serviço                                                                                                 |
+| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles, `apps`, os módulos de agente e `messenger` falham com `SdkCoreConfigurationError` antes de sair a requisição           |
+| `transports.publicFunctions`                                 | não         | transporte anônimo de `publicFunctions`, sem `Authorization` nem `X-App-Id`                                                      |
+| `getAppId`                                                   | não         | devolve o app fixado pelo seu SDK; usado por `context`                                                                           |
+| `functions.executeInvocationType`                            | não         | `sync` ou `async` em `functions.execute`; sem valor, vale o padrão do servidor                                                   |
+| `functions.emptyInput`                                       | não         | `empty-object` manda `{ "input": {} }` quando não há input; `omit-body` não manda corpo                                          |
+| `errors`                                                     | não         | `SdkCoreErrorFactory` para o seu SDK lançar as próprias classes no lugar de `SdkCoreConfigurationError` e `SdkCoreResponseError` |
 
 ## Erros
 
-| Classe                      | Quando                                                                                                    |
-| --------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `SdkCoreConfigurationError` | entrada inválida: path vazio, `deleteMany` sem filtro, transporte opcional ausente, API key ou app vazios |
-| `SdkCoreResponseError`      | resposta fora do contrato; `code` é `INVALID_RESPONSE` e `retryable` é `false`                            |
-| `AgentTaskTurnError`        | a box ou o Copilot recusou ou encerrou o turno com erro; `code` traz o `error_code`, quando veio          |
+| Erro                                               | Quando                                                                                             | O que fazer                                                               |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `SdkCoreConfigurationError`                        | entrada inválida: path vazio, `deleteMany({})`, transporte opcional ausente, API key ou app vazios | corrija a chamada ou passe o transporte que falta                         |
+| `SdkCoreResponseError` (`code` `INVALID_RESPONSE`) | resposta de sucesso fora do contrato                                                               | confira se o transporte devolve o corpo parseado; se sim, atualize o Core |
+| `AgentTaskTurnError`                               | o turno do agente foi recusado ou terminou com erro; `code` traz o motivo, quando vem              | mostre o erro e deixe a pessoa mandar de novo                             |
+| erro do seu `Transport`                            | falha HTTP ou de rede                                                                              | trate no seu SDK; o Core repassa o erro sem mudar                         |
 
-Com `errors` configurado, as duas primeiras situações lançam o que a factory devolver.
+## Boas práticas
+
+- Fixe o app no adaptador: `getAppId` e o header `X-App-Id` vêm do valor configurado no seu SDK, nunca de um argumento de quem chama.
+- O Core não repete requisição nem renova token. Se o seu transporte repetir, repita só o que não grava.
+- `publicFunctions` precisa de um transporte sem credencial. O Core não usa o transporte autenticado no lugar dele.
+- `sendAndWait` com `timeoutMs` ou `signal` só para de esperar; o turno continua no servidor. Para interromper, chame `cancel()`.
+- O `open()` do seu `eventSource` só deve resolver depois que o stream estiver conectado, para nenhum evento do turno se perder.
 
 ## Desenvolvimento
 
 ```bash
-npm install
+npm ci
 npm run check
 ```
 
-O `check` roda format, lint, typecheck, testes, build, conferência dos exports e do corpus de contrato, e um smoke test que instala o tarball num consumidor limpo.
-
-## Operação
-
-O Core publica antes dos SDKs que dependem dele. O workflow Release roda só da `main`, exige que a versão pedida já seja a do `package.json` e publica `X.Y.Z-beta.N` na dist-tag `beta` do npm e `X.Y.Z` na `latest`. Depois, cada SDK regenera o lockfile a partir do npm e fixa este commit no manifest de contrato dele. Não publique um SDK contra tarball local ou dependência `file:`.
+O `check` roda format, lint, typecheck, testes, build, a conferência dos exports e do corpus de contrato em `contracts/`, e um smoke test do pacote. A publicação no npm sai do workflow Release, sempre antes dos SDKs que dependem do Core.
