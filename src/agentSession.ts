@@ -1,4 +1,8 @@
-import { AgentDirectChannel, type AgentDirectChannelOptions } from "./agentChannel"
+import {
+  AgentDirectChannel,
+  newClientMessageId,
+  type AgentDirectChannelOptions,
+} from "./agentChannel"
 import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import { agentTurnUsageOf, expectCredentialUsage } from "./response"
@@ -192,6 +196,13 @@ interface TurnWaiter {
   cleanup(): void
 }
 
+interface SteeredMessage {
+  /** The id the message goes out with; the box echoes it on the `stepStart` that takes it. */
+  clientMessageId: string
+  waiter?: TurnWaiter
+  taken: boolean
+}
+
 interface InternalQueueItem extends AgentQueueItem {
   waiter?: TurnWaiter
 }
@@ -353,6 +364,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private cancelTimer: ReturnType<typeof setTimeout> | null = null
   private queueSequence = 0
   private activeWaiter: TurnWaiter | undefined
+  // Messages steered into the running turn. One the box took settles with that turn; one the
+  // box had not taken when the turn ended opens a turn of its own when it does.
+  private steers: SteeredMessage[] = []
+  private strayedSteers: SteeredMessage[] = []
+  private pendingSteers = 0
   private turnBaselineIds = new Set<string>()
 
   constructor(
@@ -405,6 +421,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
   send(prompt: string, options: AgentSendOptions = {}): void {
     this.requireOpen()
     if (!prompt.trim()) return
+    if (this.canSteer()) {
+      this.steer(prompt, options)
+      return
+    }
     if (this.isBusy()) {
       this.enqueue(prompt, options)
       return
@@ -420,6 +440,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const sendOptions: AgentSendOptions = {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    }
+    if (this.canSteer()) {
+      this.steer(prompt, sendOptions, waiter)
+      return waiter.promise
     }
     if (this.isBusy()) {
       const queueId = this.enqueue(prompt, sendOptions, waiter)
@@ -529,6 +553,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const closedError = new Error("Agent task session is closed.")
     this.activeWaiter?.reject(closedError)
     this.activeWaiter = undefined
+    this.rejectSteers(closedError)
     for (const item of this._queue) item.waiter?.reject(closedError)
     this._queue = []
     if (this._taskId) this.dependencies.onClose(this._taskId, this)
@@ -609,7 +634,131 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("turnStart", {})
     if (!(await this.sendInput(input))) return false
     this.emit("accepted", {})
+    // Sent before the turn reached the box, these waited for it; now they join it.
+    while (this._queue.length && this.canSteer()) {
+      const next = this._queue[0]!
+      this._queue = this._queue.slice(1)
+      this.emitQueue()
+      if (next.waiter?.settled) continue
+      this.steer(
+        next.text,
+        {
+          ...(next.agentType ? { agentType: next.agentType } : {}),
+          ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+        },
+        next.waiter,
+      )
+    }
     return true
+  }
+
+  // A message sent while the turn runs on the box goes straight to it, as the T3 shell sends it:
+  // the box takes it into that turn (the provider's own steering) instead of this session holding
+  // it until the turn ends. A stop already sent, a turn this session has not sent yet, a channel
+  // being redialed, or the Copilot's stream keep the queue.
+  private canSteer(): boolean {
+    return (
+      this._status === "streaming" &&
+      this._taskId !== null &&
+      this.dependencies.channel.isLive(this._taskId)
+    )
+  }
+
+  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+    const steered: SteeredMessage = {
+      clientMessageId: newClientMessageId(),
+      ...(waiter ? { waiter } : {}),
+      taken: false,
+    }
+    this.steers.push(steered)
+    const input: AgentTaskInput = {
+      type: "message",
+      content: prompt,
+      ...(options.agentType ? { agentType: options.agentType } : {}),
+      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    }
+    this.pendingSteers += 1
+    void this.sendInput(input, steered.clientMessageId)
+      .then((admitted) => {
+        if (!admitted) {
+          this.forgetSteer(steered)
+          waiter?.reject(new AgentTaskTurnError("The Agent box did not take the message."))
+          return
+        }
+        // A box that does not echo the id is only heard here.
+        this.steerTaken(steered)
+        this.emit("accepted", {})
+      })
+      .catch((error: unknown) => {
+        this.forgetSteer(steered)
+        waiter?.reject(error)
+        this.emitError("Failed to send Agent prompt", error)
+      })
+      .finally(() => {
+        this.pendingSteers -= 1
+      })
+  }
+
+  // The box took the steer. Into the turn it was sent to, when that turn still runs; into a turn
+  // of its own, when that one ended before the box got to the message.
+  private steerTaken(steered: SteeredMessage): void {
+    if (steered.taken) return
+    steered.taken = true
+    if (!this.strayedSteers.includes(steered)) return
+    this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
+    this.openTurnFor(steered.waiter)
+  }
+
+  private steerOpenedBy(lifecycle: Record<string, unknown> | null): void {
+    const id = lifecycle?.clientMessageId
+    if (typeof id !== "string") return
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === id,
+    )
+    if (steered) this.steerTaken(steered)
+  }
+
+  private forgetSteer(steered: SteeredMessage): void {
+    this.steers = this.steers.filter((pending) => pending !== steered)
+    this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
+  }
+
+  // The turn ended: what the box took is answered by it, what it had not taken yet waits for the
+  // turn the box opens for it.
+  private settleSteers(settle: (waiter: TurnWaiter) => void): void {
+    const steers = this.steers
+    this.steers = []
+    for (const steered of steers) {
+      if (!steered.taken) this.strayedSteers.push(steered)
+      else if (steered.waiter) settle(steered.waiter)
+    }
+  }
+
+  private openTurnFor(waiter?: TurnWaiter): void {
+    if (this.isClosed()) return
+    if (this._status !== "streaming" && this._status !== "cancelled") {
+      this._content = ""
+      this.recoveryUsed = false
+      this.recoveredTerminalReason = undefined
+      this.recoveredTerminalUsage = undefined
+      this.recoveryGeneration += 1
+      // What the history held before this turn, so a recovery finds this turn's answer and not
+      // the one before it. The history already loaded is that, up to the turn just ended.
+      this.turnBaselineIds = new Set(this._history.map((item) => item.id))
+      void this.captureTurnBaseline().catch(() => undefined)
+      this.setStatus("streaming")
+      this.emit("turnStart", {})
+    }
+    if (!waiter) return
+    if (!this.activeWaiter) this.activeWaiter = waiter
+    else this.steers.push({ clientMessageId: "", waiter, taken: true })
+  }
+
+  private rejectSteers(error: unknown): void {
+    const steers = [...this.steers, ...this.strayedSteers]
+    this.steers = []
+    this.strayedSteers = []
+    for (const steered of steers) steered.waiter?.reject(error)
   }
 
   private async ensureTask(): Promise<void> {
@@ -748,9 +897,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   /** True once the server took the input; false when the box refused it on the stream. */
-  private async sendInput(input: AgentTaskInput): Promise<boolean> {
+  private async sendInput(input: AgentTaskInput, clientMessageId?: string): Promise<boolean> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
-    const direct = this.dependencies.channel.send(this._taskId, input)
+    const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return direct
     await this.dependencies.tasks.sendInput(this._taskId, input)
     return true
@@ -778,6 +927,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "workspace":
         this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
+        break
+      case "stepStart":
+        this.steerOpenedBy(asObject(payload?.lifecycle))
         break
       case "providerUsage": {
         const usage = providerUsageOf(payload)
@@ -818,6 +970,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
         this.emit("error", { ...(code ? { code } : {}), error: message })
+        // A refusal names no turn. Once the turn that runs was accepted, one arriving with a
+        // steer pending is that steer's: the box refused the message and the turn goes on.
+        if (!payload?.lifecycle && !this.dispatching && this.pendingSteers > 0) break
         if (this._status === "streaming" || this._status === "cancelled") {
           this.failTurn(new AgentTaskTurnError(message, code))
         }
@@ -891,6 +1046,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
     this.activeWaiter = undefined
+    this.settleSteers((waiter) => waiter.resolve(result))
     this.setStatus("idle")
     this.flushQueue()
   }
@@ -901,6 +1057,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.recoveryGeneration += 1
     this.activeWaiter?.reject(error)
     this.activeWaiter = undefined
+    this.settleSteers((waiter) => waiter.reject(error))
     this.setStatus("idle")
     this.flushQueue()
   }
@@ -910,6 +1067,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emitError("Agent live channel failed", observed)
     this.activeWaiter?.reject(waiterError)
     this.activeWaiter = undefined
+    this.rejectSteers(waiterError)
     for (const item of this._queue) item.waiter?.reject(waiterError)
     this._queue = []
     this.emitQueue()
