@@ -12,7 +12,7 @@ Node 18 ou mais novo. Publicado em ESM e CommonJS, com tipos e sem dependências
 
 ## Início rápido
 
-O Core não faz HTTP: você entrega um `Transport` por serviço, que recebe o path e as opções e devolve o corpo já parseado. Autenticação, headers, timeout e erro HTTP ficam com ele.
+Os módulos de API não fazem HTTP: você entrega um `Transport` por serviço, que recebe o path e as opções e devolve o corpo já parseado. Autenticação, headers, timeout e erro HTTP ficam com ele. A exceção é o canal direto dos chats de agente (`directChannel`), que fala com o gateway por WebSocket ou `fetch`, fora do `Transport`.
 
 ```typescript
 import { createSdkCore, type Transport, type TransportRequestOptions } from "@mitralab.io/sdk-core"
@@ -30,14 +30,12 @@ function fetchTransport(service: string): Transport {
           if (item !== undefined) url.searchParams.append(key, String(item))
         }
       }
+      const headers = new Headers({ "Content-Type": "application/json", ...options.headers })
+      headers.set("Authorization", `Bearer ${accessToken}`)
+      headers.set("X-App-Id", appId)
       const response = await fetch(url, {
         method: options.method ?? "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          "X-App-Id": appId,
-          ...options.headers,
-        },
+        headers,
         body: options.body === undefined ? null : JSON.stringify(options.body),
         redirect: "error",
       })
@@ -73,28 +71,28 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 
 ## Configuração
 
-| Opção                                                        | Obrigatória | Uso                                                                                                                              |
-| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` para cada serviço                                                                                                 |
-| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles, `apps`, os módulos de agente e `messenger` falham com `SdkCoreConfigurationError` antes de sair a requisição           |
-| `transports.publicFunctions`                                 | não         | transporte anônimo de `publicFunctions`, sem `Authorization` nem `X-App-Id`                                                      |
-| `getAppId`                                                   | não         | devolve o app fixado pelo seu SDK; usado por `context`                                                                           |
-| `functions.executeInvocationType`                            | não         | `sync` ou `async` em `functions.execute`; sem valor, vale o padrão do servidor                                                   |
-| `functions.emptyInput`                                       | não         | `empty-object` manda `{ "input": {} }` quando não há input; `omit-body` não manda corpo                                          |
-| `errors`                                                     | não         | `SdkCoreErrorFactory` para o seu SDK lançar as próprias classes no lugar de `SdkCoreConfigurationError` e `SdkCoreResponseError` |
+| Opção                                                        | Obrigatória | Uso                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` para cada serviço                                                                                                                                                                                                             |
+| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles falham com `SdkCoreConfigurationError`, antes de sair a requisição: `apps` (`codeStudio`); `agentTasks`, `agentConnections`, `agentCredentials` e `agents.listModels` (`copilot`); `messenger`. O resto de `agents` usa `functions` |
+| `transports.publicFunctions`                                 | não         | transporte anônimo de `publicFunctions`, sem `Authorization` nem `X-App-Id`                                                                                                                                                                  |
+| `getAppId`                                                   | não         | devolve o app fixado pelo seu SDK; usado por `context`                                                                                                                                                                                       |
+| `functions.executeInvocationType`                            | não         | `sync` ou `async` em `functions.execute`; sem valor, vale o padrão do servidor                                                                                                                                                               |
+| `functions.emptyInput`                                       | não         | `empty-object` manda `{ "input": {} }` quando não há input; `omit-body` não manda corpo                                                                                                                                                      |
+| `errors`                                                     | não         | `SdkCoreErrorFactory` para o seu SDK lançar as próprias classes no lugar de `SdkCoreConfigurationError` e `SdkCoreResponseError`                                                                                                             |
 
 ## Erros
 
-| Erro                                               | Quando                                                                                             | O que fazer                                                               |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `SdkCoreConfigurationError`                        | entrada inválida: path vazio, `deleteMany({})`, transporte opcional ausente, API key ou app vazios | corrija a chamada ou passe o transporte que falta                         |
-| `SdkCoreResponseError` (`code` `INVALID_RESPONSE`) | resposta de sucesso fora do contrato                                                               | confira se o transporte devolve o corpo parseado; se sim, atualize o Core |
-| `AgentTaskTurnError`                               | o turno do agente foi recusado ou terminou com erro; `code` traz o motivo, quando vem              | mostre o erro e deixe a pessoa mandar de novo                             |
-| erro do seu `Transport`                            | falha HTTP ou de rede                                                                              | trate no seu SDK; o Core repassa o erro sem mudar                         |
+| Erro                                               | Quando                                                                                             | O que fazer                                                                                                                                                                                  |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SdkCoreConfigurationError`                        | entrada inválida: path vazio, `deleteMany({})`, transporte opcional ausente, API key ou app vazios | corrija a chamada ou passe o transporte que falta                                                                                                                                            |
+| `SdkCoreResponseError` (`code` `INVALID_RESPONSE`) | resposta de sucesso fora do contrato                                                               | confira se o transporte devolve o corpo parseado; se sim, atualize o Core                                                                                                                    |
+| `AgentTaskTurnError`                               | o turno do agente foi recusado ou terminou com erro; `code` traz o motivo, quando vem              | mostre o erro e deixe a pessoa mandar de novo                                                                                                                                                |
+| erro do seu `Transport`                            | falha HTTP ou de rede                                                                              | trate no seu SDK; o Core repassa o erro sem mudar, exceto em `agentCredentials.usage` e `agentConnections.usage`, que devolvem `null` quando o erro traz `code` `CREDENTIAL_USAGE_NOT_FOUND` |
 
 ## Boas práticas
 
-- Fixe o app no adaptador: `getAppId` e o header `X-App-Id` vêm do valor configurado no seu SDK, nunca de um argumento de quem chama.
+- Fixe o app no adaptador: `getAppId` e o header `X-App-Id` vêm do valor configurado no seu SDK, nunca de um argumento de quem chama. Aplique as credenciais depois dos headers de `options`, como no exemplo, para que eles não as substituam.
 - O Core não repete requisição nem renova token. Se o seu transporte repetir, repita só o que não grava.
 - `publicFunctions` precisa de um transporte sem credencial. O Core não usa o transporte autenticado no lugar dele.
 - `sendAndWait` com `timeoutMs` ou `signal` só para de esperar; o turno continua no servidor. Para interromper, chame `cancel()`.
