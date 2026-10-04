@@ -624,6 +624,107 @@ describe("Agent task session", () => {
     expect(errors).toEqual([])
   })
 
+  it("holds a cancel pressed before the turn starts and sends it once the box admits the prompt", async () => {
+    // Dev, 2026-09-29: a stop pressed in the 2 to 5 s between sending and the turn starting
+    // left the SDK in silence, and the answer arrived whole behind the closed bubble.
+    const source = new FakeEventSource()
+    let releaseOpen: () => void = () => {}
+    const opened = new Promise<void>((resolve) => {
+      releaseOpen = resolve
+    })
+    const originalOpen = source.open.bind(source)
+    source.open = vi.fn(async (...args: Parameters<FakeEventSource["open"]>) => {
+      await opened
+      return originalOpen(...args)
+    })
+    const { session, tasks } = createSession(createTasks(), source)
+    const cancelled: unknown[] = []
+    session.on("cancelled", (payload) => cancelled.push(payload))
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(source.open).toHaveBeenCalledOnce())
+
+    const cancelling = session.cancel()
+    await Promise.resolve()
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(session.status).toBe("idle")
+    expect(cancelled).toEqual([])
+
+    releaseOpen()
+    await cancelling
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input.type)).toEqual([
+      "message",
+      "interrupt",
+    ])
+    expect(session.status).toBe("cancelled")
+    expect(cancelled).toHaveLength(1)
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+  })
+
+  it("does not report a cancel before the box admitted the prompt it stops", async () => {
+    // Sent beside the prompt, the stop reached the box first and was refused, while the SDK
+    // already said "cancelled" and the answer kept coming (dev, 2026-09-29, stop at turnStart).
+    const { session, source, tasks } = createSession()
+    let admit: () => void = () => {}
+    tasks.sendInput.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          admit = resolve
+        }),
+    )
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(session.status).toBe("streaming")
+
+    const cancelling = session.cancel()
+    await Promise.resolve()
+    expect(tasks.sendInput).toHaveBeenCalledOnce()
+    expect(session.status).toBe("streaming")
+
+    admit()
+    await cancelling
+    expect(tasks.sendInput).toHaveBeenCalledTimes(2)
+    expect(tasks.sendInput.mock.calls[1]?.[1]).toEqual({ type: "interrupt" })
+    expect(session.status).toBe("cancelled")
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { activityId: "a-1", turnId: "t-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+  })
+
+  it("sends no stop for a prompt that never became a turn", async () => {
+    const { session, tasks } = createSession()
+    let refuse: (error: Error) => void = () => {}
+    tasks.sendInput.mockImplementationOnce(
+      () =>
+        new Promise<void>((_, reject) => {
+          refuse = reject
+        }),
+    )
+    const cancelled: unknown[] = []
+    session.on("cancelled", (payload) => cancelled.push(payload))
+    const first = session.sendAndWait("first")
+    const rejection = expect(first).rejects.toThrow("refused")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    const cancelling = session.cancel()
+    refuse(new Error("refused"))
+    await cancelling
+    await rejection
+
+    expect(tasks.sendInput).toHaveBeenCalledOnce()
+    expect(session.status).toBe("idle")
+    expect(cancelled).toEqual([])
+  })
+
   it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")

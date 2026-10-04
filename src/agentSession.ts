@@ -340,6 +340,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openingPromise: Promise<boolean> | null = null
   private createPromise: Promise<void> | null = null
   private dispatching = false
+  // Resolves true once the box admitted the prompt in flight; false when it never became a turn.
+  private dispatch: Promise<boolean> | null = null
   private recoveryUsed = false
   // Turns the server already ended. A box flushes the text it had buffered for a stopped turn
   // after the interrupted terminal (dev, 2026-09-14); that text must not open a turn of its own.
@@ -429,6 +431,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   async cancel(): Promise<void> {
+    // A stop pressed while the prompt is still on its way (task, channel, admission) has no turn
+    // on the box to interrupt. Sent then, it was dropped or refused and the answer still came in
+    // full (dev, 2026-09-29), so it waits for the box to admit the turn and goes out after it.
+    if (this.dispatch && !(await this.dispatch)) return
     if (this._status !== "streaming" && this._status !== "cancelled") return
     try {
       await this.sendInput({ type: "interrupt" })
@@ -549,28 +555,31 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private startDispatch(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
     this.dispatching = true
-    void this.dispatchSend(prompt, options, waiter)
+    const dispatch = this.dispatchSend(prompt, options, waiter)
       .catch((error: unknown) => {
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
         if (this._status === "streaming") this.setStatus("idle")
         this.flushQueue()
+        return false
       })
       .finally(() => {
         this.dispatching = false
+        if (this.dispatch === dispatch) this.dispatch = null
         if (this._status === "idle") this.flushQueue()
       })
+    this.dispatch = dispatch
   }
 
   private async dispatchSend(
     prompt: string,
     options: AgentSendOptions,
     waiter?: TurnWaiter,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.openingPromise && !(await this.openingPromise)) {
       throw new Error("Agent task session could not be opened.")
     }
-    if (this.isClosed() || waiter?.settled) return
+    if (this.isClosed() || waiter?.settled) return false
     await this.ensureTask()
     const input: AgentTaskInput = {
       type: "message",
@@ -584,11 +593,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       // input still goes out over REST. No channel, status, or event for a closed session,
       // and a failure has no listener left to hear it.
       await this.sendInput(input).catch(() => undefined)
-      return
+      return false
     }
-    if (waiter?.settled) return
+    if (waiter?.settled) return false
     await this.ensureChannel()
-    if (this.isClosed() || waiter?.settled) return
+    if (this.isClosed() || waiter?.settled) return false
     await this.captureTurnBaseline()
     this._content = ""
     this.recoveryUsed = false
@@ -598,7 +607,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    if (await this.sendInput(input)) this.emit("accepted", {})
+    if (!(await this.sendInput(input))) return false
+    this.emit("accepted", {})
+    return true
   }
 
   private async ensureTask(): Promise<void> {

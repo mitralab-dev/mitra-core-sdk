@@ -96,6 +96,7 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - O Core não repete requisição nem renova token. Se o seu transporte repetir, repita só o que não grava.
 - `publicFunctions` precisa de um transporte sem credencial. O Core não usa o transporte autenticado no lugar dele.
 - `sendAndWait` com `timeoutMs` ou `signal` só para de esperar; o turno continua no servidor. Para interromper, chame `cancel()`.
+- `cancel()` chamado antes de a box aceitar o prompt espera esse aceite e só então manda o stop; a promise resolve depois disso. Se o prompt não chegar a virar turno, nada é enviado e o status não passa por `cancelled`.
 - O `open()` do seu `eventSource` só deve resolver depois que o stream estiver conectado, para nenhum evento do turno se perder.
 
 ## Desenvolvimento
