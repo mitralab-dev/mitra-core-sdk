@@ -120,13 +120,16 @@ interface DialOptions {
   onLost(error: Error, code?: number): void
 }
 
+/** A message as it goes to the box, with the id the box echoes on the turn it opens. */
+type BoxMessage = Extract<AgentTaskInput, { type: "message" }> & { clientMessageId: string }
+
 /** The box, reached over its socket or its HTTP routes, as the session's sends see it. */
 interface Wire {
   close(): void
   /** Null when the wire cannot carry it right now. */
   interrupt(input: AgentTaskInput): Promise<boolean> | null
   /** False when the message was not handed over; the admission is settled by the wire or stream. */
-  message(input: AgentTaskInput, admission: PendingAdmission): boolean
+  message(input: BoxMessage, admission: PendingAdmission): boolean
 }
 
 interface ReopenHandlers extends Pick<DialOptions, "onFrame" | "onLost"> {
@@ -139,6 +142,8 @@ type ReopenOutcome =
   | { readonly kind: "failed"; readonly error: Error }
 
 interface PendingAdmission {
+  /** The id the message went out with; the box echoes it on the `stepStart` it opens. */
+  readonly clientMessageId: string
   settle(admitted: boolean): void
   fail(error: Error): void
   /** Stops the admission clock while the wire is being redialed. */
@@ -151,7 +156,32 @@ interface PendingAdmission {
 interface DirectLink {
   wire: Wire | null
   inTurn: boolean
-  admission: PendingAdmission | null
+  /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
+  admissions: PendingAdmission[]
+}
+
+let clientMessageSequence = 0
+
+export function newClientMessageId(): string {
+  const random = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto?.randomUUID
+  return random
+    ? random.call((globalThis as { crypto: unknown }).crypto)
+    : `m-${Date.now()}-${++clientMessageSequence}`
+}
+
+// The admission a frame answers. A `stepStart` names the message that opened it, and one naming
+// another message (another tab on the same chat) answers none of ours. A box that does not echo
+// the id, and every refusal, answer the oldest, which is the one the box is deciding. An error
+// that names a turn is the turn failing, not a refusal, and answers none.
+function admissionFor(link: DirectLink, event: AgentTaskEvent): PendingAdmission | undefined {
+  if (event.type === "error" && asObject(event.payload)?.lifecycle) return undefined
+  if (event.type === "stepStart") {
+    const lifecycle = asObject(asObject(event.payload)?.lifecycle)
+    const id = lifecycle?.clientMessageId
+    if (typeof id === "string")
+      return link.admissions.find((pending) => pending.clientMessageId === id)
+  }
+  return link.admissions[0]
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -326,7 +356,8 @@ const TURN_END_REASONS: ReadonlySet<unknown> = new Set(["stop", "endTurn", "inte
 /** Whether a turn is still in flight after this frame, read the way the session reads it. */
 function turnAfter(event: AgentTaskEvent, inTurn: boolean): boolean {
   if (TURN_FRAME_TYPES.has(event.type)) return true
-  if (event.type === "error") return false
+  // A refusal names no turn: the box refused a message sent while a turn runs, which goes on.
+  if (event.type === "error") return asObject(event.payload)?.lifecycle ? false : inTurn
   if (event.type === "stepFinish") {
     const payload = asObject(event.payload)
     if (TURN_END_REASONS.has(payload?.reason)) return false
@@ -416,6 +447,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     return this.enabled() && this.modeFor(transport) !== null
   }
 
+  /** Whether the chat talks to its box right now, so a message would reach it directly. */
+  isLive(taskId: string): boolean {
+    return this.links.get(taskId)?.wire != null
+  }
+
   /**
    * Off until the SDK says where it talks to: without `apiUrl` the host of an offer cannot be
    * checked, and asking for a channel that will not be followed would still move the chat to a
@@ -474,12 +510,14 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * have admitted the turn, and a second copy would start it twice. The redial replays the box
    * log, where the `stepStart` of an admitted turn is.
    */
-  send(taskId: string, input: AgentTaskInput): Promise<boolean> | null {
+  send(taskId: string, input: AgentTaskInput, clientMessageId?: string): Promise<boolean> | null {
     if (input.type === "approval_response") return null
     const link = this.links.get(taskId)
     if (!link?.wire) return null
     if (input.type !== "message") return link.wire.interrupt(input)
-    link.admission?.fail(new Error("A newer message replaced the one waiting for the box."))
+    // A message sent while a turn runs is not held back: the box takes it into that turn, so
+    // several can wait for the box at once, each answered by its own `stepStart`.
+    const messageId = clientMessageId ?? newClientMessageId()
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -495,9 +533,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       }
       const done = () => {
         clearTimeout(timer)
-        if (link.admission === admission) link.admission = null
+        link.admissions = link.admissions.filter((pending) => pending !== admission)
       }
       admission = {
+        clientMessageId: messageId,
         settle: (value) => {
           done()
           resolve(value)
@@ -511,8 +550,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       }
       arm()
     })
-    link.admission = admission
-    if (!link.wire.message(input, admission)) {
+    link.admissions = [...link.admissions, admission]
+    if (!link.wire.message({ ...input, clientMessageId: messageId }, admission)) {
       admission.settle(false)
       return null
     }
@@ -584,7 +623,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
   ): Promise<AgentTaskEventConnection> {
-    const link: DirectLink = { wire: null, inTurn: false, admission: null }
+    const link: DirectLink = { wire: null, inTurn: false, admissions: [] }
     let box = boxAddress(channel.wsUrl)
     let cursor = channel.lastSequence
     const abort = new AbortController()
@@ -595,18 +634,18 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       if (typeof event.sequence === "number" && event.sequence > cursor) cursor = event.sequence
       link.inTurn = turnAfter(event, link.inTurn)
       observer.onEvent(event)
-      if (event.type === "stepStart") link.admission?.settle(true)
-      else if (event.type === "error") link.admission?.settle(false)
+      if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
+      else if (event.type === "error") admissionFor(link, event)?.settle(false)
     }
     const onLost = (error: Error, code?: number) => {
       link.wire = null
       if (abort.signal.aborted) return
       if (!link.inTurn || code === SUPERSEDED_CLOSE_CODE) {
-        link.admission?.fail(error)
+        for (const pending of link.admissions) pending.fail(error)
         observer.onDisconnect(error)
         return
       }
-      link.admission?.hold()
+      for (const pending of link.admissions) pending.hold()
       void this.redial(taskId, mode, error, abort.signal, observer, {
         onFrame,
         onLost,
@@ -620,10 +659,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       }).then((outcome) => {
         // A message still waiting when the channel is gone for good fails out loud: the caller
         // that fires and leaves must not take a lost message for a sent one.
-        if (outcome instanceof Error) link.admission?.fail(outcome)
+        if (outcome instanceof Error) for (const pending of link.admissions) pending.fail(outcome)
         else if (outcome) {
           link.wire = outcome
-          link.admission?.rearm()
+          for (const pending of link.admissions) pending.rearm()
         }
       })
     }
@@ -645,9 +684,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         abort.abort()
         link.wire?.close()
         link.wire = null
-        link.admission?.fail(
-          new Error("The Agent session closed before the box confirmed the turn."),
-        )
+        const closed = new Error("The Agent session closed before the box confirmed the turn.")
+        for (const pending of link.admissions) pending.fail(closed)
         if (this.links.get(taskId) === link) this.links.delete(taskId)
       },
     }
@@ -802,7 +840,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       })
     // A 401 or 403 that names an `error_code` is the box refusing the turn, which a fresh
     // grant would not change: it is answered once, as it is. Only one without a code renews.
-    const post = async (input: AgentTaskInput) => {
+    const post = async (input: AgentTaskInput | BoxMessage) => {
       const response = await postOnce(input)
       if (!isGrantRejection(response.status)) return response
       const body = await response.json().catch(() => null)
