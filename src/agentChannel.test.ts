@@ -262,6 +262,64 @@ describe("Agent direct channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  // Dev, 2026-09-29: a stop pressed before the box started the turn was dropped, and the answer
+  // came in whole. On the socket the stop has to follow the message the box admitted.
+  it("holds a stop pressed before the box starts the turn and sends it right after stepStart", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const cancelled: unknown[] = []
+    session.on("cancelled", (payload) => cancelled.push(payload))
+
+    const result = session.sendAndWait("Long answer")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+
+    const cancelling = session.cancel()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(socket.sent).toEqual([{ type: "message", content: "Long answer" }])
+    expect(cancelled).toEqual([])
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    await cancelling
+    expect(socket.sent.map((frame) => (frame as { type: string }).type)).toEqual([
+      "message",
+      "interrupt",
+    ])
+    expect(cancelled).toHaveLength(1)
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+
+    socket.receive(
+      "stepFinish",
+      {
+        reason: "interrupted",
+        lifecycle: { turnId: "turn-1", terminal: true, interruptTerminal: true },
+      },
+      2,
+    )
+    await expect(result).resolves.toMatchObject({ reason: "interrupted" })
+  })
+
+  it("drops a stop pressed before the box refuses the message, so it never stops a later turn", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const cancelled: unknown[] = []
+    session.on("cancelled", (payload) => cancelled.push(payload))
+    session.on("error", () => undefined)
+
+    const result = session.sendAndWait("Over quota")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+
+    const cancelling = session.cancel()
+    socket.receive("error", { code: "PLAN_LIMIT", message: "Plan limit reached" })
+
+    await expect(result).rejects.toEqual(new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"))
+    await cancelling
+    expect(socket.sent).toEqual([{ type: "message", content: "Over quota" }])
+    expect(cancelled).toEqual([])
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
   it("keeps waiting for admission across a redial and finds it in the replay", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer(BOX_URL, 3))
