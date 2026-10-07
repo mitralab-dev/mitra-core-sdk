@@ -24,6 +24,12 @@ publishes.
 
 ## Versions
 
+- `0.2.12-beta.1` is the `0.2.11` parity surface republished with the premature stop fix: a `cancel()`
+  pressed before the turn starts waits for the box to admit the prompt and goes out right after it.
+  The parity cases do not cover the session, so they are the same; the version exists so a consumer
+  pinning the package can pin a corpus with the same number. `0.2.12-beta.0` shipped the same code
+  without its own corpus and has no entry here.
+
 - `0.2.11` is the stable release of the `0.2.11-beta.0` surface: the agent turn usage in
   `AgentTurnUsage` on `AgentMessage.usage`, on the `agent` item of `loadHistory` and on `turnEnd`
   and `sendAndWait`. Same parity cases; the version exists so a consumer pinning the stable package
