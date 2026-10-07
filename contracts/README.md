@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.12` is the stable release of the `0.2.12-beta.1` surface: a `cancel()` pressed before the turn
+  starts waits for the box to admit the prompt and goes out right after it. Same parity cases; the
+  version exists so a consumer pinning the stable package can pin a corpus with the same number.
+
 - `0.2.12-beta.1` is the `0.2.11` parity surface republished with the premature stop fix: a `cancel()`
   pressed before the turn starts waits for the box to admit the prompt and goes out right after it.
   The parity cases do not cover the session, so they are the same; the version exists so a consumer
