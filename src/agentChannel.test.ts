@@ -281,7 +281,9 @@ describe("Agent direct channel", () => {
 
     const cancelling = session.cancel()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(socket.sent).toEqual([{ type: "message", content: "Long answer" }])
+    expect(socket.sent).toEqual([
+      { type: "message", content: "Long answer", clientMessageId: expect.any(String) },
+    ])
     expect(cancelled).toEqual([])
 
     socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
@@ -320,7 +322,9 @@ describe("Agent direct channel", () => {
 
     await expect(result).rejects.toEqual(new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"))
     await cancelling
-    expect(socket.sent).toEqual([{ type: "message", content: "Over quota" }])
+    expect(socket.sent).toEqual([
+      { type: "message", content: "Over quota", clientMessageId: expect.any(String) },
+    ])
     expect(cancelled).toEqual([])
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
