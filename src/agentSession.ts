@@ -634,7 +634,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("turnStart", {})
     if (!(await this.sendInput(input))) return false
     this.emit("accepted", {})
-    // Sent before the turn reached the box, these waited for it; now they join it.
+    this.steerQueued()
+    return true
+  }
+
+  // Sent before the turn reached the box, these waited for it; now they join it.
+  private steerQueued(): void {
     while (this._queue.length && this.canSteer()) {
       const next = this._queue[0]!
       this._queue = this._queue.slice(1)
@@ -649,7 +654,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         next.waiter,
       )
     }
-    return true
   }
 
   // A message sent while the turn runs on the box goes straight to it, as the T3 shell sends it:
@@ -707,6 +711,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this.strayedSteers.includes(steered)) return
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
     this.openTurnFor(steered.waiter)
+    this.steerQueued()
   }
 
   private steerOpenedBy(lifecycle: Record<string, unknown> | null): void {
@@ -720,7 +725,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private forgetSteer(steered: SteeredMessage): void {
     this.steers = this.steers.filter((pending) => pending !== steered)
+    const strayed = this.strayedSteers.includes(steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
+    if (strayed && this._status === "idle") this.flushQueue()
   }
 
   // The turn ended: what the box took is answered by it, what it had not taken yet waits for the
@@ -1198,8 +1205,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return this._status === "closed"
   }
 
+  // A steer the box has not taken yet when its turn ended still gets a turn of its own. Until it
+  // does, or the box refuses it, a new message waits: started now, its turn and the steer's would
+  // each be answered by the other's result.
   private isBusy(): boolean {
-    return this.dispatching || this._status === "streaming" || this._status === "cancelled"
+    return (
+      this.dispatching ||
+      this._status === "streaming" ||
+      this._status === "cancelled" ||
+      this.strayedSteers.length > 0
+    )
   }
 
   private emit<K extends keyof AgentTaskSessionEventMap>(
