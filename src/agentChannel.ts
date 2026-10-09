@@ -640,7 +640,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const onLost = (error: Error, code?: number) => {
       link.wire = null
       if (abort.signal.aborted) return
-      if (!link.inTurn || code === SUPERSEDED_CLOSE_CODE) {
+      // A message the box has not answered yet keeps the redial even after a turn ended: the box
+      // may have opened its turn, and only the replay shows that.
+      if ((!link.inTurn && link.admissions.length === 0) || code === SUPERSEDED_CLOSE_CODE) {
         for (const pending of link.admissions) pending.fail(error)
         observer.onDisconnect(error)
         return
