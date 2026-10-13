@@ -1242,6 +1242,10 @@ export interface AgentTurnUsage {
    * the history and in a recovered turn, never in the live `turnEnd`.
    */
   requestMessageId?: string
+  /** Tokens occupying the chat's context window at the end of the turn. */
+  contextTokens?: number
+  /** Size of the model's context window, in tokens. */
+  contextWindow?: number
 }
 
 export interface AgentMessage {

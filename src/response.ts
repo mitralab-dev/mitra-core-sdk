@@ -1327,6 +1327,8 @@ const TURN_USAGE_COUNTS = [
   "cacheCreationTokens",
   "requestCount",
   "durationMs",
+  "contextTokens",
+  "contextWindow",
 ] as const
 const TURN_USAGE_COSTS = ["costUsd", "costUsdRaw"] as const
 const TURN_USAGE_STRINGS = [

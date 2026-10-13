@@ -870,6 +870,50 @@ describe("Agent turn usage", () => {
     expect((await result).usage).not.toHaveProperty("durationMs")
   })
 
+  it("carries the chat context occupancy in turnEnd and in the history item", async () => {
+    const withContext = { ...usage, contextTokens: 48_000, contextWindow: 200_000 }
+    const { session, source, tasks } = createSession()
+    const ended: unknown[] = []
+    session.on("turnEnd", (result) => ended.push(result))
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("stepFinish", { reason: "endTurn", usage: withContext }))
+
+    await expect(result).resolves.toMatchObject({ usage: withContext })
+    expect(ended).toEqual([expect.objectContaining({ usage: withContext })])
+
+    const closing = { ...message("agent", "AGENT", "Done"), usage: withContext }
+    const history = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages: vi.fn(async () => page([closing])) }),
+      eventSource: new FakeEventSource(),
+    }).session({ taskId: "task-1", transport: "http" })
+    await vi.waitFor(() => expect(history.status).toBe("idle"))
+
+    expect(history.history).toEqual([
+      { id: "agent", kind: "agent", text: "Done", at: closing.createdAt, usage: withContext },
+    ])
+  })
+
+  it("drops an unreadable context value from turnEnd and keeps the token counts", async () => {
+    const { session, source, tasks } = createSession()
+
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: "48k", contextWindow: 200_000 },
+      }),
+    )
+
+    expect((await result).usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 2,
+      contextWindow: 200_000,
+    })
+  })
+
   it("leaves usage out of a turn whose stepFinish reported none", async () => {
     const { session, source, tasks } = createSession()
 

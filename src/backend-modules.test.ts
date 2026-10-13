@@ -1929,6 +1929,36 @@ describe("turn usage on Agent messages", () => {
     expect(message).toEqual({ ...closing, usage: { inputTokens: 10, outputTokens: 2 } })
   })
 
+  it("keeps the chat context occupancy and drops an invalid one without the rest", async () => {
+    const messages = await listWith(
+      {
+        ...closing,
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: 48_000, contextWindow: 200_000 },
+      },
+      {
+        ...closing,
+        id: "message-3",
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: -1, contextWindow: 1.5 },
+      },
+      {
+        ...closing,
+        id: "message-4",
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: null, contextWindow: Infinity },
+      },
+      { ...closing, id: "message-5", usage: { inputTokens: 10, outputTokens: 2 } },
+    )
+
+    expect(messages).toEqual([
+      {
+        ...closing,
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: 48_000, contextWindow: 200_000 },
+      },
+      { ...closing, id: "message-3", usage: { inputTokens: 10, outputTokens: 2 } },
+      { ...closing, id: "message-4", usage: { inputTokens: 10, outputTokens: 2 } },
+      { ...closing, id: "message-5", usage: { inputTokens: 10, outputTokens: 2 } },
+    ])
+  })
+
   it("keeps counts only as non-negative integers and costs only as finite numbers", async () => {
     const messages = await listWith(
       {
