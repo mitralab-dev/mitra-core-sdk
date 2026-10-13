@@ -7,7 +7,8 @@ All notable changes to this project are documented in this file.
 - `AgentTurnUsage` gains `contextTokens` and `contextWindow`. `contextTokens` is the number of
   tokens occupying the chat's context window at the end of the turn: the prompt of the last
   model request of the main conversation, input plus cache read and cache creation, with
-  subagents excluded. `contextWindow` is the model's window size, in tokens.
+  subagents excluded. `contextWindow` is the model's window size, in tokens, and is kept only
+  as a positive integer: the box omits it when it does not know it.
 - Both come from the box in `stepFinish`, so they show live in `turnEnd` and in the result
   `sendAndWait` resolves, and in the `agent` item of the history. An invalid value is dropped
   on its own; the rest of the usage stays.

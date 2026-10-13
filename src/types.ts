@@ -1249,8 +1249,9 @@ export interface AgentTurnUsage {
    */
   contextTokens?: number
   /**
-   * Size of the model's context window, in tokens. Sent by the box in `stepFinish`: live in
-   * `turnEnd` and in the history. Absent from older boxes and older turns.
+   * Size of the model's context window, in tokens, always positive. Sent by the box in
+   * `stepFinish`: live in `turnEnd` and in the history. Absent when the box does not know it, and
+   * from older boxes and older turns.
    */
   contextWindow?: number
 }

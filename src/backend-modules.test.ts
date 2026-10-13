@@ -1946,6 +1946,11 @@ describe("turn usage on Agent messages", () => {
         usage: { inputTokens: 10, outputTokens: 2, contextTokens: null, contextWindow: Infinity },
       },
       { ...closing, id: "message-5", usage: { inputTokens: 10, outputTokens: 2 } },
+      {
+        ...closing,
+        id: "message-6",
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: 0, contextWindow: 0 },
+      },
     )
 
     expect(messages).toEqual([
@@ -1956,6 +1961,11 @@ describe("turn usage on Agent messages", () => {
       { ...closing, id: "message-3", usage: { inputTokens: 10, outputTokens: 2 } },
       { ...closing, id: "message-4", usage: { inputTokens: 10, outputTokens: 2 } },
       { ...closing, id: "message-5", usage: { inputTokens: 10, outputTokens: 2 } },
+      {
+        ...closing,
+        id: "message-6",
+        usage: { inputTokens: 10, outputTokens: 2, contextTokens: 0 },
+      },
     ])
   })
 
