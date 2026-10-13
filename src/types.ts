@@ -1242,9 +1242,16 @@ export interface AgentTurnUsage {
    * the history and in a recovered turn, never in the live `turnEnd`.
    */
   requestMessageId?: string
-  /** Tokens occupying the chat's context window at the end of the turn. */
+  /**
+   * Tokens occupying the chat's context window at the end of the turn: the prompt of the last
+   * request of the main conversation, cache included, subagents excluded. Sent by the box in
+   * `stepFinish`: live in `turnEnd` and in the history. Absent from older boxes and older turns.
+   */
   contextTokens?: number
-  /** Size of the model's context window, in tokens. */
+  /**
+   * Size of the model's context window, in tokens. Sent by the box in `stepFinish`: live in
+   * `turnEnd` and in the history. Absent from older boxes and older turns.
+   */
   contextWindow?: number
 }
 

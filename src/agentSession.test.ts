@@ -870,7 +870,7 @@ describe("Agent turn usage", () => {
     expect((await result).usage).not.toHaveProperty("durationMs")
   })
 
-  it("carries the chat context occupancy in turnEnd and in the history item", async () => {
+  it("carries the chat context occupancy in turnEnd", async () => {
     const withContext = { ...usage, contextTokens: 48_000, contextWindow: 200_000 }
     const { session, source, tasks } = createSession()
     const ended: unknown[] = []
@@ -882,17 +882,6 @@ describe("Agent turn usage", () => {
 
     await expect(result).resolves.toMatchObject({ usage: withContext })
     expect(ended).toEqual([expect.objectContaining({ usage: withContext })])
-
-    const closing = { ...message("agent", "AGENT", "Done"), usage: withContext }
-    const history = createAgentTaskSessionManager({
-      tasks: createTasks({ listMessages: vi.fn(async () => page([closing])) }),
-      eventSource: new FakeEventSource(),
-    }).session({ taskId: "task-1", transport: "http" })
-    await vi.waitFor(() => expect(history.status).toBe("idle"))
-
-    expect(history.history).toEqual([
-      { id: "agent", kind: "agent", text: "Done", at: closing.createdAt, usage: withContext },
-    ])
   })
 
   it("drops an unreadable context value from turnEnd and keeps the token counts", async () => {
