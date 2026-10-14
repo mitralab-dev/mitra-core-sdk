@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.2.13` is the `0.2.12` parity surface republished with the occupied context of the chat:
+  `contextTokens` and `contextWindow` on `AgentTurnUsage`, which the parity cases do not cover.
+  Same parity cases; the version exists so a consumer pinning the package can pin a corpus with
+  the same number.
+
 - `0.2.12` is the stable release of the `0.2.12-beta.1` surface: a `cancel()` pressed before the turn
   starts waits for the box to admit the prompt and goes out right after it. Same parity cases; the
   version exists so a consumer pinning the stable package can pin a corpus with the same number.
