@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type AgentTurnUsage, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -50,6 +50,12 @@ const customQuery: CustomQueryInput = {
   sql: "SELECT 1",
   isVirtualTable: true,
   connectionId: "connection-1",
+}
+const turnUsage: AgentTurnUsage = {
+  inputTokens: 10,
+  outputTokens: 2,
+  contextTokens: 48000,
+  contextWindow: 200000,
 }
 const transport: Transport = { request: async <T,>() => ({}) as T }
 const scheduledFunction: FunctionCreateInput = {
@@ -77,6 +83,7 @@ void core
 void scheduledFunction
 void customQuery
 void tenant
+void turnUsage
 `
   writeFileSync(join(consumerDirectory, "consumer.mts"), source)
   writeFileSync(
@@ -101,6 +108,12 @@ const customQuery: core.CustomQueryInput = {
   sql: "SELECT 1",
   isVirtualTable: true,
   connectionId: "connection-1",
+}
+const turnUsage: core.AgentTurnUsage = {
+  inputTokens: 10,
+  outputTokens: 2,
+  contextTokens: 48000,
+  contextWindow: 200000,
 }
 const scheduledFunction: core.FunctionCreateInput = {
   name: "Nightly sync",
@@ -127,6 +140,7 @@ void client
 void scheduledFunction
 void customQuery
 void tenant
+void turnUsage
 `,
   )
   execFileSync(

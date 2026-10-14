@@ -1327,6 +1327,7 @@ const TURN_USAGE_COUNTS = [
   "cacheCreationTokens",
   "requestCount",
   "durationMs",
+  "contextTokens",
 ] as const
 const TURN_USAGE_COSTS = ["costUsd", "costUsdRaw"] as const
 const TURN_USAGE_STRINGS = [
@@ -1359,6 +1360,9 @@ export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
     const item = value[field]
     if (isCount(item)) usage[field] = item
   }
+  // The box omits the window when it does not know it, so a zero is not a window to divide by.
+  const { contextWindow } = value
+  if (isInteger(contextWindow) && contextWindow > 0) usage.contextWindow = contextWindow
   for (const field of TURN_USAGE_COSTS) {
     const item = value[field]
     if (isFiniteNumber(item)) usage[field] = item
