@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.13
 
 - `AgentTurnUsage` gains `contextTokens` and `contextWindow`. `contextTokens` is the number of
   tokens occupying the chat's context window at the end of the turn: the prompt of the last
