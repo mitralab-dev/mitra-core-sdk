@@ -32,6 +32,11 @@ exact version.
   code `AGENT_MESSAGES_IN_FLIGHT_LIMIT` and emits `error`.
 - A message still waiting to go out when the session closes is rejected and not sent. The first
   message of a task that already exists still goes out over REST after a close, as before.
+- T3's mid-turn input request reaches the app as a `raw` event of type `user_input_request`,
+  with T3's item as payload. `session.respondUserInput(requestId, answers, attachmentsByQuestionId?)`
+  sends the answer to the box as T3's own `runtime-request.respond`, on the socket or the box's
+  `POST /messages`; `AgentTaskInput` gains that variant. The turn waits for the answer without a
+  timeout of its own.
 - `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
   are deprecated and kept only for compatibility: the queue is always empty, the methods do
   nothing and the event is never emitted.

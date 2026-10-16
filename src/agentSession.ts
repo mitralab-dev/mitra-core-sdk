@@ -168,6 +168,12 @@ export interface AgentTaskSession {
   sendAndWait(prompt: string, options?: AgentSendAndWaitOptions): Promise<AgentTurnResult>
   cancel(): Promise<void>
   respondApproval(approved: boolean): void
+  /** Answers T3's `user_input_request` (a `raw` event) on the box's direct channel. */
+  respondUserInput(
+    requestId: string,
+    answers: Record<string, unknown>,
+    attachmentsByQuestionId?: Record<string, unknown>,
+  ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
   /** @deprecated No effect: the queue is always empty. */
   editQueueItem(id: string, text: string): void
@@ -487,6 +493,22 @@ class CoreAgentTaskSession implements AgentTaskSession {
   respondApproval(approved: boolean): void {
     void this.sendInput({ type: "approval_response", approved }).catch((error: unknown) => {
       this.emitError("Failed to answer Agent approval", error)
+    })
+  }
+
+  respondUserInput(
+    requestId: string,
+    answers: Record<string, unknown>,
+    attachmentsByQuestionId?: Record<string, unknown>,
+  ): void {
+    const input: AgentTaskInput = {
+      type: "runtime-request.respond",
+      requestId,
+      answers,
+      ...(attachmentsByQuestionId ? { attachmentsByQuestionId } : {}),
+    }
+    void this.sendInput(input).catch((error: unknown) => {
+      this.emitError("Failed to answer Agent input request", error)
     })
   }
 

@@ -501,7 +501,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   /**
-   * Hands a message or an interrupt to the box when the chat is on the direct channel and its
+   * Hands a message, an interrupt or an answer to a T3 input request to the box when the chat is
+   * on the direct channel and its
    * wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
    * mid-redial, or an approval, which stays on REST. Mid-redial the Copilot is the durable path:
    * the box URL kept from the last channel carries a proxy ticket that lasts 60 seconds, and a
@@ -866,7 +867,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       interrupt: (input) =>
         post(input).then((response) => {
           if (!response.ok) {
-            throw new Error(`The Agent box refused the interrupt (${response.status}).`)
+            throw new Error(`The Agent box refused the ${input.type} (${response.status}).`)
           }
           return true
         }),

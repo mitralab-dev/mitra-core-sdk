@@ -1988,6 +1988,75 @@ describe("Agent direct channel steering", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("waits on a T3 input request with no output, then sends the answer to the box and finishes the turn", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session, raw } = open(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+
+    const result = session.sendAndWait("Plan the trip")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    const request = {
+      type: "user_input_request",
+      id: "item-1",
+      requestId: "req-1",
+      questions: [{ id: "q1", question: "Which city?" }],
+      lifecycle: { turnId: "turn-1" },
+    }
+    socket.receive("user_input_request", request, 2)
+    expect(raw.at(-1)).toMatchObject({ type: "user_input_request", payload: request })
+
+    // Five minutes with the person thinking: only the box's pings arrive.
+    for (let index = 0; index < 12; index += 1) {
+      await vi.advanceTimersByTimeAsync(25_000)
+      socket.receive("ping")
+    }
+    expect(session.status).toBe("streaming")
+    expect(errors).toEqual([])
+    expect(FakeWebSocket.instances).toHaveLength(1)
+
+    session.respondUserInput("req-1", { q1: "Lisbon" }, { q1: ["file-1"] })
+    expect(socket.sent[1]).toEqual({
+      type: "runtime-request.respond",
+      requestId: "req-1",
+      answers: { q1: "Lisbon" },
+      attachmentsByQuestionId: { q1: ["file-1"] },
+    })
+    socket.receive("textDelta", { text: "Lisbon it is.", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
+    await expect(result).resolves.toMatchObject({ content: "Lisbon it is.", reason: "stop" })
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
+  it("posts the answer to a T3 input request on an http session", async () => {
+    const box = new FakeBoxHttp()
+    const tasks = createTasks(offer(BOX_URL, 2))
+    const { session } = open(tasks, {
+      WebSocket: WebSocketImpl,
+      fetch: box.fetch,
+      transport: "http",
+    })
+
+    void session.sendAndWait("Plan the trip").catch(() => undefined)
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    box.answers.push({ status: 200, body: { accepted: true } })
+    session.respondUserInput("req-1", { q1: "Lisbon" })
+    await vi.waitFor(() => expect(box.posts).toHaveLength(2))
+    expect(box.posts[1]).toEqual({
+      url: "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=secret",
+      body: { type: "runtime-request.respond", requestId: "req-1", answers: { q1: "Lisbon" } },
+    })
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    session.close()
+  })
+
   it("does not take a messageQueued that names another message as the admission", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer())
