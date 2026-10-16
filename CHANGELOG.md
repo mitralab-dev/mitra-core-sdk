@@ -23,8 +23,11 @@ exact version.
   message keeps the old rule: the oldest one waiting is the one answered.
 - While the socket redials, and without the direct channel, a message goes to the Copilot's
   `POST /inputs`, which holds it while the box boots. A failed send rejects and emits `error`.
-- A message sent while a turn runs carries no `agentType` or `reasoningEffort`: the turn it
-  joins keeps its model.
+- A message sent while a turn runs keeps its `agentType` and `reasoningEffort` on the box, which
+  leaves the running turn's model alone and applies them when the message gets a turn of its
+  own. Only when it goes to the Copilot with a turn running are they dropped, because the
+  Copilot restarts the live session for another model. A refusal the Copilot answers with an
+  error status rejects that message and emits `error`.
 - At most 10 messages may wait for the box at once. One more rejects with `AgentTaskTurnError`
   code `AGENT_MESSAGES_IN_FLIGHT_LIMIT` and emits `error`.
 - A message still waiting to go out when the session closes is rejected and not sent. The first

@@ -1911,7 +1911,7 @@ describe("Agent direct channel steering", () => {
     session.close()
   })
 
-  it("sends a steer without agentType or reasoningEffort, which would restart the running turn", async () => {
+  it("keeps the model on a steer that goes straight to the box", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
 
@@ -1920,7 +1920,6 @@ describe("Agent direct channel steering", () => {
       .catch(() => undefined)
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
     const socket = FakeWebSocket.last()
-    expect(socket.sent[0]).toMatchObject({ agentType: "CLAUDE", reasoningEffort: "high" })
     socket.receive(
       "stepStart",
       { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
@@ -1933,9 +1932,107 @@ describe("Agent direct channel steering", () => {
     expect(socket.sent[1]).toEqual({
       type: "message",
       content: "Stop and say BANANA",
+      agentType: "CODEX",
+      reasoningEffort: "low",
       clientMessageId: expect.any(String),
     })
     session.close()
+  })
+
+  it("drops the model from a steer that goes to the Copilot while the turn runs", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", undefined)
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.drop()
+
+    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "Stop and say BANANA",
+    })
+    session.close()
+  })
+
+  it("keeps the model on a message that goes to the Copilot for a turn of its own", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", undefined)
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    session.send("Stop and say BANANA")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    // The turn ends before the box took the steer, which now waits for a turn of its own.
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    socket.drop()
+
+    session.send("Now say MANGO", { agentType: "CODEX", reasoningEffort: "low" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "Now say MANGO",
+      agentType: "CODEX",
+      reasoningEffort: "low",
+    })
+    session.close()
+  })
+
+  it("rejects a steer the Copilot refuses during a redial, names the refusal, and keeps the turn", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", undefined)
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const refusal = Object.assign(new Error("No balance"), { code: "INCLUDED_AI_EXHAUSTED" })
+    tasks.sendInput.mockRejectedValueOnce(refusal)
+    const { session } = open(tasks)
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.drop()
+
+    const steer = session.sendAndWait("Stop and say BANANA")
+    await expect(steer).rejects.toBe(refusal)
+    expect(errors).toContainEqual({
+      code: "INCLUDED_AI_EXHAUSTED",
+      error: "Failed to send Agent prompt: No balance",
+    })
+    expect(session.status).toBe("streaming")
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const redialed = FakeWebSocket.last()
+    redialed.receive("textDelta", { text: "Lion", lifecycle: { turnId: "turn-1" } })
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await expect(first).resolves.toMatchObject({ content: "Lion", reason: "stop" })
   })
 
   it("matches a refusal to the message it names, and keeps the turn and the other steer", async () => {

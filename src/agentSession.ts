@@ -431,7 +431,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.requireOpen()
     if (!prompt.trim()) return
     if (this.isBusy()) {
-      this.steer(prompt)
+      this.steer(prompt, options)
       return
     }
     this.startDispatch(prompt, options)
@@ -447,7 +447,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     }
     if (this.isBusy()) {
-      this.steer(prompt, waiter)
+      this.steer(prompt, sendOptions, waiter)
       return waiter.promise
     }
     this.startDispatch(prompt, sendOptions, waiter)
@@ -633,10 +633,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // id the box echoes on the frame that takes it; without the channel, over REST to the Copilot,
   // which holds it while the box boots.
   //
-  // It carries no `agentType` or `reasoningEffort`: the turn it joins keeps its model, and the
-  // Copilot restarts the live session for a message that asks for another one, which would end
-  // the running turn.
-  private steer(prompt: string, waiter?: TurnWaiter): void {
+  // It keeps its `agentType` and `reasoningEffort` on the box, which leaves the running turn's
+  // model alone by itself and needs them for a message that becomes a turn of its own. Only on
+  // the Copilot path, with a turn running, they are dropped: the Copilot restarts the live
+  // session for a message that asks for another model, which would end that turn.
+  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
     if (this.pendingSteers >= STEERS_IN_FLIGHT_LIMIT) {
       const error = new AgentTaskTurnError(
         `Too many Agent messages are waiting for the box (maximum ${STEERS_IN_FLIGHT_LIMIT}).`,
@@ -656,7 +657,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     } else {
       this.strayedSteers.push(steered)
     }
-    const input: AgentTaskInput = { type: "message", content: prompt }
+    const input: AgentTaskInput = {
+      type: "message",
+      content: prompt,
+      ...(options.agentType ? { agentType: options.agentType } : {}),
+      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    }
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
       // `close()` already rejected it as not sent; going out now would run what the caller was
@@ -664,7 +670,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (this.isClosed()) throw new Error("Agent task session is closed.")
       await this.prepareSend()
       if (this.isClosed()) throw new Error("Agent task session is closed.")
-      return this.handOver(input, steered.clientMessageId)
+      return this.handOver(input, steered.clientMessageId, true)
     })
     this.handOff = handed.then(
       () => undefined,
@@ -916,11 +922,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private async handOver(
     input: AgentTaskInput,
     clientMessageId?: string,
+    steering = false,
   ): Promise<{ admitted: Promise<boolean> }> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
     const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return { admitted: direct }
-    await this.dependencies.tasks.sendInput(this._taskId, input)
+    const turnRunning = this._status === "streaming" || this._status === "cancelled"
+    const rest: AgentTaskInput =
+      steering && turnRunning && input.type === "message"
+        ? { type: "message", content: input.content }
+        : input
+    // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
+    await this.dependencies.tasks.sendInput(this._taskId, rest)
     return { admitted: Promise.resolve(true) }
   }
 
