@@ -1,7 +1,7 @@
 {
   "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
   "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
-  "note": "One request per closed turn (split in batches of 200). `sequence` starts at 1 in each `logId`; `timestamp` is epoch ms of when the box logged the frame.",
+  "note": "One request per closed turn, the whole turn, resent until 2xx; the copilot records it once under the last of `turnIds`. `sequence` orders the rows of the thread's log; `timestamp` is epoch ms of when the box logged the frame. The answer is {consumedThrough: <sequence of the terminal>}.",
   "requests": [
     {
       "path": "/api/v1/tasks/task-1/channel-events",
@@ -10,7 +10,6 @@
       },
       "body": {
         "generation": 2,
-        "logId": "00000000-0000-4000-8000-000000000001",
         "turnIds": ["turn-1"],
         "events": [
           {
@@ -27,7 +26,7 @@
               }
             },
             "sequence": 1,
-            "timestamp": 1760600000030
+            "timestamp": 1760600000050
           },
           {
             "type": "textChunk",
@@ -44,7 +43,7 @@
               }
             },
             "sequence": 2,
-            "timestamp": 1760600000040
+            "timestamp": 1760600000060
           },
           {
             "type": "toolCall",
@@ -65,7 +64,7 @@
               }
             },
             "sequence": 3,
-            "timestamp": 1760600000050
+            "timestamp": 1760600000070
           },
           {
             "type": "toolResult",
@@ -85,7 +84,7 @@
               }
             },
             "sequence": 4,
-            "timestamp": 1760600000060
+            "timestamp": 1760600000080
           },
           {
             "type": "textChunk",
@@ -102,7 +101,7 @@
               }
             },
             "sequence": 5,
-            "timestamp": 1760600000070
+            "timestamp": 1760600000090
           },
           {
             "type": "stepFinish",
@@ -127,7 +126,7 @@
               }
             },
             "sequence": 6,
-            "timestamp": 1760600000080
+            "timestamp": 1760600000100
           }
         ]
       }

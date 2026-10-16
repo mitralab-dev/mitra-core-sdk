@@ -1,7 +1,7 @@
 {
   "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
   "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
-  "note": "A steer: one terminal, under the last prompt. `turnIds` lists every prompt the turn took in, in order; the copilot closes all and records the last as the last closed turn, which is what the box confirms in confirmed-turns.json.",
+  "note": "A steer: one terminal, under the last prompt. `turnIds` lists every prompt the turn took in, in order; the copilot closes all and records the turn under the last.",
   "requests": [
     {
       "path": "/api/v1/tasks/task-1/channel-events",
@@ -10,7 +10,6 @@
       },
       "body": {
         "generation": 2,
-        "logId": "00000000-0000-4000-8000-000000000001",
         "turnIds": ["turn-1", "turn-2"],
         "events": [
           {
@@ -27,7 +26,7 @@
               }
             },
             "sequence": 1,
-            "timestamp": 1760600000030
+            "timestamp": 1760600000050
           },
           {
             "type": "textChunk",
@@ -44,7 +43,7 @@
               }
             },
             "sequence": 2,
-            "timestamp": 1760600000040
+            "timestamp": 1760600000060
           },
           {
             "type": "stepStart",
@@ -60,7 +59,7 @@
               }
             },
             "sequence": 3,
-            "timestamp": 1760600000070
+            "timestamp": 1760600000110
           },
           {
             "type": "textChunk",
@@ -77,7 +76,7 @@
               }
             },
             "sequence": 4,
-            "timestamp": 1760600000080
+            "timestamp": 1760600000120
           },
           {
             "type": "stepFinish",
@@ -94,7 +93,7 @@
               }
             },
             "sequence": 5,
-            "timestamp": 1760600000090
+            "timestamp": 1760600000130
           }
         ]
       }
