@@ -9,7 +9,9 @@ All notable changes to this project are documented in this file.
   socket redials and on the Copilot stream. The box steers it into the running turn, or gives
   it a turn of its own when that one ended, and `sendAndWait` resolves with the turn that
   answered it. On the direct channel it carries a `clientMessageId` the box echoes on the
-  `stepStart` that takes it; while the socket redials it goes to the box's `POST /messages`;
+  `stepStart` that takes it, or on the `messageQueued` frame when the provider queues it: the
+  message counts as accepted then, with no admission timeout, and `sendAndWait` resolves with
+  the turn of its own that answers it; while the socket redials it goes to the box's `POST /messages`;
   without the direct channel, to the Copilot's `POST /inputs`. A failed send rejects and emits
   `error`.
 - `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`

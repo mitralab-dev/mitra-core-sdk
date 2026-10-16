@@ -190,6 +190,15 @@ function admissionFor(link: DirectLink, event: AgentTaskEvent): PendingAdmission
   return link.admissions[0]
 }
 
+// A message T3 put in its own queue, behind the running turn, was taken by the box: its
+// `stepStart` only comes when its turn starts, which may be well past the admission window. Only
+// the id says whose it is; a `messageQueued` naming none, or another tab's message, answers none.
+function queuedAdmission(link: DirectLink, event: AgentTaskEvent): PendingAdmission | undefined {
+  const id = asObject(asObject(event.payload)?.lifecycle)?.clientMessageId
+  if (typeof id !== "string") return undefined
+  return link.admissions.find((pending) => pending.clientMessageId === id)
+}
+
 function asObject(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -691,6 +700,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)
+      else if (event.type === "messageQueued") queuedAdmission(link, event)?.settle(true)
     }
     const onLost = (error: Error, code?: number) => {
       link.wire = null

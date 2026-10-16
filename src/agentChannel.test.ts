@@ -1828,6 +1828,89 @@ describe("Agent direct channel steering", () => {
     expect(thenResult).toBe(firstResult)
   })
 
+  it("takes a message the box queued as accepted, past the admission window, and answers it with its own turn", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    const errors: string[] = []
+    session.on("accepted", accepted)
+    session.on("error", ({ error }) => errors.push(error))
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+
+    const queued = session.sendAndWait("Now say MANGO")
+    let queuedSettled = false
+    void queued.finally(() => {
+      queuedSettled = true
+    })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const queuedId = idOf(socket.sent[1])
+    socket.receive("messageQueued", {
+      position: 1,
+      lifecycle: { turnId: "turn-2", clientMessageId: queuedId },
+    })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
+
+    // Well past the 35 s the box has to confirm a message: the queued one was confirmed.
+    socket.receive("ping")
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(errors).toEqual([])
+    expect(queuedSettled).toBe(false)
+
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
+    await expect(first).resolves.toMatchObject({ content: "1. Lion" })
+    await Promise.resolve()
+    expect(queuedSettled).toBe(false)
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: queuedId } }, 3)
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.receive("textDelta", { text: "MANGO", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    await expect(queued).resolves.toMatchObject({ content: "MANGO", reason: "stop" })
+    expect(accepted).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not take a messageQueued that names another message as the admission", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+
+    const steer = session.sendAndWait("Now say MANGO")
+    const rejection = expect(steer).rejects.toThrow("did not confirm the turn within 35s")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    socket.receive("messageQueued", {
+      position: 1,
+      lifecycle: { turnId: "turn-9", clientMessageId: "another-tab" },
+    })
+    socket.receive("messageQueued", { position: 2, lifecycle: { turnId: "turn-9" } })
+    await vi.advanceTimersByTimeAsync(35_000)
+    await rejection
+    expect(accepted).toHaveBeenCalledOnce()
+    session.close()
+  })
+
   it("sends a message typed while the socket redials to the box HTTP route, with its id", async () => {
     vi.useFakeTimers()
     const box = new FakeBoxHttp()

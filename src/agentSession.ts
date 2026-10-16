@@ -205,6 +205,8 @@ interface SteeredMessage {
   clientMessageId: string
   waiter?: TurnWaiter
   taken: boolean
+  /** The box put it in the provider's queue: accepted, answered by a turn of its own. */
+  queued?: boolean
 }
 
 // A reading that does not parse is dropped, not surfaced as an error: the meter is a side
@@ -652,8 +654,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
           waiter?.reject(new AgentTaskTurnError("The Agent box did not take the message."))
           return
         }
-        // A box that does not echo the id is only heard here.
-        this.steerTaken(steered)
+        // A box that does not echo the id is only heard here. A queued one is not in a turn yet.
+        if (!steered.queued) this.steerTaken(steered)
         this.emit("accepted", {})
       })
       .catch((error: unknown) => {
@@ -683,6 +685,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       (pending) => pending.clientMessageId === id,
     )
     if (steered) this.steerTaken(steered)
+  }
+
+  // Queued behind the running turn, the message is answered by the turn the box opens for it
+  // later, not by this one.
+  private steerQueuedBy(lifecycle: Record<string, unknown> | null): void {
+    const id = lifecycle?.clientMessageId
+    if (typeof id !== "string") return
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === id,
+    )
+    if (!steered || steered.taken) return
+    steered.queued = true
+    if (!this.steers.includes(steered)) return
+    this.steers = this.steers.filter((pending) => pending !== steered)
+    this.strayedSteers.push(steered)
   }
 
   private forgetSteer(steered: SteeredMessage): void {
@@ -914,6 +931,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "stepStart":
         this.steerOpenedBy(asObject(payload?.lifecycle))
+        break
+      case "messageQueued":
+        this.steerQueuedBy(asObject(payload?.lifecycle))
         break
       case "providerUsage": {
         const usage = providerUsageOf(payload)
