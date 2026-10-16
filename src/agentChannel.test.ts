@@ -1911,13 +1911,159 @@ describe("Agent direct channel steering", () => {
     session.close()
   })
 
-  it("sends a message typed while the socket redials to the box HTTP route, with its id", async () => {
+  it("sends a steer without agentType or reasoningEffort, which would restart the running turn", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    void session
+      .sendAndWait("List 40 animals", { agentType: "CLAUDE", reasoningEffort: "high" })
+      .catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    expect(socket.sent[0]).toMatchObject({ agentType: "CLAUDE", reasoningEffort: "high" })
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+
+    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(socket.sent[1]).toEqual({
+      type: "message",
+      content: "Stop and say BANANA",
+      clientMessageId: expect.any(String),
+    })
+    session.close()
+  })
+
+  it("matches a refusal to the message it names, and keeps the turn and the other steer", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    const older = session.sendAndWait("Say BANANA")
+    const newer = session.sendAndWait("Say MANGO")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+
+    socket.receive("error", {
+      code: "INCLUDED_AI_EXHAUSTED",
+      message: "No balance",
+      clientMessageId: idOf(socket.sent[2]),
+    })
+    await expect(newer).rejects.toMatchObject({ code: "INCLUDED_AI_EXHAUSTED" })
+    expect(session.status).toBe("streaming")
+
+    socket.receive("error", { code: "X", message: "Another tab", clientMessageId: "another-tab" })
+    expect(session.status).toBe("streaming")
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
+      2,
+    )
+    socket.receive("textDelta", { text: "BANANA", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 3)
+    const [firstResult, olderResult] = await Promise.all([first, older])
+    expect(olderResult).toBe(firstResult)
+    expect(errors.map((error) => error.code)).toEqual(["INCLUDED_AI_EXHAUSTED", "X"])
+  })
+
+  it("fails the turn when the refusal names the message that opened it", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("error", {
+      code: "MODEL_RETIRED",
+      message: "Retired",
+      clientMessageId: idOf(socket.sent[0]),
+    })
+    await expect(first).rejects.toMatchObject({ code: "MODEL_RETIRED" })
+    expect(session.status).toBe("idle")
+  })
+
+  it("does not redial after the box refused the only message, with no turn on the box", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session, raw } = open(tasks)
+
+    const first = session.sendAndWait("List 40 animals")
+    const rejection = expect(first).rejects.toMatchObject({ code: "MODEL_RETIRED" })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("error", { code: "MODEL_RETIRED", message: "Retired" })
+    await rejection
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(raw.some((event) => event.type === "channelReconnecting")).toBe(false)
+  })
+
+  it("refuses a steer over the in-flight limit with a named error, and sends again once the box answers", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    for (let index = 0; index < 10; index += 1) session.send(`steer-${index}`)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(11))
+
+    const over = session.sendAndWait("one too many")
+    await expect(over).rejects.toMatchObject({
+      name: "AgentTaskTurnError",
+      code: "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
+    })
+    expect(errors).toContainEqual({
+      code: "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
+      error: "Too many Agent messages are waiting for the box (maximum 10).",
+    })
+    expect(socket.sent).toHaveLength(11)
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
+      2,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    session.send("room again")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(12))
+    session.close()
+  })
+
+  it("sends a message typed while the socket redials to the Copilot, not to a box route whose ticket expired", async () => {
     vi.useFakeTimers()
     const box = new FakeBoxHttp()
+    box.answer = async () => ({ status: 401, body: { error: "invalid_grant" } })
     const tasks = createTasks(offer(BOX_URL, 3))
     const { session } = open(tasks, { WebSocket: WebSocketImpl, fetch: box.fetch })
     const accepted = vi.fn()
+    const errors: string[] = []
     session.on("accepted", accepted)
+    session.on("error", ({ error }) => errors.push(error))
 
     const first = session.sendAndWait("List 40 animals")
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
@@ -1931,18 +2077,15 @@ describe("Agent direct channel steering", () => {
     socket.drop()
 
     const steer = session.sendAndWait("Stop and say BANANA")
-    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
-    expect(box.posts[0]).toEqual({
-      url: "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=secret",
-      body: {
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
         type: "message",
         content: "Stop and say BANANA",
-        clientMessageId: expect.any(String),
-      },
-    })
+      }),
+    )
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
-    expect(tasks.sendInput).not.toHaveBeenCalled()
-    expect(box.eventUrls).toEqual([])
+    expect(box.posts).toEqual([])
+    expect(errors).toEqual([])
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
@@ -1956,14 +2099,15 @@ describe("Agent direct channel steering", () => {
     expect(steerResult).toBe(firstResult)
   })
 
-  it("fails out loud a message the box HTTP route refuses while the socket redials", async () => {
+  it("sends a message typed while the socket redials to the Copilot when the box network is gone", async () => {
     vi.useFakeTimers()
-    const box = new FakeBoxHttp()
-    box.answers.push({ status: 409, body: { error_code: "TURN_REFUSED", message: "Not now" } })
+    const fetch = vi.fn<AgentFetch>(async () => {
+      throw new TypeError("fetch failed")
+    })
     const tasks = createTasks(offer(BOX_URL, 3))
-    const { session } = open(tasks, { WebSocket: WebSocketImpl, fetch: box.fetch })
-    const errors: { code?: string; error: string }[] = []
-    session.on("error", (error) => errors.push(error))
+    const { session } = open(tasks, { WebSocket: WebSocketImpl, fetch })
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
 
     void session.sendAndWait("List 40 animals").catch(() => undefined)
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
@@ -1977,14 +2121,13 @@ describe("Agent direct channel steering", () => {
     socket.drop()
 
     const steer = session.sendAndWait("Stop and say BANANA")
-    await expect(steer).rejects.toMatchObject({ name: "AgentTaskTurnError", code: "TURN_REFUSED" })
-    expect(errors).toContainEqual({
-      code: "TURN_REFUSED",
-      error: "Failed to send Agent prompt: Not now",
-    })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(fetch).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(errors.filter((error) => error.startsWith("Failed to send"))).toEqual([])
     expect(session.status).toBe("streaming")
-    expect(tasks.sendInput).not.toHaveBeenCalled()
     session.close()
+    await expect(steer).rejects.toThrow("Agent task session is closed.")
   })
 
   it("sends a message typed while the socket redials to the Copilot when there is no fetch", async () => {

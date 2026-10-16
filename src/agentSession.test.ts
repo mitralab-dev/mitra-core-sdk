@@ -367,6 +367,31 @@ describe("Agent task session", () => {
     expect(session.status).toBe("streaming")
   })
 
+  it("does not deliver a steer the close rejected while it waited for the first message", async () => {
+    let created!: () => void
+    const tasks = createTasks({
+      create: vi.fn(
+        () =>
+          new Promise<AgentTask>((resolve) => {
+            created = () => resolve(TASK)
+          }),
+      ),
+    })
+    const { session } = createSession(tasks)
+    session.send("first")
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
+    session.close()
+    await expect(second).rejects.toThrow("Agent task session is closed.")
+
+    created()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "message", content: "first" },
+    ])
+  })
+
   it("keeps the queue API as an empty no-op and sends every message at once", async () => {
     vi.useFakeTimers()
     try {
@@ -378,10 +403,10 @@ describe("Agent task session", () => {
       session.send("active")
       await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
 
-      for (let index = 0; index < 11; index += 1) session.send(`steer-${index}`)
-      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(12))
+      for (let index = 0; index < 10; index += 1) session.send(`steer-${index}`)
+      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(11))
       expect(tasks.sendInput.mock.calls.slice(1).map(([, input]) => input)).toEqual(
-        Array.from({ length: 11 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
+        Array.from({ length: 10 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
       )
       expect(errors).toEqual([])
       expect(session.queue).toEqual([])

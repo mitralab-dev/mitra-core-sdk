@@ -20,6 +20,9 @@ import type {
 export { AgentTaskTurnError }
 
 const CANCEL_SAFETY_MS = 10_000
+// Messages the box has not answered yet. Nothing is held, so this is the only bound on an app
+// that sends in a loop; the old queue held as many.
+const STEERS_IN_FLIGHT_LIMIT = 10
 const RECONCILE_DELAY_MS = 1_000
 
 export interface AgentTaskEventObserver {
@@ -207,6 +210,8 @@ interface SteeredMessage {
   taken: boolean
   /** The box put it in the provider's queue: accepted, answered by a turn of its own. */
   queued?: boolean
+  /** The refusal the box sent naming this message, which its waiter rejects with. */
+  refusal?: AgentTaskTurnError
 }
 
 // A reading that does not parse is dropped, not surfaced as an error: the meter is a side
@@ -367,11 +372,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // before it was, not after it was answered.
   private handOff: Promise<void> = Promise.resolve()
   private activeWaiter: TurnWaiter | undefined
-  // Messages steered into the running turn. One the box took settles with that turn; one the
-  // box had not taken when the turn ended opens a turn of its own when it does.
+  // Every steer sits in exactly one of the two lists until it is settled or forgotten: `steers`
+  // while the turn it was sent into runs (taken ones settle with that turn), `strayedSteers` once
+  // it waits for a turn of its own (sent with no turn, not taken when its turn ended, or queued by
+  // the provider). A non-empty `strayedSteers` keeps the session busy, which is what stops a new
+  // message from opening a turn the steer's answer would settle. `pendingSteers` counts the ones
+  // the box has not answered yet, wherever they sit.
   private steers: SteeredMessage[] = []
   private strayedSteers: SteeredMessage[] = []
   private pendingSteers = 0
+  // The id the message that opened the current turn went out with, so a refusal naming it fails
+  // that turn and one naming a steer does not.
+  private openingMessageId: string | undefined
   private turnBaselineIds = new Set<string>()
 
   constructor(
@@ -419,7 +431,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.requireOpen()
     if (!prompt.trim()) return
     if (this.isBusy()) {
-      this.steer(prompt, options)
+      this.steer(prompt)
       return
     }
     this.startDispatch(prompt, options)
@@ -435,7 +447,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     }
     if (this.isBusy()) {
-      this.steer(prompt, sendOptions, waiter)
+      this.steer(prompt, waiter)
       return waiter.promise
     }
     this.startDispatch(prompt, sendOptions, waiter)
@@ -607,19 +619,33 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    const { admitted } = await this.handOver(input)
+    this.openingMessageId = newClientMessageId()
+    const { admitted } = await this.handOver(input, this.openingMessageId)
     handedOver()
     if (!(await admitted)) return false
     this.emit("accepted", {})
     return true
   }
 
-  // A message sent while a turn runs, or is being opened, goes out at once, as the T3 shell sends
-  // it: the box takes it into that turn (the provider's own steering), or into a turn of its own
-  // when that one already ended. Nothing waits in this session. On the direct channel it goes
-  // with an id the box echoes on the turn that takes it; without the channel, over REST to the
-  // Copilot, which holds it while the box boots.
-  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+  // A message sent while a turn runs, or is being opened, goes out at once: the box takes it into
+  // that turn (the provider's own steering), queues it for a turn of its own, or gives it one when
+  // that turn already ended. Nothing waits in this session. On the direct channel it goes with an
+  // id the box echoes on the frame that takes it; without the channel, over REST to the Copilot,
+  // which holds it while the box boots.
+  //
+  // It carries no `agentType` or `reasoningEffort`: the turn it joins keeps its model, and the
+  // Copilot restarts the live session for a message that asks for another one, which would end
+  // the running turn.
+  private steer(prompt: string, waiter?: TurnWaiter): void {
+    if (this.pendingSteers >= STEERS_IN_FLIGHT_LIMIT) {
+      const error = new AgentTaskTurnError(
+        `Too many Agent messages are waiting for the box (maximum ${STEERS_IN_FLIGHT_LIMIT}).`,
+        "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
+      )
+      waiter?.reject(error)
+      this.emit("error", { code: error.code!, error: error.message })
+      return
+    }
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
@@ -630,16 +656,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
     } else {
       this.strayedSteers.push(steered)
     }
-    const input: AgentTaskInput = {
-      type: "message",
-      content: prompt,
-      ...(options.agentType ? { agentType: options.agentType } : {}),
-      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    }
+    const input: AgentTaskInput = { type: "message", content: prompt }
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
-      // A closed session still hands over a message whose task exists, over REST.
-      if (!this.isClosed()) await this.prepareSend()
+      // `close()` already rejected it as not sent; going out now would run what the caller was
+      // told failed.
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
+      await this.prepareSend()
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
       return this.handOver(input, steered.clientMessageId)
     })
     this.handOff = handed.then(
@@ -651,7 +675,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .then((admitted) => {
         if (!admitted) {
           this.forgetSteer(steered)
-          waiter?.reject(new AgentTaskTurnError("The Agent box did not take the message."))
+          waiter?.reject(
+            steered.refusal ?? new AgentTaskTurnError("The Agent box did not take the message."),
+          )
           return
         }
         // A box that does not echo the id is only heard here. A queued one is not in a turn yet.
@@ -974,9 +1000,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
         this.emit("error", { ...(code ? { code } : {}), error: message })
-        // A refusal names no turn. Once the turn that runs was accepted, one arriving with a
-        // steer pending is that steer's: the box refused the message and the turn goes on.
-        if (!payload?.lifecycle && !this.dispatching && this.pendingSteers > 0) break
+        // A refusal names no turn. One naming a message other than the turn's opening one is
+        // that message's: the box refused it and the turn goes on. A box that names none:
+        // once the turn that runs was accepted, one arriving with a steer pending is the steer's.
+        const refused = payload?.lifecycle ? undefined : payload?.clientMessageId
+        if (typeof refused === "string") {
+          if (refused !== this.openingMessageId) {
+            const steered = [...this.steers, ...this.strayedSteers].find(
+              (pending) => pending.clientMessageId === refused,
+            )
+            if (steered) steered.refusal = new AgentTaskTurnError(message, code)
+            break
+          }
+        } else if (!payload?.lifecycle && !this.dispatching && this.pendingSteers > 0) break
         if (this._status === "streaming" || this._status === "cancelled") {
           this.failTurn(new AgentTaskTurnError(message, code))
         }
