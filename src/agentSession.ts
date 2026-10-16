@@ -1011,6 +1011,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const reason = typeof payload?.reason === "string" ? payload.reason : "unknown"
         const lifecycle = payload?.lifecycle as Record<string, unknown> | undefined
         const usage = agentTurnUsageOf(payload?.usage)
+        // A turn already ended (closed here when its box went away, then again by the new box)
+        // must not end the turn running now.
+        const finished = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : undefined
+        if (finished !== undefined && this.finishedTurnIds.includes(finished)) break
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.

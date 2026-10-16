@@ -39,6 +39,10 @@ exact version.
   timeout of its own. An `error` the box sends with a `requestId` refuses that answer only: the
   event is emitted and the turn and the messages waiting for the box are left alone. With the box
   channel down, the answer is not sent and an `error` says so; the Copilot does not take it.
+- A turn whose box went away while the socket redialed (the Copilot points the chat to another
+  box, or the same address comes back with an empty log) ends as `interrupted` with the text it
+  had, so the next message opens a turn of its own. A terminal the new box sends for that turn
+  is ignored.
 - `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
   are deprecated and kept only for compatibility: the queue is always empty, the methods do
   nothing and the event is never emitted.

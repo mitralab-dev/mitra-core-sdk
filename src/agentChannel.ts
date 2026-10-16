@@ -156,6 +156,8 @@ interface PendingAdmission {
 interface DirectLink {
   wire: Wire | null
   inTurn: boolean
+  /** The `lifecycle.turnId` of the last turn frame, so a lost turn can be closed by name. */
+  turnId: string | undefined
   /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
   admissions: PendingAdmission[]
 }
@@ -378,6 +380,23 @@ function turnAfter(event: AgentTaskEvent, inTurn: boolean): boolean {
     return asObject(payload?.lifecycle)?.interruptTerminal !== true
   }
   return inTurn
+}
+
+/** The terminal of a turn whose box went away, as the box writes an interrupted one. */
+function lostTurnFrame(turnId: string | undefined): AgentTaskEvent {
+  return {
+    type: "stepFinish",
+    payload: {
+      reason: "interrupted",
+      lifecycle: {
+        ...(turnId === undefined ? {} : { turnId }),
+        terminal: true,
+        sessionIdle: true,
+        interruptTerminal: true,
+      },
+    },
+    timestamp: Date.now(),
+  }
 }
 
 /**
@@ -637,7 +656,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
   ): Promise<AgentTaskEventConnection> {
-    const link: DirectLink = { wire: null, inTurn: false, admissions: [] }
+    const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
     let box = boxAddress(channel.wsUrl)
     let cursor = channel.lastSequence
     const abort = new AbortController()
@@ -646,6 +665,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
 
     const onFrame = (event: AgentTaskEvent) => {
       if (typeof event.sequence === "number" && event.sequence > cursor) cursor = event.sequence
+      const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
+      if (typeof turnId === "string") link.turnId = turnId
       link.inTurn = turnAfter(event, link.inTurn)
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
@@ -668,7 +689,14 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         onLost,
         replayFrom: (next) => {
           const nextBox = boxAddress(next.wsUrl)
-          if (nextBox === box) return cursor
+          // A box back with an empty log is a new box behind the same address. Only an empty one:
+          // a channel the Copilot answers from a cache can carry an older, smaller sequence.
+          const zeroed = next.lastSequence === 0 && cursor > 0
+          if (nextBox === box && !zeroed) return cursor
+          // The box the turn ran on is gone and nothing will ever end that turn. Closed here as interrupted, so the next message
+          // opens a turn of its own instead of steering into a dead one. The box may send the same
+          // terminal; the session ignores a second one for a turn it already ended.
+          if (link.inTurn) onFrame(lostTurnFrame(link.turnId))
           box = nextBox
           cursor = next.lastSequence
           return undefined

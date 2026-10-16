@@ -1200,10 +1200,87 @@ describe("Agent direct channel lifecycle", () => {
     expect(otherBox.url).toBe(OTHER_BOX_URL)
     expect(otherBox.sent).toEqual([])
 
+    // The turn on the first box is closed with it; a turn on the new box counts from its log.
+    session.send("again")
+    await vi.waitFor(() => expect(otherBox.sent).toHaveLength(1))
     otherBox.drop()
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
     expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 10 }])
+    session.close()
+  })
+
+  it("closes as interrupted a turn whose box went away, so the next message opens its own turn", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const turnEnds: string[] = []
+    const errors: string[] = []
+    session.on("turnEnd", ({ reason }) => turnEnds.push(reason))
+    session.on("error", ({ error }) => errors.push(error))
+
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = FakeWebSocket.last()
+    first.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    first.receive("textDelta", { text: "w000 w001", lifecycle: { turnId: "turn-1" } })
+    first.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000 w001" })
+    expect(session.status).toBe("idle")
+    const fresh = FakeWebSocket.last()
+    expect(fresh.sent).toEqual([])
+
+    const next = session.sendAndWait("Say hi")
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(1))
+    // The new box ends the dead turn too: it must not end the turn running now.
+    fresh.receive(
+      "stepFinish",
+      { reason: "interrupted", lifecycle: { turnId: "turn-1", interruptTerminal: true } },
+      1,
+    )
+    expect(session.status).toBe("streaming")
+    fresh.receive(
+      "stepStart",
+      {
+        lifecycle: {
+          turnId: "turn-2",
+          clientMessageId: (fresh.sent[0] as { clientMessageId: string }).clientMessageId,
+        },
+      },
+      2,
+    )
+    fresh.receive("textDelta", { text: "hi", lifecycle: { turnId: "turn-2" } })
+    fresh.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 3)
+    await expect(next).resolves.toMatchObject({ content: "hi", reason: "stop" })
+    expect(turnEnds).toEqual(["interrupted", "stop"])
+    expect(errors).toEqual([])
+    session.close()
+  })
+
+  it("closes the turn when the same box comes back with an empty log", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted" })
+    expect(FakeWebSocket.last().sent).toEqual([])
     session.close()
   })
 
