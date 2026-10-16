@@ -2035,6 +2035,135 @@ describe("Agent direct channel steering", () => {
     expect(tasks.sendInput).not.toHaveBeenCalled()
   })
 
+  it("keeps the turn when the box refuses an input answer, with no other message pending", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    const result = session.sendAndWait("Plan the trip")
+    let settled = false
+    void result.finally(() => {
+      settled = true
+    })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    socket.receive("user_input_request", { requestId: "req-1", lifecycle: { turnId: "turn-1" } }, 2)
+    session.respondUserInput("req-1", { q1: "Lisbon" })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: "error",
+        payload: {
+          code: "INVALID_MESSAGE",
+          message: "The answer was not accepted",
+          requestId: "req-1",
+        },
+        timestamp: 1,
+      }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(errors).toEqual([{ code: "INVALID_MESSAGE", error: "The answer was not accepted" }])
+    expect(session.status).toBe("streaming")
+    expect(settled).toBe(false)
+
+    socket.receive("textDelta", { text: "Done.", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
+    await expect(result).resolves.toMatchObject({ content: "Done.", reason: "stop" })
+  })
+
+  it("keeps the turn and the pending steer when the box refuses an input answer", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    const first = session.sendAndWait("Plan the trip")
+    let firstSettled = false
+    void first.finally(() => {
+      firstSettled = true
+    })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    socket.receive("user_input_request", { requestId: "req-1", lifecycle: { turnId: "turn-1" } }, 2)
+    const steer = session.sendAndWait("Also check hotels")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+
+    session.respondUserInput("req-1", { q1: "Lisbon" })
+    expect(socket.sent[2]).toMatchObject({ type: "runtime-request.respond", requestId: "req-1" })
+    // The exact frame the sidecar sends when T3 refuses the answer.
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: "error",
+        payload: {
+          code: "INVALID_MESSAGE",
+          message: "The answer was not accepted",
+          requestId: "req-1",
+        },
+        timestamp: 1,
+      }),
+    })
+    let steerSettled = false
+    void steer.then(
+      () => (steerSettled = true),
+      () => (steerSettled = true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(errors).toEqual([{ code: "INVALID_MESSAGE", error: "The answer was not accepted" }])
+    expect(session.status).toBe("streaming")
+    expect(firstSettled).toBe(false)
+    expect(steerSettled).toBe(false)
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
+      3,
+    )
+    socket.receive("textDelta", { text: "Done.", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    const [firstResult, steerResult] = await Promise.all([first, steer])
+    expect(steerResult).toBe(firstResult)
+    expect(firstResult).toMatchObject({ content: "Done.", reason: "stop" })
+  })
+
+  it("does not send an input answer to the Copilot while the socket redials, and says so", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+
+    void session.sendAndWait("Plan the trip").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.drop()
+
+    session.respondUserInput("req-1", { q1: "Lisbon" })
+    await vi.waitFor(() =>
+      expect(errors).toEqual([
+        "Failed to answer Agent input request: The answer to the Agent input request was not sent: the box channel is not connected right now.",
+      ]),
+    )
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(session.status).toBe("streaming")
+    session.close()
+  })
+
   it("posts the answer to a T3 input request on an http session", async () => {
     const box = new FakeBoxHttp()
     const tasks = createTasks(offer(BOX_URL, 2))

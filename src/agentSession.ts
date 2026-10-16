@@ -949,6 +949,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) throw new Error("Agent task has not been created.")
     const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return { admitted: direct }
+    // Only the box knows T3's input requests; the Copilot would refuse the type.
+    if (input.type === "runtime-request.respond") {
+      throw new Error(
+        "The answer to the Agent input request was not sent: the box channel is not connected right now.",
+      )
+    }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
     const rest: AgentTaskInput =
       steering && turnRunning && input.type === "message"
@@ -1035,6 +1041,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
         this.emit("error", { ...(code ? { code } : {}), error: message })
+        // The box refused an answer to a T3 input request: T3 still waits on that request and the
+        // turn goes on.
+        if (!payload?.lifecycle && payload?.requestId !== undefined) break
         // A refusal names no turn. One naming a message other than the turn's opening one is
         // that message's: the box refused it and the turn goes on. A box that names none:
         // once the turn that runs was accepted, one arriving with a steer pending is the steer's.

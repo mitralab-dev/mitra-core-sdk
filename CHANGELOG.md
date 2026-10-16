@@ -36,7 +36,9 @@ exact version.
   with T3's item as payload. `session.respondUserInput(requestId, answers, attachmentsByQuestionId?)`
   sends the answer to the box as T3's own `runtime-request.respond`, on the socket or the box's
   `POST /messages`; `AgentTaskInput` gains that variant. The turn waits for the answer without a
-  timeout of its own.
+  timeout of its own. An `error` the box sends with a `requestId` refuses that answer only: the
+  event is emitted and the turn and the messages waiting for the box are left alone. With the box
+  channel down, the answer is not sent and an `error` says so; the Copilot does not take it.
 - `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
   are deprecated and kept only for compatibility: the queue is always empty, the methods do
   nothing and the event is never emitted.

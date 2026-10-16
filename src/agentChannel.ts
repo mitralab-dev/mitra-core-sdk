@@ -173,10 +173,13 @@ export function newClientMessageId(): string {
 // lifecycle, and a refusal names the message it refuses in its payload; one naming another
 // message (another tab on the same chat) answers none of ours. A box that names no message
 // answers the oldest, which is the one it is deciding. An error that names a turn is the turn
-// failing, not a refusal, and answers none.
+// failing, and one that names a `requestId` is the box refusing an answer to a T3 input request:
+// neither answers a message.
 function admissionFor(link: DirectLink, event: AgentTaskEvent): PendingAdmission | undefined {
   const payload = asObject(event.payload)
-  if (event.type === "error" && payload?.lifecycle) return undefined
+  if (event.type === "error" && (payload?.lifecycle || payload?.requestId !== undefined)) {
+    return undefined
+  }
   const id =
     event.type === "stepStart"
       ? asObject(payload?.lifecycle)?.clientMessageId
