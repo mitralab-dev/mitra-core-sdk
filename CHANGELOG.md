@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- The agent session no longer holds messages. Every `send` and `sendAndWait` goes out at once,
+  also while a turn runs, before it reached the box, after a delivered `cancel()`, while the
+  socket redials and on the Copilot stream. The box steers it into the running turn, or gives
+  it a turn of its own when that one ended, and `sendAndWait` resolves with the turn that
+  answered it. On the direct channel it carries a `clientMessageId` the box echoes on the
+  `stepStart` that takes it; while the socket redials it goes to the box's `POST /messages`;
+  without the direct channel, to the Copilot's `POST /inputs`. A failed send rejects and emits
+  `error`.
+- `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
+  are deprecated and kept only for compatibility: the queue is always empty, the methods do
+  nothing and the event is never emitted.
+
 ## 0.2.13
 
 - `AgentTurnUsage` gains `contextTokens` and `contextWindow`. `contextTokens` is the number of

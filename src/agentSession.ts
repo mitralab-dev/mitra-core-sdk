@@ -19,7 +19,6 @@ import type {
 
 export { AgentTaskTurnError }
 
-const AGENT_QUEUE_LIMIT = 10
 const CANCEL_SAFETY_MS = 10_000
 const RECONCILE_DELAY_MS = 1_000
 
@@ -86,6 +85,7 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
+/** @deprecated Messages are no longer held by the session; the queue is always empty. */
 export interface AgentQueueItem extends AgentSendOptions {
   id: string
   text: string
@@ -136,6 +136,7 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
+  /** @deprecated Never emitted: every message is sent at once, so there is no queue to change. */
   queueChange: { queue: readonly AgentQueueItem[] }
   error: { code?: string; error: string }
   /**
@@ -158,14 +159,18 @@ export interface AgentTaskSession {
   readonly status: AgentTaskSessionStatus
   readonly history: readonly AgentTimelineItem[]
   readonly content: string
+  /** @deprecated Always empty: a message sent while a turn runs goes to the box at once. */
   readonly queue: readonly AgentQueueItem[]
   send(prompt: string, options?: AgentSendOptions): void
   sendAndWait(prompt: string, options?: AgentSendAndWaitOptions): Promise<AgentTurnResult>
   cancel(): Promise<void>
   respondApproval(approved: boolean): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
+  /** @deprecated No effect: the queue is always empty. */
   editQueueItem(id: string, text: string): void
+  /** @deprecated No effect: the queue is always empty. */
   removeQueueItem(id: string): void
+  /** @deprecated No effect: the queue is always empty. */
   clearQueue(): void
   on<K extends keyof AgentTaskSessionEventMap>(
     event: K,
@@ -192,7 +197,6 @@ interface TurnWaiter {
   resolve(result: AgentTurnResult): void
   reject(error: unknown): void
   settled: boolean
-  queueId?: string
   cleanup(): void
 }
 
@@ -201,10 +205,6 @@ interface SteeredMessage {
   clientMessageId: string
   waiter?: TurnWaiter
   taken: boolean
-}
-
-interface InternalQueueItem extends AgentQueueItem {
-  waiter?: TurnWaiter
 }
 
 // A reading that does not parse is dropped, not surfaced as an error: the meter is a side
@@ -339,7 +339,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private _status: AgentTaskSessionStatus = "opening"
   private _history: AgentTimelineItem[] = []
   private _content = ""
-  private _queue: InternalQueueItem[] = []
   private readonly isNewSession: boolean
   private readonly listeners = new Map<
     keyof AgentTaskSessionEventMap,
@@ -362,7 +361,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private recoveredTerminalReason: string | undefined
   private recoveredTerminalUsage: AgentTurnUsage | undefined
   private cancelTimer: ReturnType<typeof setTimeout> | null = null
-  private queueSequence = 0
+  // Messages leave in the order they were sent: each one is handed over only after the one
+  // before it was, not after it was answered.
+  private handOff: Promise<void> = Promise.resolve()
   private activeWaiter: TurnWaiter | undefined
   // Messages steered into the running turn. One the box took settles with that turn; one the
   // box had not taken when the turn ended opens a turn of its own when it does.
@@ -409,24 +410,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get queue(): readonly AgentQueueItem[] {
-    return this._queue.map((item) => ({
-      id: item.id,
-      text: item.text,
-      createdAt: item.createdAt,
-      ...(item.agentType ? { agentType: item.agentType } : {}),
-      ...(item.reasoningEffort ? { reasoningEffort: item.reasoningEffort } : {}),
-    }))
+    return []
   }
 
   send(prompt: string, options: AgentSendOptions = {}): void {
     this.requireOpen()
     if (!prompt.trim()) return
-    if (this.canSteer()) {
-      this.steer(prompt, options)
-      return
-    }
     if (this.isBusy()) {
-      this.enqueue(prompt, options)
+      this.steer(prompt, options)
       return
     }
     this.startDispatch(prompt, options)
@@ -441,13 +432,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     }
-    if (this.canSteer()) {
-      this.steer(prompt, sendOptions, waiter)
-      return waiter.promise
-    }
     if (this.isBusy()) {
-      const queueId = this.enqueue(prompt, sendOptions, waiter)
-      if (queueId) waiter.queueId = queueId
+      this.steer(prompt, sendOptions, waiter)
       return waiter.promise
     }
     this.startDispatch(prompt, sendOptions, waiter)
@@ -502,29 +488,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return history
   }
 
-  editQueueItem(id: string, text: string): void {
-    if (!text.trim()) {
-      this.removeQueueItem(id)
-      return
-    }
-    this._queue = this._queue.map((item) => (item.id === id ? { ...item, text } : item))
-    this.emitQueue()
-  }
+  editQueueItem(): void {}
 
-  removeQueueItem(id: string): void {
-    const removed = this._queue.find((item) => item.id === id)
-    this._queue = this._queue.filter((item) => item.id !== id)
-    removed?.waiter?.reject(new Error("Queued Agent prompt was removed."))
-    this.emitQueue()
-  }
+  removeQueueItem(): void {}
 
-  clearQueue(): void {
-    if (!this._queue.length) return
-    const removed = this._queue
-    this._queue = []
-    for (const item of removed) item.waiter?.reject(new Error("Agent prompt queue was cleared."))
-    this.emitQueue()
-  }
+  clearQueue(): void {}
 
   on<K extends keyof AgentTaskSessionEventMap>(
     event: K,
@@ -554,8 +522,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter?.reject(closedError)
     this.activeWaiter = undefined
     this.rejectSteers(closedError)
-    for (const item of this._queue) item.waiter?.reject(closedError)
-    this._queue = []
     if (this._taskId) this.dependencies.onClose(this._taskId, this)
     for (const listeners of this.listeners.values()) listeners.clear()
   }
@@ -580,18 +546,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private startDispatch(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
     this.dispatching = true
-    const dispatch = this.dispatchSend(prompt, options, waiter)
+    let handedOver!: () => void
+    this.handOff = new Promise<void>((resolve) => {
+      handedOver = resolve
+    })
+    const dispatch = this.dispatchSend(prompt, options, handedOver, waiter)
       .catch((error: unknown) => {
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
-        if (this._status === "streaming") this.setStatus("idle")
-        this.flushQueue()
+        if (this._status === "streaming") {
+          this.settleSteers((steered) => steered.reject(error))
+          this.setStatus("idle")
+        }
         return false
       })
       .finally(() => {
+        handedOver()
         this.dispatching = false
         if (this.dispatch === dispatch) this.dispatch = null
-        if (this._status === "idle") this.flushQueue()
       })
     this.dispatch = dispatch
   }
@@ -599,6 +571,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private async dispatchSend(
     prompt: string,
     options: AgentSendOptions,
+    handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
     if (this.openingPromise && !(await this.openingPromise)) {
@@ -632,49 +605,29 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    if (!(await this.sendInput(input))) return false
+    const { admitted } = await this.handOver(input)
+    handedOver()
+    if (!(await admitted)) return false
     this.emit("accepted", {})
-    this.steerQueued()
     return true
   }
 
-  // Sent before the turn reached the box, these waited for it; now they join it.
-  private steerQueued(): void {
-    while (this._queue.length && this.canSteer()) {
-      const next = this._queue[0]!
-      this._queue = this._queue.slice(1)
-      this.emitQueue()
-      if (next.waiter?.settled) continue
-      this.steer(
-        next.text,
-        {
-          ...(next.agentType ? { agentType: next.agentType } : {}),
-          ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
-        },
-        next.waiter,
-      )
-    }
-  }
-
-  // A message sent while the turn runs on the box goes straight to it, as the T3 shell sends it:
-  // the box takes it into that turn (the provider's own steering) instead of this session holding
-  // it until the turn ends. A stop already sent, a turn this session has not sent yet, a channel
-  // being redialed, or the Copilot's stream keep the queue.
-  private canSteer(): boolean {
-    return (
-      this._status === "streaming" &&
-      this._taskId !== null &&
-      this.dependencies.channel.isLive(this._taskId)
-    )
-  }
-
+  // A message sent while a turn runs, or is being opened, goes out at once, as the T3 shell sends
+  // it: the box takes it into that turn (the provider's own steering), or into a turn of its own
+  // when that one already ended. Nothing waits in this session. On the direct channel it goes
+  // with an id the box echoes on the turn that takes it; without the channel, over REST to the
+  // Copilot, which holds it while the box boots.
   private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
       taken: false,
     }
-    this.steers.push(steered)
+    if (this.dispatching || this._status === "streaming" || this._status === "cancelled") {
+      this.steers.push(steered)
+    } else {
+      this.strayedSteers.push(steered)
+    }
     const input: AgentTaskInput = {
       type: "message",
       content: prompt,
@@ -682,7 +635,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     }
     this.pendingSteers += 1
-    void this.sendInput(input, steered.clientMessageId)
+    const handed = this.handOff.then(async () => {
+      // A closed session still hands over a message whose task exists, over REST.
+      if (!this.isClosed()) await this.prepareSend()
+      return this.handOver(input, steered.clientMessageId)
+    })
+    this.handOff = handed.then(
+      () => undefined,
+      () => undefined,
+    )
+    void handed
+      .then(({ admitted }) => admitted)
       .then((admitted) => {
         if (!admitted) {
           this.forgetSteer(steered)
@@ -711,7 +674,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this.strayedSteers.includes(steered)) return
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
     this.openTurnFor(steered.waiter)
-    this.steerQueued()
   }
 
   private steerOpenedBy(lifecycle: Record<string, unknown> | null): void {
@@ -725,9 +687,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private forgetSteer(steered: SteeredMessage): void {
     this.steers = this.steers.filter((pending) => pending !== steered)
-    const strayed = this.strayedSteers.includes(steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
-    if (strayed && this._status === "idle") this.flushQueue()
   }
 
   // The turn ended: what the box took is answered by it, what it had not taken yet waits for the
@@ -904,12 +864,29 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   /** True once the server took the input; false when the box refused it on the stream. */
-  private async sendInput(input: AgentTaskInput, clientMessageId?: string): Promise<boolean> {
+  private async sendInput(input: AgentTaskInput): Promise<boolean> {
+    return (await this.handOver(input)).admitted
+  }
+
+  // Resolves once the input left this session; `admitted` then says whether the server took it.
+  // Wrapped so that awaiting the hand-over does not also await the answer.
+  private async handOver(
+    input: AgentTaskInput,
+    clientMessageId?: string,
+  ): Promise<{ admitted: Promise<boolean> }> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
     const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
-    if (direct) return direct
+    if (direct) return { admitted: direct }
     await this.dependencies.tasks.sendInput(this._taskId, input)
-    return true
+    return { admitted: Promise.resolve(true) }
+  }
+
+  private async prepareSend(): Promise<void> {
+    if (this.openingPromise && !(await this.openingPromise)) {
+      throw new Error("Agent task session could not be opened.")
+    }
+    await this.ensureTask()
+    if (!this.isClosed()) await this.ensureChannel()
   }
 
   private handleEvent(event: AgentTaskEvent): void {
@@ -1055,7 +1032,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = undefined
     this.settleSteers((waiter) => waiter.resolve(result))
     this.setStatus("idle")
-    this.flushQueue()
   }
 
   private failTurn(error: AgentTaskTurnError): void {
@@ -1066,7 +1042,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = undefined
     this.settleSteers((waiter) => waiter.reject(error))
     this.setStatus("idle")
-    this.flushQueue()
   }
 
   private failLiveChannel(observed: unknown, waiterError: Error): void {
@@ -1075,53 +1050,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter?.reject(waiterError)
     this.activeWaiter = undefined
     this.rejectSteers(waiterError)
-    for (const item of this._queue) item.waiter?.reject(waiterError)
-    this._queue = []
-    this.emitQueue()
     this.setStatus("error")
-  }
-
-  private enqueue(
-    text: string,
-    options: AgentSendOptions,
-    waiter?: TurnWaiter,
-  ): string | undefined {
-    if (this._queue.length >= AGENT_QUEUE_LIMIT) {
-      const error = new Error(`Agent message queue is full (maximum ${AGENT_QUEUE_LIMIT}).`)
-      waiter?.reject(error)
-      this.emit("error", { error: error.message })
-      return undefined
-    }
-    const id = `q-${++this.queueSequence}`
-    this._queue = [
-      ...this._queue,
-      { id, text, createdAt: Date.now(), ...options, ...(waiter ? { waiter } : {}) },
-    ]
-    this.emitQueue()
-    return id
-  }
-
-  private flushQueue(): void {
-    if (this.isBusy()) return
-    let next = this._queue[0]
-    while (next?.waiter?.settled) {
-      this._queue = this._queue.slice(1)
-      next = this._queue[0]
-    }
-    if (!next) {
-      this.emitQueue()
-      return
-    }
-    this._queue = this._queue.slice(1)
-    this.emitQueue()
-    this.startDispatch(
-      next.text,
-      {
-        ...(next.agentType ? { agentType: next.agentType } : {}),
-        ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
-      },
-      next.waiter,
-    )
   }
 
   private createWaiter(options: AgentSendAndWaitOptions): TurnWaiter {
@@ -1145,7 +1074,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         if (waiter.settled) return
         waiter.settled = true
         waiter.cleanup()
-        if (waiter.queueId) this.removeQueuedWaiter(waiter.queueId)
         rejectPromise(error)
       },
       cleanup: () => {
@@ -1173,16 +1101,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return waiter
   }
 
-  private removeQueuedWaiter(id: string): void {
-    const size = this._queue.length
-    this._queue = this._queue.filter((item) => item.id !== id)
-    if (this._queue.length !== size) this.emitQueue()
-  }
-
-  private emitQueue(): void {
-    this.emit("queueChange", { queue: this.queue })
-  }
-
   private emitError(prefix: string, error: unknown): void {
     const code = errorCode(error)
     this.emit("error", {
@@ -1205,9 +1123,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return this._status === "closed"
   }
 
-  // A steer the box has not taken yet when its turn ended still gets a turn of its own. Until it
-  // does, or the box refuses it, a new message waits: started now, its turn and the steer's would
-  // each be answered by the other's result.
+  // A turn running or being opened takes a new message as a steer. So does a session waiting for
+  // the turn the box opens for a steer it took late: a new message started as a turn of its own
+  // then would be answered by the steer's result, and the steer by its.
   private isBusy(): boolean {
     return (
       this.dispatching ||

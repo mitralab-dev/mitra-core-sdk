@@ -1538,7 +1538,7 @@ describe("Agent direct channel steering", () => {
     expect(turnStarts).toHaveBeenCalledTimes(2)
   })
 
-  it("holds a new message until a steer the box took late gets its own turn", async () => {
+  it("sends a new message at once while a steer the box took late waits for its turn", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
     const accepted = vi.fn()
@@ -1560,27 +1560,23 @@ describe("Agent direct channel steering", () => {
     socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
     await expect(first).resolves.toMatchObject({ content: "1. Lion" })
 
-    // Sent now, its turn and the steer's would each settle with the other's result.
     const next = session.sendAndWait("Now say MANGO")
-    await Promise.resolve()
-    expect(socket.sent).toHaveLength(2)
-    expect(session.queue.map((item) => item.text)).toEqual(["Now say MANGO"])
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    expect(socket.sent[2]).toMatchObject({ type: "message", content: "Now say MANGO" })
+    expect(session.queue).toEqual([])
 
     socket.receive(
       "stepStart",
       { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
       3,
     )
-    // Once the steer has its turn, the held message joins that turn as a steer.
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
-    expect(socket.sent[2]).toMatchObject({ type: "message", content: "Now say MANGO" })
     socket.receive(
       "stepStart",
-      { lifecycle: { turnId: "turn-3", clientMessageId: idOf(socket.sent[2]) } },
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[2]) } },
       4,
     )
-    socket.receive("textDelta", { text: "BANANA MANGO", lifecycle: { turnId: "turn-3" } })
-    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-3" } }, 5)
+    socket.receive("textDelta", { text: "BANANA MANGO", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 5)
 
     const [steerResult, nextResult] = await Promise.all([steer, next])
     expect(steerResult).toMatchObject({ content: "BANANA MANGO", reason: "stop" })
@@ -1588,7 +1584,7 @@ describe("Agent direct channel steering", () => {
     expect(session.status).toBe("idle")
   })
 
-  it("sends a held message as its own turn when the box refuses the late steer", async () => {
+  it("gives a message sent after a late steer its own turn when the box refuses the steer", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
     const accepted = vi.fn()
@@ -1606,15 +1602,22 @@ describe("Agent direct channel steering", () => {
     const steer = session.sendAndWait("Stop and say BANANA")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
-    void session.sendAndWait("Now say MANGO")
-    await Promise.resolve()
-    expect(socket.sent).toHaveLength(2)
-
-    socket.receive("error", { code: "INCLUDED_AI_EXHAUSTED", message: "No balance" })
-
-    await expect(steer).rejects.toThrow()
+    const next = session.sendAndWait("Now say MANGO")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     expect(socket.sent[2]).toMatchObject({ type: "message", content: "Now say MANGO" })
+
+    socket.receive("error", { code: "INCLUDED_AI_EXHAUSTED", message: "No balance" })
+    await expect(steer).rejects.toThrow()
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[2]) } },
+      3,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.receive("textDelta", { text: "MANGO", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    await expect(next).resolves.toMatchObject({ content: "MANGO", reason: "stop" })
   })
 
   it("rejects a steer the box refuses over HTTP and keeps the turn", async () => {
@@ -1694,6 +1697,7 @@ describe("Agent direct channel steering", () => {
       expect(raw.some((event) => event.type === "channelReconnecting")).toBe(true),
     )
     expect(session.status).toBe("streaming")
+    session.close()
   })
 
   it("takes a steer into the turn when the box does not echo the message id", async () => {
@@ -1753,7 +1757,7 @@ describe("Agent direct channel steering", () => {
     expect(session.status).toBe("idle")
   })
 
-  it("holds a message typed while a stop is in flight for the turn after it", async () => {
+  it("sends a message typed after a stop at once and gives it the turn the box opens for it", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
 
@@ -1769,40 +1773,171 @@ describe("Agent direct channel steering", () => {
 
     await session.cancel()
     expect(session.status).toBe("cancelled")
-    session.send("Now say BANANA")
-    expect(session.queue).toHaveLength(1)
+    const after = session.sendAndWait("Now say BANANA")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     expect(socket.sent.map((frame) => (frame as { type: string }).type)).toEqual([
       "message",
       "interrupt",
+      "message",
     ])
+    expect(socket.sent[2]).toMatchObject({ content: "Now say BANANA" })
+    expect(session.queue).toEqual([])
 
     socket.receive(
       "stepFinish",
       { reason: "interrupted", lifecycle: { turnId: "turn-1", interruptTerminal: true } },
       2,
     )
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
-    expect(socket.sent[2]).toMatchObject({ type: "message", content: "Now say BANANA" })
-    expect(session.queue).toEqual([])
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[2]) } },
+      3,
+    )
+    socket.receive("textDelta", { text: "BANANA", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    await expect(after).resolves.toMatchObject({ content: "BANANA", reason: "stop" })
   })
 
-  it("sends a message typed before the turn reached the box into that turn once it is there", async () => {
+  it("sends a message typed before the turn reached the box right after the first, in order", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
 
-    void session.sendAndWait("List 40 animals").catch(() => undefined)
-    session.send("Then say BANANA")
-    expect(session.queue).toHaveLength(1)
-    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = session.sendAndWait("List 40 animals")
+    const then = session.sendAndWait("Then say BANANA")
+    expect(session.queue).toEqual([])
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(2))
     const socket = FakeWebSocket.last()
+    expect(socket.sent[0]).toMatchObject({ type: "message", content: "List 40 animals" })
+    expect(socket.sent[1]).toMatchObject({ type: "message", content: "Then say BANANA" })
+
     socket.receive(
       "stepStart",
       { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
       1,
     )
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[1]) } },
+      2,
+    )
+    socket.receive("textDelta", { text: "Lion BANANA", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
+    const [firstResult, thenResult] = await Promise.all([first, then])
+    expect(firstResult).toMatchObject({ content: "Lion BANANA" })
+    expect(thenResult).toBe(firstResult)
+  })
 
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
-    expect(socket.sent[1]).toMatchObject({ type: "message", content: "Then say BANANA" })
-    expect(session.queue).toEqual([])
+  it("sends a message typed while the socket redials to the box HTTP route, with its id", async () => {
+    vi.useFakeTimers()
+    const box = new FakeBoxHttp()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks, { WebSocket: WebSocketImpl, fetch: box.fetch })
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    socket.drop()
+
+    const steer = session.sendAndWait("Stop and say BANANA")
+    await vi.waitFor(() => expect(box.posts).toHaveLength(1))
+    expect(box.posts[0]).toEqual({
+      url: "https://49999-box1.e2b.app/api/mitra/chat/messages?grant=secret",
+      body: {
+        type: "message",
+        content: "Stop and say BANANA",
+        clientMessageId: expect.any(String),
+      },
+    })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(box.eventUrls).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const redialed = FakeWebSocket.last()
+    expect(redialed.sent).toEqual([{ type: "replay", fromSequence: 4 }])
+    redialed.receive("textDelta", { text: "BANANA", lifecycle: { turnId: "turn-1" } })
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+
+    const [firstResult, steerResult] = await Promise.all([first, steer])
+    expect(firstResult).toMatchObject({ content: "BANANA", reason: "stop" })
+    expect(steerResult).toBe(firstResult)
+  })
+
+  it("fails out loud a message the box HTTP route refuses while the socket redials", async () => {
+    vi.useFakeTimers()
+    const box = new FakeBoxHttp()
+    box.answers.push({ status: 409, body: { error_code: "TURN_REFUSED", message: "Not now" } })
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks, { WebSocket: WebSocketImpl, fetch: box.fetch })
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.drop()
+
+    const steer = session.sendAndWait("Stop and say BANANA")
+    await expect(steer).rejects.toMatchObject({ name: "AgentTaskTurnError", code: "TURN_REFUSED" })
+    expect(errors).toContainEqual({
+      code: "TURN_REFUSED",
+      error: "Failed to send Agent prompt: Not now",
+    })
+    expect(session.status).toBe("streaming")
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    session.close()
+  })
+
+  it("sends a message typed while the socket redials to the Copilot when there is no fetch", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", undefined)
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    session.on("accepted", accepted)
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    socket.drop()
+
+    const steer = session.sendAndWait("Stop and say BANANA")
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+        type: "message",
+        content: "Stop and say BANANA",
+      }),
+    )
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const redialed = FakeWebSocket.last()
+    redialed.receive("textDelta", { text: "BANANA", lifecycle: { turnId: "turn-1" } })
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    const [firstResult, steerResult] = await Promise.all([first, steer])
+    expect(steerResult).toBe(firstResult)
   })
 })

@@ -156,6 +156,12 @@ interface PendingAdmission {
 interface DirectLink {
   wire: Wire | null
   inTurn: boolean
+  /**
+   * While the socket is redialed, a message goes to the box's HTTP route with the last grant
+   * instead of waiting for the socket or detouring through the Copilot. Absent without fetch.
+   */
+  redialPost?: (input: BoxMessage, admission: PendingAdmission) => void
+  redialing: boolean
   /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
   admissions: PendingAdmission[]
 }
@@ -425,6 +431,38 @@ function withBody(response: AgentFetchResponse, body: unknown): AgentFetchRespon
   }
 }
 
+// The box's answer to a POSTed message settles its admission. Every refusal carries
+// `{error_code, message}`: 409 not admitted, 400 bad frame, 413 too large, 503 nobody to admit,
+// 504 no admission or turn within 30 s.
+function settleByAnswer(answer: Promise<AgentFetchResponse>, admission: PendingAdmission): void {
+  answer.then(
+    async (response) => {
+      if (response.ok) {
+        admission.settle(true)
+        return
+      }
+      const body = asObject(await response.json().catch(() => null))
+      const code = errorCodeOf(body)
+      if (isGrantRejection(response.status) && code === undefined) {
+        admission.fail(new GrantRejectedError(response.status))
+        return
+      }
+      const fallback =
+        response.status === 504
+          ? "The Agent box got no admission for the turn (504)."
+          : `The Agent box refused the message (${response.status}).`
+      const message = typeof body?.message === "string" ? body.message : fallback
+      admission.fail(new AgentTaskTurnError(message, code))
+    },
+    (error: unknown) => {
+      // A request the network lost may still have been admitted: its `stepStart` on the
+      // stream, or the admission timeout, settles it then. A rejected grant that could not
+      // be renewed means the message never reached the box.
+      if (error instanceof ChannelRenewalError) admission.fail(error)
+    },
+  )
+}
+
 /**
  * The chat's direct channel to its box. The Copilot hands out the box address, admits every turn
  * and receives the box log; the box runs the turn. The box is reached over its WebSocket or over
@@ -445,11 +483,6 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   /** Whether an open would try the box at all: the Copilot can be asked and the box reached. */
   canDial(transport?: AgentSessionTransport): boolean {
     return this.enabled() && this.modeFor(transport) !== null
-  }
-
-  /** Whether the chat talks to its box right now, so a message would reach it directly. */
-  isLive(taskId: string): boolean {
-    return this.links.get(taskId)?.wire != null
   }
 
   /**
@@ -495,9 +528,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   /**
-   * Hands a message or an interrupt to the box when the chat is on the direct channel and its
-   * wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
-   * mid-redial, or an approval, which stays on REST.
+   * Hands a message or an interrupt to the box when the chat is on the direct channel. With the
+   * wire up it goes on the wire; while the socket is redialed a message goes to the box's HTTP
+   * route instead. Null sends the caller to REST: no direct channel, a wire lost with nothing to
+   * carry it, an interrupt mid-redial, or an approval, which stays on REST.
    *
    * A message resolves only when the box answers for it. `stepStart` on the stream, or the 200 of
    * the HTTP route, is the box starting the turn the Copilot admitted: from then on the turn runs
@@ -513,8 +547,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   send(taskId: string, input: AgentTaskInput, clientMessageId?: string): Promise<boolean> | null {
     if (input.type === "approval_response") return null
     const link = this.links.get(taskId)
-    if (!link?.wire) return null
-    if (input.type !== "message") return link.wire.interrupt(input)
+    if (!link) return null
+    const redialPost = link.redialing ? link.redialPost : undefined
+    if (!link.wire && !(input.type === "message" && redialPost)) return null
+    if (input.type !== "message") return link.wire!.interrupt(input)
     // A message sent while a turn runs is not held back: the box takes it into that turn, so
     // several can wait for the box at once, each answered by its own `stepStart`.
     const messageId = clientMessageId ?? newClientMessageId()
@@ -551,9 +587,14 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       arm()
     })
     link.admissions = [...link.admissions, admission]
-    if (!link.wire.message({ ...input, clientMessageId: messageId }, admission)) {
-      admission.settle(false)
-      return null
+    const message: BoxMessage = { ...input, clientMessageId: messageId }
+    if (link.wire) {
+      if (!link.wire.message(message, admission)) {
+        admission.settle(false)
+        return null
+      }
+    } else {
+      redialPost!(message, admission)
     }
     link.inTurn = true
     return admitted
@@ -623,9 +664,23 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
   ): Promise<AgentTaskEventConnection> {
-    const link: DirectLink = { wire: null, inTurn: false, admissions: [] }
+    const link: DirectLink = { wire: null, inTurn: false, admissions: [], redialing: false }
     let box = boxAddress(channel.wsUrl)
     let cursor = channel.lastSequence
+    let latest = channel
+    const fetch = mode === "websocket" ? this.fetcher() : null
+    if (fetch) {
+      link.redialPost = (input, admission) =>
+        settleByAnswer(
+          fetch(boxRoute(latest.wsUrl, "messages"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+            redirect: "error",
+          }),
+          admission,
+        )
+    }
     const abort = new AbortController()
     const onAbort = () => abort.abort(signal?.reason)
     signal?.addEventListener("abort", onAbort, { once: true })
@@ -648,10 +703,12 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         return
       }
       for (const pending of link.admissions) pending.hold()
+      link.redialing = true
       void this.redial(taskId, mode, error, abort.signal, observer, {
         onFrame,
         onLost,
         replayFrom: (next) => {
+          latest = next
           const nextBox = boxAddress(next.wsUrl)
           if (nextBox === box) return cursor
           box = nextBox
@@ -659,6 +716,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           return undefined
         },
       }).then((outcome) => {
+        link.redialing = false
         // A message still waiting when the channel is gone for good fails out loud: the caller
         // that fires and leaves must not take a lost message for a sent one.
         if (outcome instanceof Error) for (const pending of link.admissions) pending.fail(outcome)
@@ -860,34 +918,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           return true
         }),
       message: (input, admission) => {
-        post(input).then(
-          async (response) => {
-            if (response.ok) {
-              admission.settle(true)
-              return
-            }
-            // Every refusal carries `{error_code, message}`: 409 not admitted, 400 bad frame, 413
-            // too large, 503 nobody to admit, 504 no admission or turn within 30 s.
-            const body = asObject(await response.json().catch(() => null))
-            const code = errorCodeOf(body)
-            if (isGrantRejection(response.status) && code === undefined) {
-              admission.fail(new GrantRejectedError(response.status))
-              return
-            }
-            const fallback =
-              response.status === 504
-                ? "The Agent box got no admission for the turn (504)."
-                : `The Agent box refused the message (${response.status}).`
-            const message = typeof body?.message === "string" ? body.message : fallback
-            admission.fail(new AgentTaskTurnError(message, code))
-          },
-          (error: unknown) => {
-            // A request the network lost may still have been admitted: its `stepStart` on the
-            // stream, or the admission timeout, settles it then. A rejected grant that could not
-            // be renewed means the message never reached the box.
-            if (error instanceof ChannelRenewalError) admission.fail(error)
-          },
-        )
+        settleByAnswer(post(input), admission)
         return true
       },
     }
