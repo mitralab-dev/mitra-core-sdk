@@ -1,0 +1,136 @@
+{
+  "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
+  "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
+  "note": "One request per closed turn (split in batches of 200). `sequence` starts at 1 in each `logId`; `timestamp` is epoch ms of when the box logged the frame.",
+  "requests": [
+    {
+      "path": "/api/v1/tasks/task-1/channel-events",
+      "header": {
+        "X-Mitra-Chat-Grant": "<delivery credential>"
+      },
+      "body": {
+        "generation": 2,
+        "logId": "00000000-0000-4000-8000-000000000001",
+        "turnIds": ["turn-1"],
+        "events": [
+          {
+            "type": "stepStart",
+            "payload": {
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false,
+                "clientMessageId": "cm-1"
+              }
+            },
+            "sequence": 1,
+            "timestamp": 1760600000030
+          },
+          {
+            "type": "textChunk",
+            "payload": {
+              "text": "Let me look.\n\n",
+              "kind": "text",
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 2,
+            "timestamp": 1760600000040
+          },
+          {
+            "type": "toolCall",
+            "payload": {
+              "toolId": "tool-1",
+              "name": "command_execution",
+              "title": "ls",
+              "input": {
+                "command": "ls"
+              },
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 3,
+            "timestamp": 1760600000050
+          },
+          {
+            "type": "toolResult",
+            "payload": {
+              "toolId": "tool-1",
+              "name": "command_execution",
+              "title": "ls",
+              "output": "a.txt\nb.txt",
+              "isError": false,
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 4,
+            "timestamp": 1760600000060
+          },
+          {
+            "type": "textChunk",
+            "payload": {
+              "text": "Two files.",
+              "kind": "text",
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 5,
+            "timestamp": 1760600000070
+          },
+          {
+            "type": "stepFinish",
+            "payload": {
+              "reason": "stop",
+              "turnId": "run-1",
+              "usage": {
+                "inputTokens": 1000,
+                "outputTokens": 80,
+                "cacheReadTokens": 200,
+                "model": "fake-model",
+                "provider": "claudeAgent",
+                "durationMs": 2500
+              },
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": true,
+                "sessionIdle": true,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 6,
+            "timestamp": 1760600000080
+          }
+        ]
+      }
+    }
+  ]
+}
