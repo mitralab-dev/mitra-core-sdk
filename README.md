@@ -97,6 +97,7 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - `publicFunctions` precisa de um transporte sem credencial. O Core não usa o transporte autenticado no lugar dele.
 - `sendAndWait` com `timeoutMs` ou `signal` só para de esperar; o turno continua no servidor. Para interromper, chame `cancel()`.
 - `cancel()` chamado antes de a box aceitar o prompt espera esse aceite e só então manda o stop; a promise resolve depois disso. Se o prompt não chegar a virar turno, nada é enviado e o status não passa por `cancelled`.
+- No canal direto, uma mensagem mandada com o turno rodando vai na hora para a box, que a coloca dentro do turno em andamento (steering nativo do T3: o Claude fecha o que está escrevendo e responde; o Codex incorpora no próximo passo). O turno termina uma vez, e o `sendAndWait` de cada mensagem resolve com o resultado desse turno. A fila (`queue`, `queueChange`) só guarda o que não pode ir agora: mensagem mandada antes de o turno chegar à box (vai assim que ele chega), depois que um `cancel()` foi entregue, enquanto o canal reconecta (vai no turno seguinte) ou numa sessão que caiu para o stream do Copilot (vai turno a turno, como antes). A box precisa da versão com steer (t3code-mitra#207) antes de um SDK com esta mudança chegar aos apps.
 - O `open()` do seu `eventSource` só deve resolver depois que o stream estiver conectado, para nenhum evento do turno se perder.
 
 ## Desenvolvimento
