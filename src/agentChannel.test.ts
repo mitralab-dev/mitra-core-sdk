@@ -1880,6 +1880,114 @@ describe("Agent direct channel steering", () => {
     expect(accepted).toHaveBeenCalledTimes(2)
   })
 
+  it("takes the box's admission ack for the opening message, then runs the turn its stepStart opens", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    const errors: string[] = []
+    session.on("accepted", accepted)
+    session.on("error", ({ error }) => errors.push(error))
+
+    const result = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const id = idOf(socket.sent[0])
+    socket.receive("messageQueued", {
+      position: null,
+      runId: null,
+      lifecycle: { turnId: "turn-1", clientMessageId: id },
+    })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+    expect(session.status).toBe("streaming")
+
+    // A box slow to hand the message to T3: the ack already confirmed it.
+    socket.receive("ping")
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(errors).toEqual([])
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: id } }, 1)
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
+    await expect(result).resolves.toMatchObject({ content: "1. Lion", reason: "stop" })
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(session.status).toBe("idle")
+  })
+
+  it("takes the admission ack of a steer, then settles it with the turn its stepStart joins", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const accepted = vi.fn()
+    const turnEnds = vi.fn()
+    session.on("accepted", accepted)
+    session.on("turnEnd", turnEnds)
+
+    const first = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    socket.receive("textDelta", { text: "1. Lion ", lifecycle: { turnId: "turn-1" } })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
+
+    const steer = session.sendAndWait("Stop and say BANANA")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const steerId = idOf(socket.sent[1])
+    socket.receive("messageQueued", {
+      position: null,
+      runId: null,
+      lifecycle: { turnId: "turn-2", clientMessageId: steerId },
+    })
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: steerId } }, 2)
+    socket.receive("textDelta", { text: "BANANA", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 3)
+
+    const [firstResult, steerResult] = await Promise.all([first, steer])
+    expect(firstResult).toMatchObject({ content: "1. Lion BANANA", reason: "stop" })
+    expect(steerResult).toBe(firstResult)
+    expect(turnEnds).toHaveBeenCalledOnce()
+    expect(session.status).toBe("idle")
+  })
+
+  it("sends a stop pressed right after the admission ack, and settles the turn the box stops", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+
+    const result = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const id = idOf(socket.sent[0])
+    socket.receive("messageQueued", {
+      position: null,
+      runId: null,
+      lifecycle: { turnId: "turn-1", clientMessageId: id },
+    })
+
+    await session.cancel()
+    expect(socket.sent.map((frame) => (frame as { type: string }).type)).toEqual([
+      "message",
+      "interrupt",
+    ])
+    expect(session.status).toBe("cancelled")
+
+    // The box holds the stop until T3 gives the run an id, then stops it.
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: id } }, 1)
+    socket.receive(
+      "stepFinish",
+      { reason: "interrupted", lifecycle: { turnId: "turn-1", interruptTerminal: true } },
+      2,
+    )
+    await expect(result).resolves.toMatchObject({ reason: "interrupted" })
+    expect(errors).toEqual([])
+    expect(session.status).toBe("idle")
+  })
+
   it("does not take a messageQueued that names another message as the admission", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer())
