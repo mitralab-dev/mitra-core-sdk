@@ -1,0 +1,102 @@
+{
+  "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
+  "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
+  "note": "A steer: one terminal, under the last prompt. `turnIds` lists every prompt the turn took in, in order; the copilot closes all and records the turn under the last.",
+  "requests": [
+    {
+      "path": "/api/v1/tasks/task-1/channel-events",
+      "header": {
+        "X-Mitra-Chat-Grant": "<delivery credential>"
+      },
+      "body": {
+        "generation": 2,
+        "turnIds": ["turn-1", "turn-2"],
+        "events": [
+          {
+            "type": "stepStart",
+            "payload": {
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false,
+                "clientMessageId": "cm-1"
+              }
+            },
+            "sequence": 1,
+            "timestamp": 1760600000050
+          },
+          {
+            "type": "textChunk",
+            "payload": {
+              "text": "Once upon a time",
+              "kind": "text",
+              "lifecycle": {
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 2,
+            "timestamp": 1760600000060
+          },
+          {
+            "type": "stepStart",
+            "payload": {
+              "lifecycle": {
+                "activityId": "act-2",
+                "turnId": "turn-2",
+                "turnSequence": 2,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false,
+                "clientMessageId": "cm-2"
+              }
+            },
+            "sequence": 3,
+            "timestamp": 1760600000110
+          },
+          {
+            "type": "textChunk",
+            "payload": {
+              "text": ", the end.",
+              "kind": "text",
+              "lifecycle": {
+                "activityId": "act-2",
+                "turnId": "turn-2",
+                "turnSequence": 2,
+                "terminal": false,
+                "sessionIdle": false,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 4,
+            "timestamp": 1760600000120
+          },
+          {
+            "type": "stepFinish",
+            "payload": {
+              "reason": "stop",
+              "turnId": "run-1",
+              "lifecycle": {
+                "activityId": "act-2",
+                "turnId": "turn-2",
+                "turnSequence": 2,
+                "terminal": true,
+                "sessionIdle": true,
+                "interruptTerminal": false
+              }
+            },
+            "sequence": 5,
+            "timestamp": 1760600000130
+          }
+        ]
+      }
+    }
+  ]
+}

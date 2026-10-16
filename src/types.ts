@@ -1181,6 +1181,16 @@ export type AgentTaskInput =
   | { type: "message"; content: string; agentType?: string; reasoningEffort?: string }
   | { type: "interrupt" }
   | { type: "approval_response"; approved: boolean }
+  /**
+   * The answer to a `user_input_request` the box forwards from T3 mid-turn (a `raw` event whose
+   * payload is T3's item). Same shape as T3's own command; only the box's direct channel takes it.
+   */
+  | {
+      type: "runtime-request.respond"
+      requestId: string
+      answers: Record<string, unknown>
+      attachmentsByQuestionId?: Record<string, unknown>
+    }
 
 export interface AgentTaskEvent {
   /** Event names are open and can grow without a client release. */

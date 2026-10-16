@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0
+
+Rollout gate: this version goes into the app SDKs (`@mitralab.io/platform-sdk` and the Functions
+SDK) only once the environment has no old agent box left, that is, no box still running on the
+`experimental` fork template. An old box takes a message sent during a turn as a new turn start:
+it resets the turn's usage and identity, and nothing reports it as an error. The SDK cannot tell
+an old box from a new one, so the gate is the bump in the app SDKs, which pin this package to an
+exact version.
+
+- The agent session no longer holds messages. Every `send` and `sendAndWait` goes out at once,
+  also while a turn runs, before it reached the box, after a delivered `cancel()`, while the
+  socket redials and on the Copilot stream. The box steers it into the running turn, queues it
+  for a turn of its own, or gives it one when that turn ended, and `sendAndWait` resolves with
+  the turn that answered it.
+- On the direct channel each message carries a `clientMessageId`. The box echoes it on the
+  `stepStart` that takes it, on the `messageQueued` frame when the provider queues it (the
+  message counts as accepted then, with no admission timeout), and on the `error` that refuses
+  it, which rejects that message only and leaves the running turn alone. A box that names no
+  message keeps the old rule: the oldest one waiting is the one answered.
+- While the socket redials, and without the direct channel, a message goes to the Copilot's
+  `POST /inputs`, which holds it while the box boots. A failed send rejects and emits `error`.
+- A message sent while a turn runs keeps its `agentType` and `reasoningEffort` on the box, which
+  leaves the running turn's model alone and applies them when the message gets a turn of its
+  own. Only when it goes to the Copilot with a turn running are they dropped, because the
+  Copilot restarts the live session for another model. A refusal the Copilot answers with an
+  error status rejects that message and emits `error`.
+- At most 10 messages may wait for the box at once. One more rejects with `AgentTaskTurnError`
+  code `AGENT_MESSAGES_IN_FLIGHT_LIMIT` and emits `error`.
+- A message still waiting to go out when the session closes is rejected and not sent. The first
+  message of a task that already exists still goes out over REST after a close, as before.
+- T3's mid-turn input request reaches the app as a `raw` event of type `user_input_request`,
+  with T3's item as payload. `session.respondUserInput(requestId, answers, attachmentsByQuestionId?)`
+  sends the answer to the box as T3's own `runtime-request.respond`, on the socket or the box's
+  `POST /messages`; `AgentTaskInput` gains that variant. The turn waits for the answer without a
+  timeout of its own. An `error` the box sends with a `requestId` refuses that answer only: the
+  event is emitted and the turn and the messages waiting for the box are left alone. With the box
+  channel down, the answer is not sent and an `error` says so; the Copilot does not take it.
+- A turn whose box went away while the socket redialed (the Copilot points the chat to another
+  box, or the same address comes back with an empty log) ends as `interrupted` with the text it
+  had, so the next message opens a turn of its own. A terminal the new box sends for that turn
+  is ignored.
+- `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
+  are deprecated and kept only for compatibility: the queue is always empty, the methods do
+  nothing and the event is never emitted.
+
 ## 0.2.13
 
 - `AgentTurnUsage` gains `contextTokens` and `contextWindow`. `contextTokens` is the number of
