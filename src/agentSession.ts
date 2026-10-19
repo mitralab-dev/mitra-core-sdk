@@ -1316,9 +1316,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private applySubagent(payload: Record<string, unknown> | null): void {
     const subagentId = payload?.subagentId
     const toolId = payload?.toolId
-    const status = payload?.status
     if (typeof subagentId !== "string" || typeof toolId !== "string") return
-    if (typeof status !== "string") return
+    // T3 can report a subagent without a status; it keeps the one it had.
+    const status =
+      typeof payload?.status === "string"
+        ? payload.status
+        : this.subagentsById.get(subagentId)?.status
+    if (status === undefined) return
     const startedAt = epochOf(payload?.startedAt)
     const endedAt = epochOf(payload?.endedAt)
     const subagent: AgentSubagent = {

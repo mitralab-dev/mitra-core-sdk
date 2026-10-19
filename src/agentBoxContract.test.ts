@@ -435,6 +435,15 @@ describe("Agent box queue and subagents", () => {
       },
       3,
     )
+    // T3 can name no status on an update; the sidecar then sends it as null.
+    frame(socket, "subagentUpdate", {
+      toolId: "tool-9",
+      subagentId: "sub-1",
+      status: null,
+      progress: "Halfway",
+      childThreadId: "thread-child",
+    })
+    expect(session.subagents[0]).toMatchObject({ status: "running", progress: "Halfway" })
     frame(socket, "stepStart", { parentToolId: "tool-9", lifecycle: { turnId: "child-turn" } }, 4)
     frame(socket, "textDelta", {
       parentToolId: "tool-9",
