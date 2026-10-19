@@ -25,7 +25,8 @@ publishes.
 ## Versions
 
 - `0.3.0` is the `0.2.13` parity surface republished with the agent session that holds no
-  messages: every message goes out at once and the queue API is deprecated and always empty.
+  messages: every message goes out at once, the queue is the box's, and subagents are reported
+  apart from the chat's turn.
   Same parity cases; the version exists so a consumer pinning the package can pin a corpus with
   the same number.
 

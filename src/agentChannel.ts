@@ -200,6 +200,11 @@ function queuedAdmission(link: DirectLink, event: AgentTaskEvent): PendingAdmiss
   return link.admissions.find((pending) => pending.clientMessageId === id)
 }
 
+/** A frame of a subagent's child thread: the box marks it with the tool call that spawned it. */
+export function isSubagentFrame(event: AgentTaskEvent): boolean {
+  return typeof asObject(event.payload)?.parentToolId === "string"
+}
+
 function asObject(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -523,9 +528,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   /**
-   * Hands a message, an interrupt or an answer to a T3 input request to the box when the chat is
-   * on the direct channel and its
-   * wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
+   * Hands a message, an interrupt, a queue or subagent command, or an answer to a T3 input request
+   * to the box when the chat is on the direct channel and its wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
    * mid-redial, or an approval, which stays on REST. Mid-redial the Copilot is the durable path:
    * the box URL kept from the last channel carries a proxy ticket that lasts 60 seconds, and a
    * box that dropped the socket is often the one that went away.
@@ -665,6 +669,12 @@ export class AgentDirectChannel implements AgentTaskEventSource {
 
     const onFrame = (event: AgentTaskEvent) => {
       if (typeof event.sequence === "number" && event.sequence > cursor) cursor = event.sequence
+      // A subagent's own thread: its `stepStart` and `stepFinish` are not the chat's turn, and
+      // must neither admit a message nor end the turn the redial would resume.
+      if (isSubagentFrame(event)) {
+        observer.onEvent(event)
+        return
+      }
       const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
       if (typeof turnId === "string") link.turnId = turnId
       link.inTurn = turnAfter(event, link.inTurn)

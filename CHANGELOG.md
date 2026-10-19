@@ -13,9 +13,29 @@ exact version.
 
 - The agent session no longer holds messages. Every `send` and `sendAndWait` goes out at once,
   also while a turn runs, before it reached the box, after a delivered `cancel()`, while the
-  socket redials and on the Copilot stream. The box steers it into the running turn, queues it
-  for a turn of its own, or gives it one when that turn ended, and `sendAndWait` resolves with
-  the turn that answered it.
+  socket redials and on the Copilot stream. The queue is the box's, and `sendAndWait` resolves
+  with the turn that answered the message.
+- `send` and `sendAndWait` take `mode`, T3's follow-up behavior: `queue` (the default, as in T3)
+  puts a message sent during a turn in the box's queue for a turn of its own, `steer` sends it
+  into the running turn. The box frame always carries it; the Copilot path does not, and the box
+  applies its own default, `queue`. `AgentTaskInput` gains `mode` and the box-only commands
+  `queue.cancel`, `queue.edit`, `queue.reorder`, `queue.promote` and `subagent.stop`.
+- The queue API is real again. `session.queue` is the list the box's last `queueChange` frame
+  sent (the whole queue, on every change and on connect), and the `queueChange` event fires with
+  it. `AgentQueueItem` gains `runId`, `messageId` and `position`; `id` is the `runId`, and
+  `createdAt` is when the session first saw the item. `editQueueItem`, `removeQueueItem` and
+  `clearQueue` send T3's edit and cancel; `reorderQueueItem(id, beforeId)` and
+  `promoteQueueItem(id)` are new. They go only over the box channel and an `error` reports a
+  failure. A message of the session cancelled from it rejects with `AgentTaskTurnError` code
+  `AGENT_QUEUED_MESSAGE_CANCELLED` once it leaves the queue, one promoted resolves with the
+  running turn, and one another tab cancelled rejects with the same code when the box starts
+  another message.
+- Subagents: the `subagent` event and `session.subagents` carry `subagentId`, `toolId`, `status`,
+  `progress`, `startedAt`, `endedAt` and `childThreadId` from the box's `subagentUpdate` frame.
+  Frames of the child thread, marked with `parentToolId`, come as `subagentDelta` and
+  `subagentTool` and never touch the chat's turn: they open none, end none, admit no message and
+  stay out of `content`. `stopSubagent(subagentId)` stops one. `AgentToolEvent` gains
+  `parentToolId`; `AgentSendMode`, `AgentSubagent` and `AgentSubagentStatus` are exported.
 - On the direct channel each message carries a `clientMessageId`. The box echoes it on the
   `stepStart` that takes it, on the `messageQueued` frame when the provider queues it (the
   message counts as accepted then, with no admission timeout), and on the `error` that refuses
@@ -43,9 +63,6 @@ exact version.
   box, or the same address comes back with an empty log) ends as `interrupted` with the text it
   had, so the next message opens a turn of its own. A terminal the new box sends for that turn
   is ignored.
-- `queue`, `editQueueItem`, `removeQueueItem`, `clearQueue`, `queueChange` and `AgentQueueItem`
-  are deprecated and kept only for compatibility: the queue is always empty, the methods do
-  nothing and the event is never emitted.
 
 ## 0.2.13
 

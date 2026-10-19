@@ -194,6 +194,7 @@ describe("Agent direct channel", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -282,7 +283,12 @@ describe("Agent direct channel", () => {
     const cancelling = session.cancel()
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(socket.sent).toEqual([
-      { type: "message", content: "Long answer", clientMessageId: expect.any(String) },
+      {
+        type: "message",
+        content: "Long answer",
+        mode: "queue",
+        clientMessageId: expect.any(String),
+      },
     ])
     expect(cancelled).toEqual([])
 
@@ -323,7 +329,12 @@ describe("Agent direct channel", () => {
     await expect(result).rejects.toEqual(new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"))
     await cancelling
     expect(socket.sent).toEqual([
-      { type: "message", content: "Over quota", clientMessageId: expect.any(String) },
+      {
+        type: "message",
+        content: "Over quota",
+        mode: "queue",
+        clientMessageId: expect.any(String),
+      },
     ])
     expect(cancelled).toEqual([])
     expect(tasks.sendInput).not.toHaveBeenCalled()
@@ -861,6 +872,7 @@ describe("Agent direct channel over HTTP", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     })
@@ -2310,13 +2322,18 @@ describe("Agent direct channel steering", () => {
     )
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    session.send("Stop and say BANANA", {
+      agentType: "CODEX",
+      reasoningEffort: "low",
+      mode: "steer",
+    })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
       content: "Stop and say BANANA",
       agentType: "CODEX",
       reasoningEffort: "low",
+      mode: "steer",
       clientMessageId: expect.any(String),
     })
     session.close()
