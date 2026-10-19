@@ -363,6 +363,45 @@ describe("Agent direct channel", () => {
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
   })
 
+  it("still redials a running turn after the terminal of a message the queue cancelled", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    const idOf = (frame: unknown) => (frame as { clientMessageId?: string }).clientMessageId
+
+    const result = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    socket.receive("messageQueued", {
+      runId: "run-2",
+      lifecycle: { turnId: "turn-2", clientMessageId: "other-tab" },
+    })
+    socket.receive(
+      "stepFinish",
+      {
+        reason: "interrupted",
+        turnId: null,
+        lifecycle: { turnId: "turn-2", terminal: true, sessionIdle: true, interruptTerminal: true },
+      },
+      5,
+    )
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    const redialed = FakeWebSocket.last()
+    expect(redialed.sent).toEqual([{ type: "replay", fromSequence: 5 }])
+    redialed.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 6)
+    await expect(result).resolves.toMatchObject({ content: "1. Lion", reason: "stop" })
+  })
+
   it("redials for a steer the box had not answered when the turn ended and the socket dropped", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer(BOX_URL, 3))

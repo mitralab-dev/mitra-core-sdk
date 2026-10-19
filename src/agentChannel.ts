@@ -676,8 +676,18 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         return
       }
       const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
-      if (typeof turnId === "string") link.turnId = turnId
-      link.inTurn = turnAfter(event, link.inTurn)
+      // The terminal of a queued message the queue cancelled names that message's turn, which
+      // never ran: the turn in flight goes on. `messageQueued` names the same unstarted turn.
+      const otherTurn =
+        event.type === "stepFinish" &&
+        link.inTurn &&
+        typeof turnId === "string" &&
+        link.turnId !== undefined &&
+        turnId !== link.turnId
+      if (!otherTurn) {
+        if (typeof turnId === "string" && event.type !== "messageQueued") link.turnId = turnId
+        link.inTurn = turnAfter(event, link.inTurn)
+      }
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)

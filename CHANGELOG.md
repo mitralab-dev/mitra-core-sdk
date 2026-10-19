@@ -26,10 +26,13 @@ exact version.
   `createdAt` is when the session first saw the item. `editQueueItem`, `removeQueueItem` and
   `clearQueue` send T3's edit and cancel; `reorderQueueItem(id, beforeId)` and
   `promoteQueueItem(id)` are new. They go only over the box channel and an `error` reports a
-  failure. A message of the session cancelled from it rejects with `AgentTaskTurnError` code
-  `AGENT_QUEUED_MESSAGE_CANCELLED` once it leaves the queue, one promoted resolves with the
-  running turn, and one another tab cancelled rejects with the same code when the box starts
-  another message.
+  failure. The box's own frames settle a message that leaves the queue: a cancelled one (from
+  this session or another tab) ends as its turn's `interrupted` terminal with no `stepStart`,
+  which rejects its `sendAndWait` with `AgentTaskTurnError` code
+  `AGENT_QUEUED_MESSAGE_CANCELLED` and leaves the running turn alone, also for the redial; a
+  promoted one comes back on a `stepStart` with its `clientMessageId` and resolves with the
+  running turn; an edited one starts its turn with `turnStart` carrying `editedText`, the text
+  the box ran. `turnStart` gains that optional field.
 - Subagents: the `subagent` event and `session.subagents` carry `subagentId`, `toolId`, `status`,
   `progress`, `startedAt`, `endedAt` and `childThreadId` from the box's `subagentUpdate` frame.
   Frames of the child thread, marked with `parentToolId`, come as `subagentDelta` and
