@@ -51,10 +51,10 @@ exact version.
 - A turn whose `sendAndWait` already gave up on `timeoutMs` or `signal` is still closed from the
   history when the stream drops: the recovery no longer stops with the waiter, and the session
   does not stay `streaming` forever.
-- A message sent after `cancel()`, while the stop is unanswered, no longer steers into the turn
-  being stopped, where the stop took it too and it resolved with that turn's partial text. It
-  goes without `mode` and the box puts it in T3's queue for a turn of its own. A stopped turn the
-  session closes from the history ends as `interrupted`, not `reconciled`.
+- A stopped turn the session closes from the history ends as `interrupted`, not `reconciled`. A
+  message sent after `cancel()`, while the stop is unanswered, goes out as any other; the box
+  holds it until the stopped turn ends and gives it a turn of its own, which its `sendAndWait`
+  resolves with.
 - On the direct channel, turn frames naming a turn that arrive before the opening message's
   `stepStart` are the tail of an earlier turn (one already closed from the history) and are
   ignored, so its answer is not delivered to the next message.

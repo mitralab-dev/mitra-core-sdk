@@ -1529,7 +1529,7 @@ describe("Agent direct channel steering", () => {
     expect(deltas).toEqual(["POS-21-OK"])
   })
 
-  it("gives a message sent after a stop a turn of its own instead of steering it into the stopped turn", async () => {
+  it("answers a message sent after a stop with the turn the box opens for it after the stopped one", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)
 
@@ -1548,10 +1548,12 @@ describe("Agent direct channel steering", () => {
     const after = session.sendAndWait("POS-CX")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     expect(socket.sent[1]).toEqual({ type: "interrupt" })
-    // No `steer`: the box puts it in T3's queue, behind the turn being stopped.
+    // Sent as any message; the box holds it until the stopped turn ends and gives it a turn of
+    // its own (sidecar contract after r5 S17).
     expect(socket.sent[2]).toEqual({
       type: "message",
       content: "POS-CX",
+      mode: "steer",
       clientMessageId: expect.any(String),
     })
     socket.receive("messageQueued", {

@@ -309,13 +309,13 @@ function delay(milliseconds: number): Promise<void> {
 
 // The box puts a message with no mode in T3's queue when a turn runs; the session steers it into
 // that turn, as it always did.
-function messageInput(prompt: string, options: AgentSendOptions, steer = true): AgentTaskInput {
+function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    ...(steer ? { mode: "steer" as const } : {}),
+    mode: "steer",
   }
 }
 
@@ -763,16 +763,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(waiter ? { waiter } : {}),
       taken: false,
     }
-    // After a stop the running turn is going away: steered into it, the message was stopped with
-    // it and answered by its partial text (r5 S17, dev 2026-10-19). Without a mode the box puts it
-    // in T3's queue, behind the stopped turn, and it gets a turn of its own.
-    const afterStop = this._status === "cancelled"
-    if (!afterStop && (this.dispatching || this._status === "streaming")) {
+    if (this.dispatching || this._status === "streaming" || this._status === "cancelled") {
       this.steers.push(steered)
     } else {
       this.strayedSteers.push(steered)
     }
-    const input = messageInput(prompt, options, !afterStop)
+    const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
       // `close()` already rejected it as not sent; going out now would run what the caller was
