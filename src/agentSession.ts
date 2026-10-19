@@ -78,18 +78,9 @@ export interface ExistingAgentTaskSessionOptions {
 
 export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgentTaskSessionOptions
 
-/** T3's follow-up behavior for a message sent while a turn runs. */
-export type AgentSendMode = "queue" | "steer"
-
 export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
-  /**
-   * What the box does with the message when a turn is running: `queue` (the default, as in T3)
-   * puts it in the box's queue for a turn of its own, `steer` sends it into the running turn.
-   * With no turn running the message starts one either way.
-   */
-  mode?: AgentSendMode
 }
 
 export interface AgentSendAndWaitOptions extends AgentSendOptions {
@@ -100,21 +91,11 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
-/** A message waiting in the box's queue for a turn of its own: one of T3's queued runs. */
-export interface AgentQueueItem {
-  /** The queued run, which the queue methods take. The same value as `runId`. */
+/** @deprecated Messages are no longer held by the session; the queue is always empty. */
+export interface AgentQueueItem extends AgentSendOptions {
   id: string
-  runId: string
-  /** T3's id for the queued user message. */
-  messageId: string
   text: string
-  /** The place the box gives it; the list is sorted by it. */
-  position: number
-  /** When this session first saw the item in the queue, in epoch milliseconds. */
   createdAt: number
-  /** Only on a message this session sent with one. */
-  agentType?: string
-  reasoningEffort?: string
 }
 
 /** T3's subagent statuses; a status this version does not know comes through as it was sent. */
@@ -171,12 +152,6 @@ export interface AgentTaskSessionEventMap {
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
   turnStart: Record<string, never>
-  /**
-   * A queued message of this session was edited after it was sent and its turn starts now:
-   * `text` is what the box ran, which the app shows in place of what was sent. Comes right
-   * before that turn's `turnStart`.
-   */
-  messageEdited: { text: string }
   delta: { delta: string; kind: "text" | "thinking" }
   tool: AgentToolEvent
   workspace: { payload: unknown; timestamp: number }
@@ -188,7 +163,7 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
-  /** The box's queue changed, or the box listed it on connect; `queue` is the whole list. */
+  /** @deprecated Never emitted: every message is sent at once, so there is no queue to change. */
   queueChange: { queue: readonly AgentQueueItem[] }
   /** A subagent's status, progress or child thread changed. */
   subagent: AgentSubagent
@@ -220,7 +195,7 @@ export interface AgentTaskSession {
   readonly status: AgentTaskSessionStatus
   readonly history: readonly AgentTimelineItem[]
   readonly content: string
-  /** The box's queue, as its last `queueChange` listed it. */
+  /** @deprecated Always empty: a message sent while a turn runs goes to the box at once. */
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
@@ -235,16 +210,12 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
-  /** Replaces the text of a queued message (T3's `queued-run.edit`). */
+  /** @deprecated No effect: the queue is always empty. */
   editQueueItem(id: string, text: string): void
-  /** Takes a message out of the queue (T3's `queued-run.cancel`); its `sendAndWait` rejects. */
+  /** @deprecated No effect: the queue is always empty. */
   removeQueueItem(id: string): void
-  /** Takes every listed message out of the queue. */
+  /** @deprecated No effect: the queue is always empty. */
   clearQueue(): void
-  /** Moves a queued message before another one, or to the end with `null` (T3's `queued-run.reorder`). */
-  reorderQueueItem(id: string, beforeId: string | null): void
-  /** Sends a queued message into the running turn (T3's `queued-message.promote-to-steer`). */
-  promoteQueueItem(id: string): void
   /** Stops one subagent and leaves the turn running (T3's `subagent.stop`). */
   stopSubagent(subagentId: string): void
   on<K extends keyof AgentTaskSessionEventMap>(
@@ -279,14 +250,9 @@ interface SteeredMessage {
   /** The id the message goes out with; the box echoes it on the `stepStart` that takes it. */
   clientMessageId: string
   waiter?: TurnWaiter
-  options?: AgentSendOptions
   taken: boolean
   /** The box put it in the provider's queue: accepted, answered by a turn of its own. */
   queued?: boolean
-  /** The queued run the box named in `messageQueued`, which its `queueChange` lists. */
-  runId?: string
-  /** The turn the box gave it in `messageQueued`; a queue cancel closes that turn unstarted. */
-  turnId?: string
   /** The refusal the box sent naming this message, which its waiter rejects with. */
   refusal?: AgentTaskTurnError
 }
@@ -328,13 +294,15 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
+// The box puts a message with no mode in T3's queue when a turn runs; the session steers it into
+// that turn, as it always did.
 function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: options.mode ?? "queue",
+    mode: "steer",
   }
 }
 
@@ -482,13 +450,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // before it was, not after it was answered.
   private handOff: Promise<void> = Promise.resolve()
   private activeWaiter: TurnWaiter | undefined
-  // Waiters only: every message is already on its way to the box. Each one sits in exactly one of
-  // the two lists until it is settled or forgotten: `steers` while the turn it was sent into runs
-  // (taken ones settle with that turn), `strayedSteers` once it waits for a turn of its own (in
-  // T3's queue, or not taken when its turn ended). A non-empty `strayedSteers` keeps the session
-  // busy, so a new message is matched to the turn the box opens for it by its id, instead of
-  // opening a local turn that the queued message's answer would settle. `pendingSteers` counts
-  // the ones the box has not answered yet, wherever they sit.
+  // Every steer sits in exactly one of the two lists until it is settled or forgotten: `steers`
+  // while the turn it was sent into runs (taken ones settle with that turn), `strayedSteers` once
+  // it waits for a turn of its own (sent with no turn, not taken when its turn ended, or queued by
+  // the provider). A non-empty `strayedSteers` keeps the session busy, which is what stops a new
+  // message from opening a turn the steer's answer would settle. `pendingSteers` counts the ones
+  // the box has not answered yet, wherever they sit.
   private steers: SteeredMessage[] = []
   private strayedSteers: SteeredMessage[] = []
   private pendingSteers = 0
@@ -496,8 +463,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // that turn and one naming a steer does not.
   private openingMessageId: string | undefined
   private turnBaselineIds = new Set<string>()
-  private _queue: AgentQueueItem[] = []
-  private turnIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
 
   constructor(
@@ -538,7 +503,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get queue(): readonly AgentQueueItem[] {
-    return [...this._queue]
+    return []
   }
 
   get subagents(): readonly AgentSubagent[] {
@@ -563,7 +528,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const sendOptions: AgentSendOptions = {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-      ...(options.mode ? { mode: options.mode } : {}),
     }
     if (this.isBusy()) {
       this.steer(prompt, sendOptions, waiter)
@@ -637,32 +601,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return history
   }
 
-  editQueueItem(id: string, text: string): void {
-    if (!text.trim()) return
-    this.sendBoxCommand({ type: "queue.edit", runId: id, text }, "edit the queued Agent message")
-  }
+  editQueueItem(): void {}
 
-  removeQueueItem(id: string): void {
-    this.sendBoxCommand({ type: "queue.cancel", runId: id }, "cancel the queued Agent message")
-  }
+  removeQueueItem(): void {}
 
-  clearQueue(): void {
-    for (const item of this._queue) this.removeQueueItem(item.id)
-  }
-
-  reorderQueueItem(id: string, beforeId: string | null): void {
-    this.sendBoxCommand(
-      { type: "queue.reorder", runId: id, beforeRunId: beforeId },
-      "reorder the Agent queue",
-    )
-  }
-
-  promoteQueueItem(id: string): void {
-    this.sendBoxCommand({ type: "queue.promote", runId: id }, "steer the queued Agent message")
-  }
+  clearQueue(): void {}
 
   stopSubagent(subagentId: string): void {
-    this.sendBoxCommand({ type: "subagent.stop", subagentId }, "stop the Agent subagent")
+    this.requireOpen()
+    void this.sendInput({ type: "subagent.stop", subagentId }).catch((error: unknown) => {
+      this.emitError("Failed to stop the Agent subagent", error)
+    })
   }
 
   on<K extends keyof AgentTaskSessionEventMap>(
@@ -779,9 +728,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return true
   }
 
-  // A message sent while a turn runs, or is being opened, goes out at once with its mode: the box
-  // queues it for a turn of its own (`queue`), takes it into that turn (`steer`, the provider's
-  // own steering), or gives it a turn when that one already ended. Nothing waits in this session. On the direct channel it goes with an
+  // A message sent while a turn runs, or is being opened, goes out at once: the box takes it into
+  // that turn (the provider's own steering), queues it for a turn of its own, or gives it one when
+  // that turn already ended. Nothing waits in this session. On the direct channel it goes with an
   // id the box echoes on the frame that takes it; without the channel, over REST to the Copilot,
   // which holds it while the box boots.
   //
@@ -793,7 +742,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
-      options,
       taken: false,
     }
     if (this.dispatching || this._status === "streaming" || this._status === "cancelled") {
@@ -849,49 +797,25 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.openTurnFor(steered.waiter)
   }
 
-  private steerOpenedBy(payload: Record<string, unknown> | null): void {
-    const id = asObject(payload?.lifecycle)?.clientMessageId
+  private steerOpenedBy(lifecycle: Record<string, unknown> | null): void {
+    const id = lifecycle?.clientMessageId
     if (typeof id !== "string") return
     const steered = [...this.steers, ...this.strayedSteers].find(
       (pending) => pending.clientMessageId === id,
     )
-    if (!steered) return
-    if (!steered.taken && typeof payload?.editedText === "string") {
-      this.emit("messageEdited", { text: payload.editedText })
-    }
-    this.steerTaken(steered)
-  }
-
-  // A queue cancel, from this session or another tab, closes the message's turn as interrupted
-  // with no `stepStart`. That ends the message, never the turn running now.
-  private queuedTurnClosed(turnId: string): boolean {
-    const steered = this.strayedSteers.find(
-      (pending) => pending.turnId === turnId && !pending.taken,
-    )
-    if (!steered) return false
-    this.forgetSteer(steered)
-    steered.waiter?.reject(
-      new AgentTaskTurnError(
-        "The queued Agent message was cancelled.",
-        "AGENT_QUEUED_MESSAGE_CANCELLED",
-      ),
-    )
-    return true
+    if (steered) this.steerTaken(steered)
   }
 
   // Queued behind the running turn, the message is answered by the turn the box opens for it
   // later, not by this one.
-  private steerQueuedBy(payload: Record<string, unknown> | null): void {
-    const id = asObject(payload?.lifecycle)?.clientMessageId
+  private steerQueuedBy(lifecycle: Record<string, unknown> | null): void {
+    const id = lifecycle?.clientMessageId
     if (typeof id !== "string") return
     const steered = [...this.steers, ...this.strayedSteers].find(
       (pending) => pending.clientMessageId === id,
     )
     if (!steered || steered.taken) return
     steered.queued = true
-    if (typeof payload?.runId === "string") steered.runId = payload.runId
-    const turnId = asObject(payload?.lifecycle)?.turnId
-    if (typeof turnId === "string") steered.turnId = turnId
     if (!this.steers.includes(steered)) return
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers.push(steered)
@@ -1090,7 +1014,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) throw new Error("Agent task has not been created.")
     const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return { admitted: direct }
-    // Only the box knows T3's input requests, queue and subagents; the Copilot would refuse them.
+    // Only the box knows T3's input requests and subagents; the Copilot would refuse the type.
     if (input.type === "runtime-request.respond") {
       throw new Error(
         "The answer to the Agent input request was not sent: the box channel is not connected right now.",
@@ -1102,7 +1026,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`: the box it hands the message to applies its default, `queue`.
+    // The Copilot takes no `mode`.
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
@@ -1147,24 +1071,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "toolCall":
         this.emitTool(payload, "call", event.timestamp)
-        this.noteTurnId(payload)
         break
       case "toolResult":
         this.emitTool(payload, "result", event.timestamp)
-        this.noteTurnId(payload)
         break
       case "workspace":
         this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
         break
       case "stepStart":
-        this.steerOpenedBy(payload)
-        this.noteTurnId(payload)
+        this.steerOpenedBy(asObject(payload?.lifecycle))
         break
       case "messageQueued":
-        this.steerQueuedBy(payload)
-        break
-      case "queueChange":
-        this.applyQueue(payload?.queue)
+        this.steerQueuedBy(asObject(payload?.lifecycle))
         break
       case "subagentUpdate":
         this.applySubagent(payload)
@@ -1182,15 +1100,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // must not end the turn running now.
         const finished = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : undefined
         if (finished !== undefined && this.finishedTurnIds.includes(finished)) break
-        if (finished !== undefined && this.queuedTurnClosed(finished)) {
-          this.rememberFinishedTurn(lifecycle)
-          break
-        }
-        // A turn this one never named, such as a message another tab cancelled in the queue.
-        if (finished !== undefined && this.turnIds.size > 0 && !this.turnIds.has(finished)) {
-          this.rememberFinishedTurn(lifecycle)
-          break
-        }
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
@@ -1268,7 +1177,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.setStatus("streaming")
       this.emit("turnStart", {})
     }
-    if (turnId) this.turnIds.add(turnId)
     if (kind === "text") this._content += text
     this.emit("delta", { delta: text, kind })
   }
@@ -1332,57 +1240,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
     this.subagentsById.set(subagentId, subagent)
     this.emit("subagent", subagent)
-  }
-
-  // The box sends the whole queue on every change and on connect. A message leaving it is settled
-  // by its own frames, not here: the `stepStart` of its turn or of the promote, or the
-  // interrupted `stepFinish` of a cancel.
-  private applyQueue(list: unknown): void {
-    if (!Array.isArray(list)) return
-    const seenAt = new Map(this._queue.map((item) => [item.runId, item.createdAt]))
-    const now = Date.now()
-    const queue: AgentQueueItem[] = []
-    for (const [index, entry] of list.entries()) {
-      const item = asObject(entry)
-      const runId = item?.runId
-      const messageId = item?.messageId
-      const text = item?.text
-      if (typeof runId !== "string" || typeof messageId !== "string") continue
-      if (typeof text !== "string") continue
-      const sent = [...this.steers, ...this.strayedSteers].find(
-        (pending) => pending.runId === runId,
-      )?.options
-      queue.push({
-        id: runId,
-        runId,
-        messageId,
-        text,
-        position: typeof item?.position === "number" ? item.position : index,
-        createdAt: seenAt.get(runId) ?? now,
-        ...(sent?.agentType ? { agentType: sent.agentType } : {}),
-        ...(sent?.reasoningEffort ? { reasoningEffort: sent.reasoningEffort } : {}),
-      })
-    }
-    queue.sort((left, right) => left.position - right.position)
-    this._queue = queue
-    this.emit("queueChange", { queue: this.queue })
-  }
-
-  // Queue and subagent commands go to the box only; a failure is an `error` event, as for the
-  // other answers the app gives mid-turn.
-  private sendBoxCommand(input: AgentTaskInput, action: string): void {
-    this.requireOpen()
-    void this.sendInput(input).catch((error: unknown) => {
-      this.emitError(`Failed to ${action}`, error)
-    })
-  }
-
-  // The turns the running one went by: a steer gives it the steer's turn id, and its terminal may
-  // name any of them.
-  private noteTurnId(payload: Record<string, unknown> | null): void {
-    if (this._status !== "streaming" && this._status !== "cancelled") return
-    const turnId = asObject(payload?.lifecycle)?.turnId
-    if (typeof turnId === "string") this.turnIds.add(turnId)
   }
 
   private finishTurn(reason: string, usage?: AgentTurnUsage): void {
@@ -1489,7 +1346,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private setStatus(status: AgentTaskSessionStatus): void {
     if (this._status === status) return
-    if (status !== "streaming" && status !== "cancelled") this.turnIds.clear()
     this._status = status
     this.emit("statusChange", { status })
   }

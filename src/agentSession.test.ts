@@ -392,7 +392,7 @@ describe("Agent task session", () => {
     ])
   })
 
-  it("sends every message at once to the Copilot and keeps queue commands off it", async () => {
+  it("keeps the queue API as an empty no-op and sends every message at once", async () => {
     vi.useFakeTimers()
     try {
       const { session, source, tasks } = createSession()
@@ -411,19 +411,19 @@ describe("Agent task session", () => {
       )
       expect(errors).toEqual([])
       expect(session.queue).toEqual([])
-      // Only the box has a queue and subagents: without its channel nothing goes out.
       session.editQueueItem("q-1", "edited")
       session.removeQueueItem("q-1")
-      session.reorderQueueItem("q-1", null)
-      session.promoteQueueItem("q-1")
-      session.stopSubagent("sub-1")
-      await vi.waitFor(() => expect(errors).toHaveLength(5))
-      expect(errors[0]).toBe(
-        "Failed to edit the queued Agent message: The Agent queue.edit was not sent: the box channel is not connected right now.",
-      )
-      expect(tasks.sendInput).toHaveBeenCalledTimes(21)
+      session.clearQueue()
       expect(session.queue).toEqual([])
       expect(queueChanges).not.toHaveBeenCalled()
+      // Only the box has subagents: without its channel nothing goes out.
+      session.stopSubagent("sub-1")
+      await vi.waitFor(() =>
+        expect(errors).toEqual([
+          "Failed to stop the Agent subagent: The Agent subagent.stop was not sent: the box channel is not connected right now.",
+        ]),
+      )
+      expect(tasks.sendInput).toHaveBeenCalledTimes(21)
 
       session.respondApproval(true)
       await vi.waitFor(() =>

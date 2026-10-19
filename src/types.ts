@@ -1184,11 +1184,10 @@ export type AgentTaskInput =
       agentType?: string
       reasoningEffort?: string
       /**
-       * What the box does with a message sent while a turn runs: `queue` waits for a turn of its
-       * own, `steer` goes into the running turn. The box defaults to `queue`; the Copilot does not
-       * take the field.
+       * `steer` takes the message into the running turn; a box given none puts it in T3's queue.
+       * The session always sends `steer`. The Copilot does not take the field.
        */
-      mode?: "queue" | "steer"
+      mode?: "steer"
     }
   | { type: "interrupt" }
   | { type: "approval_response"; approved: boolean }
@@ -1202,11 +1201,7 @@ export type AgentTaskInput =
       answers: Record<string, unknown>
       attachmentsByQuestionId?: Record<string, unknown>
     }
-  /** The box's queue and subagents, named after T3's own commands; only the box channel takes them. */
-  | { type: "queue.cancel"; runId: string }
-  | { type: "queue.edit"; runId: string; text: string }
-  | { type: "queue.reorder"; runId: string; beforeRunId: string | null }
-  | { type: "queue.promote"; runId: string }
+  /** Stops one subagent, as T3's own `subagent.stop`; only the box channel takes it. */
   | { type: "subagent.stop"; subagentId: string }
 
 export interface AgentTaskEvent {

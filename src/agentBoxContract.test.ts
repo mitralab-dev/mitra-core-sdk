@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { AgentWebSocketConstructor } from "./agentChannel"
-import { AgentTaskTurnError, createAgentTaskSessionManager } from "./agentSession"
+import { createAgentTaskSessionManager } from "./agentSession"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentTask, Page } from "./types"
 
@@ -84,7 +84,7 @@ const EMPTY: Page<never> = {
   page: { size: 0, totalElements: 0, totalPages: 0, number: 0 },
 }
 
-function openSession(existing = false) {
+function openSession() {
   const tasks = {
     list: vi.fn(async () => EMPTY),
     get: vi.fn(async () => TASK),
@@ -106,9 +106,7 @@ function openSession(existing = false) {
       WebSocket: BoxSocket as unknown as AgentWebSocketConstructor,
     },
   })
-  const session = existing
-    ? manager.session({ taskId: TASK.id })
-    : manager.session({ create: true, agentType: "CLAUDE", agentId: "agent-1" })
+  const session = manager.session({ create: true, agentType: "CLAUDE", agentId: "agent-1" })
   return { session, tasks }
 }
 
@@ -154,7 +152,7 @@ describe("Agent box contract fixtures", () => {
     socket.play(frames.slice(0, 2))
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    const steer = session.sendAndWait("Make it short", { mode: "steer" })
+    const steer = session.sendAndWait("Make it short")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     socket.play(frames.slice(2))
 
@@ -165,8 +163,7 @@ describe("Agent box contract fixtures", () => {
     expect(turnEnds).toHaveBeenCalledOnce()
   })
 })
-
-// Frames as the sidecar sends them for T3's queue and subagents (mitra-sandbox feat/agent-box,
+// Frames as the sidecar sends them for T3's subagents (mitra-sandbox feat/agent-box,
 // template/agent-box-sidecar).
 function frame(
   socket: BoxSocket,
@@ -198,130 +195,19 @@ async function runningTurn() {
   return { ...opened, first, socket }
 }
 
-describe("Agent box queue and subagents", () => {
-  it("queues a message sent during a turn by default and answers it with a turn of its own", async () => {
+describe("Agent box late steer", () => {
+  it("answers a message sent while a late steer waits for its turn with its own turn", async () => {
     const { session, first, socket } = await runningTurn()
-    const queues: unknown[] = []
-    session.on("queueChange", ({ queue }) => queues.push(queue))
-
-    const queued = session.sendAndWait("Now say MANGO", { reasoningEffort: "low" })
+    const late = session.sendAndWait("Also say MANGO")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
-    expect(socket.sent[1]).toEqual({
-      type: "message",
-      content: "Now say MANGO",
-      reasoningEffort: "low",
-      mode: "queue",
-      clientMessageId: expect.any(String),
-    })
-    frame(socket, "messageQueued", {
-      position: 0,
-      runId: "run-2",
-      lifecycle: { clientMessageId: idOf(socket.sent[1]) },
-    })
-    frame(socket, "queueChange", {
-      queue: [{ runId: "run-2", messageId: "msg-2", text: "Now say MANGO", position: 0 }],
-    })
-    expect(session.queue).toEqual([
-      {
-        id: "run-2",
-        runId: "run-2",
-        messageId: "msg-2",
-        text: "Now say MANGO",
-        position: 0,
-        createdAt: expect.any(Number),
-        reasoningEffort: "low",
-      },
-    ])
-
-    frame(socket, "textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
-    await expect(first).resolves.toMatchObject({ content: "1. Lion" })
-
-    frame(socket, "queueChange", { queue: [] })
-    frame(
-      socket,
-      "stepStart",
-      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
-      3,
-    )
-    frame(socket, "textDelta", { text: "MANGO", lifecycle: { turnId: "turn-2" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
-    await expect(queued).resolves.toMatchObject({ content: "MANGO", reason: "stop" })
-    expect(queues).toHaveLength(2)
-    expect(session.queue).toEqual([])
-  })
-
-  it("lists the queue the box sends on connect and sends T3's queue commands", async () => {
-    const { session } = openSession(true)
-    await vi.waitFor(() => expect(BoxSocket.instances).toHaveLength(1))
-    const socket = BoxSocket.instances[0]!
-    frame(socket, "queueChange", {
-      queue: [
-        { runId: "run-b", messageId: "msg-b", text: "second", position: 1 },
-        { runId: "run-a", messageId: "msg-a", text: "first", position: 0 },
-      ],
-    })
-    expect(session.queue.map((item) => item.id)).toEqual(["run-a", "run-b"])
-    await vi.waitFor(() => expect(session.status).toBe("idle"))
-
-    session.editQueueItem("run-a", "first, edited")
-    session.editQueueItem("run-a", "   ")
-    session.reorderQueueItem("run-b", "run-a")
-    session.reorderQueueItem("run-a", null)
-    session.promoteQueueItem("run-a")
-    session.removeQueueItem("run-b")
-    session.stopSubagent("sub-1")
-    session.clearQueue()
-    expect(socket.sent).toEqual([
-      { type: "queue.edit", runId: "run-a", text: "first, edited" },
-      { type: "queue.reorder", runId: "run-b", beforeRunId: "run-a" },
-      { type: "queue.reorder", runId: "run-a", beforeRunId: null },
-      { type: "queue.promote", runId: "run-a" },
-      { type: "queue.cancel", runId: "run-b" },
-      { type: "subagent.stop", subagentId: "sub-1" },
-      { type: "queue.cancel", runId: "run-a" },
-      { type: "queue.cancel", runId: "run-b" },
-    ])
-  })
-
-  // The sidecar closes a message the queue cancelled as its turn's interrupted terminal, with no
-  // `stepStart`, as it does for a stop pressed before a turn ran.
-  function cancelledTerminal(turnId: string) {
-    return {
-      reason: "interrupted",
-      turnId: null,
-      lifecycle: { turnId, terminal: true, sessionIdle: true, interruptTerminal: true },
-    }
-  }
-
-  async function queuedMessage(text: string) {
-    const running = await runningTurn()
-    const queued = running.session.sendAndWait(text)
-    await vi.waitFor(() => expect(running.socket.sent).toHaveLength(2))
-    frame(running.socket, "messageQueued", {
-      position: 0,
-      runId: "run-2",
-      lifecycle: { turnId: "turn-2", clientMessageId: idOf(running.socket.sent[1]) },
-    })
-    frame(running.socket, "queueChange", {
-      queue: [{ runId: "run-2", messageId: "msg-2", text, position: 0 }],
-    })
-    return { ...running, queued }
-  }
-
-  it("answers a message sent while a queued one waits for its turn with its own turn, not that one", async () => {
-    const { session, first, socket, queued } = await queuedMessage("Say MANGO")
+    expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
+    // The turn ends before the provider takes the steer: the box gives it a turn of its own.
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
     await first
     expect(session.status).toBe("idle")
 
-    // T3 starts the queued message next; this one goes to its queue behind it.
-    const later = session.sendAndWait("Say KIWI")
+    const next = session.sendAndWait("Say KIWI")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
-    frame(socket, "messageQueued", {
-      runId: "run-3",
-      lifecycle: { turnId: "turn-3", clientMessageId: idOf(socket.sent[2]) },
-    })
     frame(
       socket,
       "stepStart",
@@ -330,7 +216,7 @@ describe("Agent box queue and subagents", () => {
     )
     frame(socket, "textDelta", { text: "MANGO", lifecycle: { turnId: "turn-2" } })
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
-    await expect(queued).resolves.toMatchObject({ content: "MANGO" })
+    await expect(late).resolves.toMatchObject({ content: "MANGO" })
 
     frame(
       socket,
@@ -340,94 +226,11 @@ describe("Agent box queue and subagents", () => {
     )
     frame(socket, "textDelta", { text: "KIWI", lifecycle: { turnId: "turn-3" } })
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-3" } }, 6)
-    await expect(later).resolves.toMatchObject({ content: "KIWI" })
+    await expect(next).resolves.toMatchObject({ content: "KIWI" })
   })
+})
 
-  it("rejects a queued message the queue cancelled and leaves the running turn alone", async () => {
-    const { session, first, socket, queued } = await queuedMessage("Now say MANGO")
-
-    session.removeQueueItem("run-2")
-    expect(socket.sent[2]).toEqual({ type: "queue.cancel", runId: "run-2" })
-    frame(socket, "queueChange", { queue: [] })
-    frame(socket, "stepFinish", cancelledTerminal("turn-2"), 2)
-    await expect(queued).rejects.toEqual(
-      new AgentTaskTurnError(
-        "The queued Agent message was cancelled.",
-        "AGENT_QUEUED_MESSAGE_CANCELLED",
-      ),
-    )
-    expect(session.status).toBe("streaming")
-
-    frame(socket, "textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
-    await expect(first).resolves.toMatchObject({ content: "1. Lion", reason: "stop" })
-  })
-
-  it("does not end the running turn on the terminal of a message another tab cancelled", async () => {
-    const { session, first, socket } = await runningTurn()
-    const turnEnds = vi.fn()
-    session.on("turnEnd", turnEnds)
-
-    frame(socket, "stepFinish", cancelledTerminal("turn-other-tab"), 2)
-    expect(turnEnds).not.toHaveBeenCalled()
-    expect(session.status).toBe("streaming")
-
-    frame(socket, "textDelta", { text: "Still here", lifecycle: { turnId: "turn-1" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
-    await expect(first).resolves.toMatchObject({ content: "Still here" })
-  })
-
-  it("answers a promoted message with the running turn", async () => {
-    const { session, first, socket, queued } = await queuedMessage("Also count birds")
-
-    session.promoteQueueItem("run-2")
-    expect(socket.sent[2]).toEqual({ type: "queue.promote", runId: "run-2" })
-    frame(socket, "queueChange", { queue: [] })
-    frame(
-      socket,
-      "stepStart",
-      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
-      2,
-    )
-    frame(socket, "textDelta", { text: "Lions and birds", lifecycle: { turnId: "turn-2" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 3)
-    const [firstResult, promotedResult] = await Promise.all([first, queued])
-    expect(promotedResult).toBe(firstResult)
-    expect(firstResult.content).toBe("Lions and birds")
-    expect(session.status).toBe("idle")
-  })
-
-  it("starts an edited queued message with the text the box ran", async () => {
-    const { session, first, socket, queued } = await queuedMessage("Say MANGO")
-    const seen: string[] = []
-    session.on("messageEdited", ({ text }) => seen.push(`edited:${text}`))
-    session.on("turnStart", () => seen.push("turnStart"))
-
-    session.editQueueItem("run-2", "Say PAPAYA")
-    expect(socket.sent[2]).toEqual({ type: "queue.edit", runId: "run-2", text: "Say PAPAYA" })
-    frame(socket, "queueChange", {
-      queue: [{ runId: "run-2", messageId: "msg-2", text: "Say PAPAYA", position: 0 }],
-    })
-    expect(session.queue[0]?.text).toBe("Say PAPAYA")
-
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
-    await first
-    frame(socket, "queueChange", { queue: [] })
-    frame(
-      socket,
-      "stepStart",
-      {
-        editedText: "Say PAPAYA",
-        lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) },
-      },
-      3,
-    )
-    frame(socket, "textDelta", { text: "PAPAYA", lifecycle: { turnId: "turn-2" } })
-    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
-    await expect(queued).resolves.toMatchObject({ content: "PAPAYA" })
-    expect(seen).toEqual(["edited:Say PAPAYA", "turnStart"])
-  })
-
+describe("Agent box subagents", () => {
   it("reports a subagent and its own thread apart from the chat's turn", async () => {
     const { session, first, socket } = await runningTurn()
     const updates: unknown[] = []

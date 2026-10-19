@@ -528,8 +528,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   /**
-   * Hands a message, an interrupt, a queue or subagent command, or an answer to a T3 input request
-   * to the box when the chat is on the direct channel and its wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
+   * Hands a message, an interrupt, a subagent stop or an answer to a T3 input request to the box
+   * when the chat is on the direct channel and its wire is up right now. Null sends the caller to REST: no direct channel, a wire lost or
    * mid-redial, or an approval, which stays on REST. Mid-redial the Copilot is the durable path:
    * the box URL kept from the last channel carries a proxy ticket that lasts 60 seconds, and a
    * box that dropped the socket is often the one that went away.
@@ -676,18 +676,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         return
       }
       const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
-      // The terminal of a queued message the queue cancelled names that message's turn, which
-      // never ran: the turn in flight goes on. `messageQueued` names the same unstarted turn.
-      const otherTurn =
-        event.type === "stepFinish" &&
-        link.inTurn &&
-        typeof turnId === "string" &&
-        link.turnId !== undefined &&
-        turnId !== link.turnId
-      if (!otherTurn) {
-        if (typeof turnId === "string" && event.type !== "messageQueued") link.turnId = turnId
-        link.inTurn = turnAfter(event, link.inTurn)
-      }
+      if (typeof turnId === "string") link.turnId = turnId
+      link.inTurn = turnAfter(event, link.inTurn)
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)

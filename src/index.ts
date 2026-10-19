@@ -10,7 +10,6 @@ export type {
   AgentProviderUsage,
   AgentQueueItem,
   AgentSendAndWaitOptions,
-  AgentSendMode,
   AgentSendOptions,
   AgentSessionTransport,
   AgentTaskEventConnection,
