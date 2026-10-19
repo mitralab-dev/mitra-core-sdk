@@ -88,9 +88,9 @@ export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
   /**
-   * What the box does with the message when a turn is running: `queue` (the default, as in T3)
-   * puts it in the box's queue for a turn of its own, `steer` sends it into the running turn.
-   * With no turn running the message starts one either way.
+   * What the box does with the message when a turn is running: `steer` (the default) sends it
+   * into the running turn, `queue` puts it in the box's queue for a turn of its own, which the
+   * queue methods act on. With no turn running the message starts one either way.
    */
   mode?: AgentSendMode
 }
@@ -173,11 +173,13 @@ export interface AgentTaskSessionEventMap {
   statusChange: { status: AgentTaskSessionStatus }
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
+  turnStart: Record<string, never>
   /**
-   * A turn began. `editedText` comes when it is a queued message edited after it was sent: the
-   * text the box ran, which the app shows in place of the one sent.
+   * A queued message of this session was edited after it was sent and its turn starts now:
+   * `text` is what the box ran, which the app shows in place of what was sent. Comes right
+   * before that turn's `turnStart`.
    */
-  turnStart: { editedText?: string }
+  messageEdited: { text: string }
   delta: { delta: string; kind: "text" | "thinking" }
   tool: AgentToolEvent
   workspace: { payload: unknown; timestamp: number }
@@ -335,7 +337,7 @@ function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: options.mode ?? "queue",
+    mode: options.mode ?? "steer",
   }
 }
 
@@ -850,12 +852,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // The box took the steer. Into the turn it was sent to, when that turn still runs; into a turn
   // of its own, when that one ended before the box got to the message.
-  private steerTaken(steered: SteeredMessage, editedText?: string): void {
+  private steerTaken(steered: SteeredMessage): void {
     if (steered.taken) return
     steered.taken = true
     if (!this.strayedSteers.includes(steered)) return
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
-    this.openTurnFor(steered.waiter, editedText)
+    this.openTurnFor(steered.waiter)
   }
 
   private steerOpenedBy(payload: Record<string, unknown> | null): void {
@@ -864,8 +866,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const steered = [...this.steers, ...this.strayedSteers].find(
       (pending) => pending.clientMessageId === id,
     )
-    const edited = typeof payload?.editedText === "string" ? payload.editedText : undefined
-    if (steered) this.steerTaken(steered, edited)
+    if (!steered) return
+    if (!steered.taken && typeof payload?.editedText === "string") {
+      this.emit("messageEdited", { text: payload.editedText })
+    }
+    this.steerTaken(steered)
   }
 
   // A queue cancel, from this session or another tab, closes the message's turn as interrupted
@@ -919,7 +924,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private openTurnFor(waiter?: TurnWaiter, editedText?: string): void {
+  private openTurnFor(waiter?: TurnWaiter): void {
     if (this.isClosed()) return
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this._content = ""
@@ -932,7 +937,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.turnBaselineIds = new Set(this._history.map((item) => item.id))
       void this.captureTurnBaseline().catch(() => undefined)
       this.setStatus("streaming")
-      this.emit("turnStart", editedText === undefined ? {} : { editedText })
+      this.emit("turnStart", {})
     }
     if (!waiter) return
     if (!this.activeWaiter) this.activeWaiter = waiter
@@ -1108,7 +1113,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`: the box it hands the message to applies its default, `queue`.
+    // The Copilot takes no `mode`: the box it hands the message to applies its default, `steer`.
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input

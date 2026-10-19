@@ -15,10 +15,10 @@ exact version.
   also while a turn runs, before it reached the box, after a delivered `cancel()`, while the
   socket redials and on the Copilot stream. The queue is the box's, and `sendAndWait` resolves
   with the turn that answered the message.
-- `send` and `sendAndWait` take `mode`, T3's follow-up behavior: `queue` (the default, as in T3)
-  puts a message sent during a turn in the box's queue for a turn of its own, `steer` sends it
-  into the running turn. The box frame always carries it; the Copilot path does not, and the box
-  applies its own default, `queue`. `AgentTaskInput` gains `mode` and the box-only commands
+- `send` and `sendAndWait` take `mode`, T3's follow-up behavior: `steer` (the default) sends a
+  message sent during a turn into the running turn, `queue` puts it in the box's queue for a
+  turn of its own, where the queue methods act on it. The box frame always carries it; the
+  Copilot path does not, and the box applies its own default, `steer`. `AgentTaskInput` gains `mode` and the box-only commands
   `queue.cancel`, `queue.edit`, `queue.reorder`, `queue.promote` and `subagent.stop`.
 - The queue API is real again. `session.queue` is the list the box's last `queueChange` frame
   sent (the whole queue, on every change and on connect), and the `queueChange` event fires with
@@ -31,8 +31,8 @@ exact version.
   which rejects its `sendAndWait` with `AgentTaskTurnError` code
   `AGENT_QUEUED_MESSAGE_CANCELLED` and leaves the running turn alone, also for the redial; a
   promoted one comes back on a `stepStart` with its `clientMessageId` and resolves with the
-  running turn; an edited one starts its turn with `turnStart` carrying `editedText`, the text
-  the box ran. `turnStart` gains that optional field.
+  running turn; for an edited one the new `messageEdited` event carries the text the box ran,
+  right before its turn's `turnStart`.
 - Subagents: the `subagent` event and `session.subagents` carry `subagentId`, `toolId`, `status`,
   `progress`, `startedAt`, `endedAt` and `childThreadId` from the box's `subagentUpdate` frame.
   Frames of the child thread, marked with `parentToolId`, come as `subagentDelta` and

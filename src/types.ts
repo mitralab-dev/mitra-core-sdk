@@ -1184,9 +1184,9 @@ export type AgentTaskInput =
       agentType?: string
       reasoningEffort?: string
       /**
-       * What the box does with a message sent while a turn runs: `queue` waits for a turn of its
-       * own, `steer` goes into the running turn. The box defaults to `queue`; the Copilot does not
-       * take the field.
+       * What the box does with a message sent while a turn runs: `steer` goes into the running
+       * turn, `queue` waits for a turn of its own. The box defaults to `steer`; the Copilot does
+       * not take the field.
        */
       mode?: "queue" | "steer"
     }

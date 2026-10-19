@@ -154,7 +154,7 @@ describe("Agent box contract fixtures", () => {
     socket.play(frames.slice(0, 2))
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    const steer = session.sendAndWait("Make it short", { mode: "steer" })
+    const steer = session.sendAndWait("Make it short")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     socket.play(frames.slice(2))
 
@@ -199,12 +199,12 @@ async function runningTurn() {
 }
 
 describe("Agent box queue and subagents", () => {
-  it("queues a message sent during a turn by default and answers it with a turn of its own", async () => {
+  it("queues a message sent with mode queue and answers it with a turn of its own", async () => {
     const { session, first, socket } = await runningTurn()
     const queues: unknown[] = []
     session.on("queueChange", ({ queue }) => queues.push(queue))
 
-    const queued = session.sendAndWait("Now say MANGO", { reasoningEffort: "low" })
+    const queued = session.sendAndWait("Now say MANGO", { reasoningEffort: "low", mode: "queue" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
@@ -296,7 +296,7 @@ describe("Agent box queue and subagents", () => {
 
   async function queuedMessage(text: string) {
     const running = await runningTurn()
-    const queued = running.session.sendAndWait(text)
+    const queued = running.session.sendAndWait(text, { mode: "queue" })
     await vi.waitFor(() => expect(running.socket.sent).toHaveLength(2))
     frame(running.socket, "messageQueued", {
       position: 0,
@@ -365,8 +365,9 @@ describe("Agent box queue and subagents", () => {
 
   it("starts an edited queued message with the text the box ran", async () => {
     const { session, first, socket, queued } = await queuedMessage("Say MANGO")
-    const starts: unknown[] = []
-    session.on("turnStart", (payload) => starts.push(payload))
+    const seen: string[] = []
+    session.on("messageEdited", ({ text }) => seen.push(`edited:${text}`))
+    session.on("turnStart", () => seen.push("turnStart"))
 
     session.editQueueItem("run-2", "Say PAPAYA")
     expect(socket.sent[2]).toEqual({ type: "queue.edit", runId: "run-2", text: "Say PAPAYA" })
@@ -390,7 +391,7 @@ describe("Agent box queue and subagents", () => {
     frame(socket, "textDelta", { text: "PAPAYA", lifecycle: { turnId: "turn-2" } })
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
     await expect(queued).resolves.toMatchObject({ content: "PAPAYA" })
-    expect(starts).toEqual([{ editedText: "Say PAPAYA" }])
+    expect(seen).toEqual(["edited:Say PAPAYA", "turnStart"])
   })
 
   it("reports a subagent and its own thread apart from the chat's turn", async () => {
