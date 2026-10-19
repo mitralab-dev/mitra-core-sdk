@@ -15,10 +15,10 @@ exact version.
   also while a turn runs, before it reached the box, after a delivered `cancel()`, while the
   socket redials and on the Copilot stream. The queue is the box's, and `sendAndWait` resolves
   with the turn that answered the message.
-- `send` and `sendAndWait` take `mode`, T3's follow-up behavior: `steer` (the default) sends a
-  message sent during a turn into the running turn, `queue` puts it in the box's queue for a
-  turn of its own, where the queue methods act on it. The box frame always carries it; the
-  Copilot path does not, and the box applies its own default, `steer`. `AgentTaskInput` gains `mode` and the box-only commands
+- `send` and `sendAndWait` take `mode`, T3's follow-up behavior: `queue` (the default, as in T3)
+  puts a message sent during a turn in the box's queue for a turn of its own, `steer` sends it
+  into the running turn. The box frame always carries it; the Copilot path does not, and the box
+  applies its own default, `queue`. `AgentTaskInput` gains `mode` and the box-only commands
   `queue.cancel`, `queue.edit`, `queue.reorder`, `queue.promote` and `subagent.stop`.
 - The queue API is real again. `session.queue` is the list the box's last `queueChange` frame
   sent (the whole queue, on every change and on connect), and the `queueChange` event fires with
@@ -51,8 +51,6 @@ exact version.
   own. Only when it goes to the Copilot with a turn running are they dropped, because the
   Copilot restarts the live session for another model. A refusal the Copilot answers with an
   error status rejects that message and emits `error`.
-- At most 10 messages may wait for the box at once. One more rejects with `AgentTaskTurnError`
-  code `AGENT_MESSAGES_IN_FLIGHT_LIMIT` and emits `error`.
 - A message still waiting to go out when the session closes is rejected and not sent. The first
   message of a task that already exists still goes out over REST after a close, as before.
 - T3's mid-turn input request reaches the app as a `raw` event of type `user_input_request`,

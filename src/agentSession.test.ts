@@ -403,10 +403,11 @@ describe("Agent task session", () => {
       session.send("active")
       await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
 
-      for (let index = 0; index < 10; index += 1) session.send(`steer-${index}`)
-      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(11))
+      // No cap on the app side: every one goes out, and the box decides what to do with them.
+      for (let index = 0; index < 20; index += 1) session.send(`steer-${index}`)
+      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(21))
       expect(tasks.sendInput.mock.calls.slice(1).map(([, input]) => input)).toEqual(
-        Array.from({ length: 10 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
+        Array.from({ length: 20 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
       )
       expect(errors).toEqual([])
       expect(session.queue).toEqual([])
@@ -420,7 +421,7 @@ describe("Agent task session", () => {
       expect(errors[0]).toBe(
         "Failed to edit the queued Agent message: The Agent queue.edit was not sent: the box channel is not connected right now.",
       )
-      expect(tasks.sendInput).toHaveBeenCalledTimes(11)
+      expect(tasks.sendInput).toHaveBeenCalledTimes(21)
       expect(session.queue).toEqual([])
       expect(queueChanges).not.toHaveBeenCalled()
 

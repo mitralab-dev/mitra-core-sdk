@@ -154,7 +154,7 @@ describe("Agent box contract fixtures", () => {
     socket.play(frames.slice(0, 2))
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    const steer = session.sendAndWait("Make it short")
+    const steer = session.sendAndWait("Make it short", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     socket.play(frames.slice(2))
 
@@ -199,12 +199,12 @@ async function runningTurn() {
 }
 
 describe("Agent box queue and subagents", () => {
-  it("queues a message sent with mode queue and answers it with a turn of its own", async () => {
+  it("queues a message sent during a turn by default and answers it with a turn of its own", async () => {
     const { session, first, socket } = await runningTurn()
     const queues: unknown[] = []
     session.on("queueChange", ({ queue }) => queues.push(queue))
 
-    const queued = session.sendAndWait("Now say MANGO", { reasoningEffort: "low", mode: "queue" })
+    const queued = session.sendAndWait("Now say MANGO", { reasoningEffort: "low" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
@@ -296,7 +296,7 @@ describe("Agent box queue and subagents", () => {
 
   async function queuedMessage(text: string) {
     const running = await runningTurn()
-    const queued = running.session.sendAndWait(text, { mode: "queue" })
+    const queued = running.session.sendAndWait(text)
     await vi.waitFor(() => expect(running.socket.sent).toHaveLength(2))
     frame(running.socket, "messageQueued", {
       position: 0,
@@ -308,6 +308,40 @@ describe("Agent box queue and subagents", () => {
     })
     return { ...running, queued }
   }
+
+  it("answers a message sent while a queued one waits for its turn with its own turn, not that one", async () => {
+    const { session, first, socket, queued } = await queuedMessage("Say MANGO")
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
+    await first
+    expect(session.status).toBe("idle")
+
+    // T3 starts the queued message next; this one goes to its queue behind it.
+    const later = session.sendAndWait("Say KIWI")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    frame(socket, "messageQueued", {
+      runId: "run-3",
+      lifecycle: { turnId: "turn-3", clientMessageId: idOf(socket.sent[2]) },
+    })
+    frame(
+      socket,
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
+      3,
+    )
+    frame(socket, "textDelta", { text: "MANGO", lifecycle: { turnId: "turn-2" } })
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    await expect(queued).resolves.toMatchObject({ content: "MANGO" })
+
+    frame(
+      socket,
+      "stepStart",
+      { lifecycle: { turnId: "turn-3", clientMessageId: idOf(socket.sent[2]) } },
+      5,
+    )
+    frame(socket, "textDelta", { text: "KIWI", lifecycle: { turnId: "turn-3" } })
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-3" } }, 6)
+    await expect(later).resolves.toMatchObject({ content: "KIWI" })
+  })
 
   it("rejects a queued message the queue cancelled and leaves the running turn alone", async () => {
     const { session, first, socket, queued } = await queuedMessage("Now say MANGO")

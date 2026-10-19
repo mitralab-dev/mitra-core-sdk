@@ -21,9 +21,6 @@ import type {
 export { AgentTaskTurnError }
 
 const CANCEL_SAFETY_MS = 10_000
-// Messages the box has not answered yet. The session holds none (the queue is the box's), so this
-// is the only bound on an app that sends in a loop.
-const STEERS_IN_FLIGHT_LIMIT = 10
 const RECONCILE_DELAY_MS = 1_000
 const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
@@ -88,9 +85,9 @@ export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
   /**
-   * What the box does with the message when a turn is running: `steer` (the default) sends it
-   * into the running turn, `queue` puts it in the box's queue for a turn of its own, which the
-   * queue methods act on. With no turn running the message starts one either way.
+   * What the box does with the message when a turn is running: `queue` (the default, as in T3)
+   * puts it in the box's queue for a turn of its own, `steer` sends it into the running turn.
+   * With no turn running the message starts one either way.
    */
   mode?: AgentSendMode
 }
@@ -337,7 +334,7 @@ function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: options.mode ?? "steer",
+    mode: options.mode ?? "queue",
   }
 }
 
@@ -485,12 +482,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // before it was, not after it was answered.
   private handOff: Promise<void> = Promise.resolve()
   private activeWaiter: TurnWaiter | undefined
-  // Every steer sits in exactly one of the two lists until it is settled or forgotten: `steers`
-  // while the turn it was sent into runs (taken ones settle with that turn), `strayedSteers` once
-  // it waits for a turn of its own (sent with no turn, not taken when its turn ended, or queued by
-  // the provider). A non-empty `strayedSteers` keeps the session busy, which is what stops a new
-  // message from opening a turn the steer's answer would settle. `pendingSteers` counts the ones
-  // the box has not answered yet, wherever they sit.
+  // Waiters only: every message is already on its way to the box. Each one sits in exactly one of
+  // the two lists until it is settled or forgotten: `steers` while the turn it was sent into runs
+  // (taken ones settle with that turn), `strayedSteers` once it waits for a turn of its own (in
+  // T3's queue, or not taken when its turn ended). A non-empty `strayedSteers` keeps the session
+  // busy, so a new message is matched to the turn the box opens for it by its id, instead of
+  // opening a local turn that the queued message's answer would settle. `pendingSteers` counts
+  // the ones the box has not answered yet, wherever they sit.
   private steers: SteeredMessage[] = []
   private strayedSteers: SteeredMessage[] = []
   private pendingSteers = 0
@@ -792,15 +790,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // the Copilot path, with a turn running, they are dropped: the Copilot restarts the live
   // session for a message that asks for another model, which would end that turn.
   private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
-    if (this.pendingSteers >= STEERS_IN_FLIGHT_LIMIT) {
-      const error = new AgentTaskTurnError(
-        `Too many Agent messages are waiting for the box (maximum ${STEERS_IN_FLIGHT_LIMIT}).`,
-        "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
-      )
-      waiter?.reject(error)
-      this.emit("error", { code: error.code!, error: error.message })
-      return
-    }
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
@@ -1113,7 +1102,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`: the box it hands the message to applies its default, `steer`.
+    // The Copilot takes no `mode`: the box it hands the message to applies its default, `queue`.
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input

@@ -194,7 +194,7 @@ describe("Agent direct channel", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -286,7 +286,7 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Long answer",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -332,7 +332,7 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Over quota",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -911,7 +911,7 @@ describe("Agent direct channel over HTTP", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     })
@@ -2361,8 +2361,11 @@ describe("Agent direct channel steering", () => {
     )
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    // No mode: a message sent during a turn steers it by default.
-    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    session.send("Stop and say BANANA", {
+      agentType: "CODEX",
+      reasoningEffort: "low",
+      mode: "steer",
+    })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
@@ -2545,46 +2548,6 @@ describe("Agent direct channel steering", () => {
 
     expect(FakeWebSocket.instances).toHaveLength(1)
     expect(raw.some((event) => event.type === "channelReconnecting")).toBe(false)
-  })
-
-  it("refuses a steer over the in-flight limit with a named error, and sends again once the box answers", async () => {
-    const tasks = createTasks(offer())
-    const { session } = open(tasks)
-    const errors: { code?: string; error: string }[] = []
-    session.on("error", (error) => errors.push(error))
-
-    void session.sendAndWait("List 40 animals").catch(() => undefined)
-    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
-    const socket = FakeWebSocket.last()
-    socket.receive(
-      "stepStart",
-      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
-      1,
-    )
-    await vi.waitFor(() => expect(session.status).toBe("streaming"))
-    for (let index = 0; index < 10; index += 1) session.send(`steer-${index}`)
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(11))
-
-    const over = session.sendAndWait("one too many")
-    await expect(over).rejects.toMatchObject({
-      name: "AgentTaskTurnError",
-      code: "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
-    })
-    expect(errors).toContainEqual({
-      code: "AGENT_MESSAGES_IN_FLIGHT_LIMIT",
-      error: "Too many Agent messages are waiting for the box (maximum 10).",
-    })
-    expect(socket.sent).toHaveLength(11)
-
-    socket.receive(
-      "stepStart",
-      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
-      2,
-    )
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    session.send("room again")
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(12))
-    session.close()
   })
 
   it("sends a message typed while the socket redials to the Copilot, not to a box route whose ticket expired", async () => {
