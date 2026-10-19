@@ -493,6 +493,52 @@ describe("Agent task session", () => {
     expect(source.taskIds).toHaveLength(3)
   })
 
+  it("still closes a turn from the history after its sendAndWait timed out and the stream dropped", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const answer = message("new", "AGENT", "TM-OK")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([answer, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turnEnds: unknown[] = []
+    session.on("turnEnd", (result) => turnEnds.push(result))
+
+    const result = session.sendAndWait("long turn", { timeoutMs: 20 })
+    await expect(result).rejects.toThrow("timed out after 20 ms")
+    expect(session.status).toBe("streaming")
+
+    // The waiter gave up; the turn did not. The history still has to close it.
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(session.status).toBe("idle"), { timeout: 3_000 })
+    expect(turnEnds).toEqual([expect.objectContaining({ content: "TM-OK", reason: "reconciled" })])
+  })
+
+  it("closes a stopped turn found in the history as interrupted, not as a full answer", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const partial = message("new", "AGENT", "I will run the command and wait.")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([partial, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("long task")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", { lifecycle: { turnId: "turn-1" } }))
+    await session.cancel()
+    expect(session.status).toBe("cancelled")
+    source.disconnect(new Error("network"), 0)
+
+    await expect(result).resolves.toMatchObject({
+      content: "I will run the command and wait.",
+      reason: "interrupted",
+    })
+  })
+
   it("reconciles persisted content before resolving a terminal event after recovery", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const finalMessage = message("final", "AGENT", "complete persisted answer")

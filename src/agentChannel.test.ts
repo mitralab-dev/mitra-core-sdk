@@ -1503,6 +1503,81 @@ describe("Agent turn usage on the direct channel", () => {
 describe("Agent direct channel steering", () => {
   const idOf = (frame: unknown) => (frame as { clientMessageId?: string }).clientMessageId
 
+  it("ignores the live tail of an earlier turn that arrives before the next message's turn starts", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const deltas: string[] = []
+    session.on("delta", ({ delta }) => deltas.push(delta))
+
+    const next = session.sendAndWait("POS-21")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    // The end of turn 21, which this session already closed from the history, comes late.
+    socket.receive("textDelta", { text: "KW-21-OK", lifecycle: { turnId: "turn-21" } })
+    socket.receive("toolResult", { name: "Bash", toolId: "t", lifecycle: { turnId: "turn-21" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-21" } }, 9)
+    expect(session.status).toBe("streaming")
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-22", clientMessageId: idOf(socket.sent[0]) } },
+      10,
+    )
+    socket.receive("textDelta", { text: "POS-21-OK", lifecycle: { turnId: "turn-22" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-22" } }, 11)
+    await expect(next).resolves.toMatchObject({ content: "POS-21-OK", reason: "stop" })
+    expect(deltas).toEqual(["POS-21-OK"])
+  })
+
+  it("gives a message sent after a stop a turn of its own instead of steering it into the stopped turn", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const first = session.sendAndWait("Long task")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    socket.receive("textDelta", { text: "Working on it.", lifecycle: { turnId: "turn-1" } })
+    await session.cancel()
+    expect(session.status).toBe("cancelled")
+
+    const after = session.sendAndWait("POS-CX")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    expect(socket.sent[1]).toEqual({ type: "interrupt" })
+    // No `steer`: the box puts it in T3's queue, behind the turn being stopped.
+    expect(socket.sent[2]).toEqual({
+      type: "message",
+      content: "POS-CX",
+      clientMessageId: expect.any(String),
+    })
+    socket.receive("messageQueued", {
+      runId: "run-2",
+      lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[2]) },
+    })
+    socket.receive(
+      "stepFinish",
+      {
+        reason: "interrupted",
+        lifecycle: { turnId: "turn-1", terminal: true, interruptTerminal: true },
+      },
+      2,
+    )
+    await expect(first).resolves.toMatchObject({ reason: "interrupted" })
+
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[2]) } },
+      3,
+    )
+    socket.receive("textDelta", { text: "POS-CX-OK", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 4)
+    await expect(after).resolves.toMatchObject({ content: "POS-CX-OK", reason: "stop" })
+  })
+
   it("sends a message typed during the turn to the box at once and settles both with the turn", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)

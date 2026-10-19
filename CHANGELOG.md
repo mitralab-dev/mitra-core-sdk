@@ -43,6 +43,16 @@ exact version.
   box, or the same address comes back with an empty log) ends as `interrupted` with the text it
   had, so the next message opens a turn of its own. A terminal the new box sends for that turn
   is ignored.
+- A turn whose `sendAndWait` already gave up on `timeoutMs` or `signal` is still closed from the
+  history when the stream drops: the recovery no longer stops with the waiter, and the session
+  does not stay `streaming` forever.
+- A message sent after `cancel()`, while the stop is unanswered, no longer steers into the turn
+  being stopped, where the stop took it too and it resolved with that turn's partial text. It
+  goes without `mode` and the box puts it in T3's queue for a turn of its own. A stopped turn the
+  session closes from the history ends as `interrupted`, not `reconciled`.
+- On the direct channel, turn frames naming a turn that arrive before the opening message's
+  `stepStart` are the tail of an earlier turn (one already closed from the history) and are
+  ignored, so its answer is not delivered to the next message.
 - Subagents: the `subagent` event and `session.subagents` carry `subagentId`, `toolId`, `status`,
   `progress`, `startedAt`, `endedAt` (epoch ms) and `childThreadId` from the box's
   `subagentUpdate` frame; an update with no status keeps the one before. Frames of the child

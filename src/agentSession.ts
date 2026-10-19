@@ -22,6 +22,14 @@ export { AgentTaskTurnError }
 
 const CANCEL_SAFETY_MS = 10_000
 const RECONCILE_DELAY_MS = 1_000
+const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
+  "textDelta",
+  "textChunk",
+  "thinking",
+  "toolCall",
+  "toolResult",
+  "stepFinish",
+])
 const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
   "interrupt",
@@ -296,13 +304,13 @@ function delay(milliseconds: number): Promise<void> {
 
 // The box puts a message with no mode in T3's queue when a turn runs; the session steers it into
 // that turn, as it always did.
-function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
+function messageInput(prompt: string, options: AgentSendOptions, steer = true): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: "steer",
+    ...(steer ? { mode: "steer" as const } : {}),
   }
 }
 
@@ -462,6 +470,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // The id the message that opened the current turn went out with, so a refusal naming it fails
   // that turn and one naming a steer does not.
   private openingMessageId: string | undefined
+  // The opening message went to the box, which starts its turn with a `stepStart`. Until then a
+  // turn frame naming a turn is another turn's tail: the one before, closed here from the history
+  // (r5 S17, dev 2026-10-19), whose live end came after the next message went out.
+  private openingAwaitsStart = false
   private turnBaselineIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
 
@@ -721,7 +733,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.setStatus("streaming")
     this.emit("turnStart", {})
     this.openingMessageId = newClientMessageId()
-    const { admitted } = await this.handOver(input, this.openingMessageId)
+    this.openingAwaitsStart = true
+    const { admitted, direct } = await this.handOver(input, this.openingMessageId)
+    if (!direct) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
     this.emit("accepted", {})
@@ -744,12 +758,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(waiter ? { waiter } : {}),
       taken: false,
     }
-    if (this.dispatching || this._status === "streaming" || this._status === "cancelled") {
+    // After a stop the running turn is going away: steered into it, the message was stopped with
+    // it and answered by its partial text (r5 S17, dev 2026-10-19). Without a mode the box puts it
+    // in T3's queue, behind the stopped turn, and it gets a turn of its own.
+    const afterStop = this._status === "cancelled"
+    if (!afterStop && (this.dispatching || this._status === "streaming")) {
       this.steers.push(steered)
     } else {
       this.strayedSteers.push(steered)
     }
-    const input = messageInput(prompt, options)
+    const input = messageInput(prompt, options, !afterStop)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
       // `close()` already rejected it as not sent; going out now would run what the caller was
@@ -951,10 +969,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
         !this.isClosed() &&
         (this._status === "streaming" || this._status === "cancelled")
       ) {
-        if (await this.reconcilePersistedTurn(this.recoveredTerminalReason ?? "reconciled")) {
-          return
-        }
-        if (this.activeWaiter?.settled) return
+        // A stop already sent makes the persisted answer the stopped turn's, not a full one.
+        const reason =
+          this.recoveredTerminalReason ??
+          (this._status === "cancelled" ? "interrupted" : "reconciled")
+        if (await this.reconcilePersistedTurn(reason)) return
+        // Polled even with no one waiting (a `send`, or a `sendAndWait` past its `timeoutMs`): the
+        // turn is the session's, and only its end lets the next message have a turn of its own.
         await delay(RECONCILE_DELAY_MS)
       }
     } catch (error) {
@@ -1010,10 +1031,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     input: AgentTaskInput,
     clientMessageId?: string,
     steering = false,
-  ): Promise<{ admitted: Promise<boolean> }> {
+  ): Promise<{ admitted: Promise<boolean>; direct: boolean }> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
     const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
-    if (direct) return { admitted: direct }
+    if (direct) return { admitted: direct, direct: true }
     // Only the box knows T3's input requests and subagents; the Copilot would refuse the type.
     if (input.type === "runtime-request.respond") {
       throw new Error(
@@ -1040,7 +1061,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
     await this.dependencies.tasks.sendInput(this._taskId, rest)
-    return { admitted: Promise.resolve(true) }
+    return { admitted: Promise.resolve(true), direct: false }
   }
 
   private async prepareSend(): Promise<void> {
@@ -1058,6 +1079,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.handleSubagentFrame(event, payload)
       return
     }
+    const lifecycle = asObject(payload?.lifecycle)
+    if (event.type === "stepStart") {
+      // A box that names no message is answering ours: it decides one message at a time.
+      const id = lifecycle?.clientMessageId
+      if (id === undefined || id === this.openingMessageId) this.openingAwaitsStart = false
+    } else if (
+      this.openingAwaitsStart &&
+      TURN_TAIL_TYPES.has(event.type) &&
+      typeof lifecycle?.turnId === "string"
+    ) {
+      this.rememberFinishedTurn(lifecycle)
+    }
     switch (event.type) {
       // A box transmite o texto do agente ao vivo em `textDelta` e grava o mesmo texto no log
       // como `textChunk`. Uma repeticao depois de uma queda devolve chunks, entao trata-los como
@@ -1070,10 +1103,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.consumeDelta(payload, "thinking")
         break
       case "toolCall":
-        this.emitTool(payload, "call", event.timestamp)
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "call", event.timestamp)
         break
       case "toolResult":
-        this.emitTool(payload, "result", event.timestamp)
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "result", event.timestamp)
         break
       case "workspace":
         this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
@@ -1156,7 +1189,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private rememberFinishedTurn(lifecycle: Record<string, unknown> | undefined): void {
+  private isFinishedTurnFrame(lifecycle: Record<string, unknown> | null): boolean {
+    const turnId = lifecycle?.turnId
+    return typeof turnId === "string" && this.finishedTurnIds.includes(turnId)
+  }
+
+  private rememberFinishedTurn(lifecycle: Record<string, unknown> | null | undefined): void {
     const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
     if (!turnId) return
     this.finishedTurnIds.push(turnId)
@@ -1346,6 +1384,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private setStatus(status: AgentTaskSessionStatus): void {
     if (this._status === status) return
+    if (status !== "streaming" && status !== "cancelled") this.openingAwaitsStart = false
     this._status = status
     this.emit("statusChange", { status })
   }
