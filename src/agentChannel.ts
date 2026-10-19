@@ -366,6 +366,7 @@ function asDelta(event: AgentTaskEvent): AgentTaskEvent {
 
 const TURN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "stepStart",
+  "steer",
   "textDelta",
   "thinking",
   "toolCall",
@@ -681,7 +682,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)
-      else if (event.type === "messageQueued") queuedAdmission(link, event)?.settle(true)
+      // A `steer` names the message it took into the running turn, as `messageQueued` does.
+      else if (event.type === "messageQueued" || event.type === "steer") {
+        queuedAdmission(link, event)?.settle(true)
+      }
     }
     const onLost = (error: Error, code?: number) => {
       link.wire = null

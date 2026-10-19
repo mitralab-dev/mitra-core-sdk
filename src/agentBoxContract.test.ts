@@ -195,6 +195,82 @@ async function runningTurn() {
   return { ...opened, first, socket }
 }
 
+describe("Agent box steer marker", () => {
+  // The sidecar admits a steer with `messageQueued` (`position: null`) and, once T3 delivered it
+  // to the running turn, marks the point with a `steer` frame: no `stepStart`, one turn.
+  it("answers a steered message with the running turn and reports where it went in", async () => {
+    const { session, first, socket } = await runningTurn()
+    const seen: string[] = []
+    session.on("steered", ({ text, messageId }) => seen.push(`steered:${messageId}:${text}`))
+    session.on("delta", ({ delta }) => seen.push(`delta:${delta}`))
+    const turnEnds = vi.fn()
+    session.on("turnEnd", turnEnds)
+
+    frame(socket, "textDelta", { text: "Lions", lifecycle: { turnId: "turn-1" } })
+    const steer = session.sendAndWait("Also birds")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
+    frame(socket, "messageQueued", {
+      position: null,
+      runId: null,
+      lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[1]) },
+    })
+    frame(
+      socket,
+      "steer",
+      {
+        messageId: "msg-2",
+        text: "Also birds",
+        turnId: "turn-1b",
+        activityId: "act-1b",
+        turnSequence: 2,
+        lifecycle: {
+          turnId: "turn-1",
+          activityId: "act-1",
+          turnSequence: 1,
+          clientMessageId: idOf(socket.sent[1]),
+        },
+      },
+      2,
+    )
+    frame(socket, "textDelta", { text: " and birds", lifecycle: { turnId: "turn-1" } })
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 3)
+
+    const [firstResult, steerResult] = await Promise.all([first, steer])
+    expect(steerResult).toBe(firstResult)
+    expect(firstResult.content).toBe("Lions and birds")
+    expect(turnEnds).toHaveBeenCalledOnce()
+    expect(seen).toEqual(["delta:Lions", "steered:msg-2:Also birds", "delta: and birds"])
+    expect(session.status).toBe("idle")
+  })
+
+  it("follows a turn another client opened once the box steers this session's message into it", async () => {
+    const { session } = openSession()
+    const result = session.sendAndWait("Join in")
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    // Another tab's turn is running: its frames before the steer are not this message's answer.
+    frame(socket, "textDelta", { text: "Other tab text", lifecycle: { turnId: "turn-x" } })
+    frame(socket, "messageQueued", {
+      position: null,
+      lifecycle: { turnId: "turn-x", clientMessageId: idOf(socket.sent[0]) },
+    })
+    frame(
+      socket,
+      "steer",
+      {
+        messageId: "msg-9",
+        text: "Join in",
+        lifecycle: { turnId: "turn-x", clientMessageId: idOf(socket.sent[0]) },
+      },
+      5,
+    )
+    frame(socket, "textDelta", { text: "Joined", lifecycle: { turnId: "turn-x" } })
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-x" } }, 6)
+    await expect(result).resolves.toMatchObject({ content: "Joined", reason: "stop" })
+  })
+})
+
 describe("Agent box late steer", () => {
   it("answers a message sent while a late steer waits for its turn with its own turn", async () => {
     const { session, first, socket } = await runningTurn()

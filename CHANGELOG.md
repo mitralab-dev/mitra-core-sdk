@@ -43,6 +43,11 @@ exact version.
   box, or the same address comes back with an empty log) ends as `interrupted` with the text it
   had, so the next message opens a turn of its own. A terminal the new box sends for that turn
   is ignored.
+- The box's `steer` frame marks where T3 took a message into the running turn, with no turn of
+  its own: the session answers that message with the running turn and emits the new `steered`
+  event with its `text` and `messageId`, for the app to show it at that point. The frame also
+  confirms the message, as `messageQueued` does, and keeps the redial. A message the box steers
+  into a turn another client opened follows that turn from the `steer` on.
 - A turn whose `sendAndWait` already gave up on `timeoutMs` or `signal` is still closed from the
   history when the stream drops: the recovery no longer stops with the waiter, and the session
   does not stay `streaming` forever.

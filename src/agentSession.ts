@@ -173,6 +173,11 @@ export interface AgentTaskSessionEventMap {
   cancelled: Record<string, never>
   /** @deprecated Never emitted: every message is sent at once, so there is no queue to change. */
   queueChange: { queue: readonly AgentQueueItem[] }
+  /**
+   * The box took a message into the running turn at this point, with no turn of its own: the
+   * place the app shows it in that turn. The turn's `turnEnd` answers it.
+   */
+  steered: { text: string; messageId: string }
   /** A subagent's status, progress or child thread changed. */
   subagent: AgentSubagent
   /**
@@ -1080,10 +1085,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return
     }
     const lifecycle = asObject(payload?.lifecycle)
-    if (event.type === "stepStart") {
-      // A box that names no message is answering ours: it decides one message at a time.
+    if (event.type === "stepStart" || event.type === "steer") {
+      // A box that names no message is answering ours: it decides one message at a time. Steered
+      // into a turn another client opened, ours goes on in that turn, whose frames before the
+      // `steer` were not ours but whose next ones are.
       const id = lifecycle?.clientMessageId
-      if (id === undefined || id === this.openingMessageId) this.openingAwaitsStart = false
+      if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
+        this.openingAwaitsStart = false
+        this.forgetFinishedTurn(lifecycle)
+      }
     } else if (
       this.openingAwaitsStart &&
       TURN_TAIL_TYPES.has(event.type) &&
@@ -1113,6 +1123,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "stepStart":
         this.steerOpenedBy(asObject(payload?.lifecycle))
+        break
+      case "steer":
+        this.steerOpenedBy(lifecycle)
+        this.emit("steered", {
+          text: typeof payload?.text === "string" ? payload.text : "",
+          messageId: typeof payload?.messageId === "string" ? payload.messageId : "",
+        })
         break
       case "messageQueued":
         this.steerQueuedBy(asObject(payload?.lifecycle))
@@ -1192,6 +1209,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private isFinishedTurnFrame(lifecycle: Record<string, unknown> | null): boolean {
     const turnId = lifecycle?.turnId
     return typeof turnId === "string" && this.finishedTurnIds.includes(turnId)
+  }
+
+  private forgetFinishedTurn(lifecycle: Record<string, unknown> | null): void {
+    const turnId = lifecycle?.turnId
+    if (typeof turnId !== "string") return
+    const index = this.finishedTurnIds.indexOf(turnId)
+    if (index >= 0) this.finishedTurnIds.splice(index, 1)
   }
 
   private rememberFinishedTurn(lifecycle: Record<string, unknown> | null | undefined): void {
