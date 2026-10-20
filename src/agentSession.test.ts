@@ -547,6 +547,46 @@ describe("Agent task session", () => {
     })
   })
 
+  it("skips the frames of the running turn the Copilot stream replays after a drop", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const answer = closing("answer", "Hello world")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([answer, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const deltas: string[] = []
+    const tools: string[] = []
+    session.on("delta", ({ delta }) => deltas.push(delta))
+    session.on("tool", ({ phase }) => tools.push(phase))
+    const turn = { lifecycle: { turnId: "turn-1" } }
+    const sequenced = (type: string, payload: object, sequence: number): AgentTaskEvent => ({
+      ...event(type, payload),
+      sequence,
+    })
+
+    const result = session.sendAndWait("say hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(sequenced("stepStart", turn, 1), 0)
+    source.emit(sequenced("textChunk", { text: "Hello", ...turn }, 2), 0)
+    source.emit(sequenced("toolCall", { name: "Bash", toolId: "t1", ...turn }, 3), 0)
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+
+    // The Copilot stream replays from what its history had, before what this session saw.
+    source.emit(sequenced("textChunk", { text: "Hello", ...turn }, 2), 1)
+    source.emit(sequenced("toolCall", { name: "Bash", toolId: "t1", ...turn }, 3), 1)
+    source.emit(sequenced("toolResult", { name: "Bash", toolId: "t1", ...turn }, 4), 1)
+    source.emit(sequenced("textChunk", { text: " world", ...turn }, 5), 1)
+    source.emit(sequenced("stepFinish", { reason: "stop", ...turn }, 6), 1)
+
+    await expect(result).resolves.toMatchObject({ content: "Hello world" })
+    expect(deltas).toEqual(["Hello", " world"])
+    expect(tools).toEqual(["call", "result"])
+  })
+
   it("does not close a running turn with a row the Copilot wrote while it runs", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const comment = message("comment", "AGENT", "I will run the command in the terminal.")
@@ -1086,10 +1126,11 @@ describe("Agent turn usage", () => {
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
       .mockResolvedValueOnce(page([oldMessage]))
-      .mockResolvedValueOnce(page([finalMessage, oldMessage]))
+      .mockResolvedValue(page([finalMessage, oldMessage]))
     const source = new FakeEventSource()
     const { session } = createSession(tasks, source)
-    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    // A terminal with usage waits a few polls for the row carrying it; this Copilot wrote none.
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 8_000 })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     source.disconnect(new Error("network"), 0)
     await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))

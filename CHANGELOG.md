@@ -56,8 +56,11 @@ exact version.
   turn's rows while it runs, so the first new row was often a comment from the middle of the
   turn, and an earlier turn's answer written late looked new; both closed the turn with text that
   was not its answer. A closing row whose usage names a prompt the session had already seen
-  answers that earlier prompt and is skipped. Once the live terminal was heard, the newest agent
-  row is taken as before.
+  answers that earlier prompt and is skipped. Once the live terminal was heard, a terminal with
+  usage waits about 3 s for its closing row and one without takes the turn's newest row, as before.
+- After a drop, the Copilot stream replays the running turn from what its history had. Frames of
+  that turn whose box `sequence` the session already saw are skipped, so text and tools are not
+  shown twice.
 - A stopped turn the session closes from the history ends as `interrupted`, not `reconciled`. A
   message sent after `cancel()`, while the stop is unanswered, goes out as any other; the box
   holds it until the stopped turn ends and gives it a turn of its own, which its `sendAndWait`

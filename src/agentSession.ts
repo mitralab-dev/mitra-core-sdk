@@ -22,6 +22,8 @@ export { AgentTaskTurnError }
 
 const CANCEL_SAFETY_MS = 10_000
 const RECONCILE_DELAY_MS = 1_000
+// About 3 s at the poll interval: the Copilot writes the closing row right after the terminal.
+const ENDED_POLLS_BEFORE_NEWEST = 3
 const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
   "textDelta",
   "textChunk",
@@ -458,6 +460,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private recoveryGeneration = 0
   private recoveredTerminalReason: string | undefined
   private recoveredTerminalUsage: AgentTurnUsage | undefined
+  // Polls that found no closing row although a terminal with usage was heard.
+  private endedPollsWithoutRow = 0
+  // The turn ids the running turn went by, and the highest box sequence seen in it. The Copilot
+  // stream a dropped session falls back to replays the turn from what the history has, so it
+  // repeats frames the box socket already delivered.
+  private readonly turnIds = new Set<string>()
+  private turnSequenceHigh = -1
   private cancelTimer: ReturnType<typeof setTimeout> | null = null
   // Messages leave in the order they were sent: each one is handed over only after the one
   // before it was, not after it was answered.
@@ -1007,15 +1016,32 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
     // row that closes a turn, with its usage, answers it, and not one closing the turn of a prompt
     // the baseline already had. With the live terminal already heard, the turn is known to be over.
-    const ended = this.recoveredTerminalReason !== undefined
     const recovered = page.content.find(
       (message) =>
         !this.turnBaselineIds.has(message.id) &&
         message.sender !== "USER" &&
         message.type !== "TOOL_USE" &&
-        (ended || message.type === "ERROR" || this.closesThisTurn(message)),
+        (message.type === "ERROR" || this.closesThisTurn(message)),
     )
-    if (!recovered) return false
+    if (!recovered) {
+      if (this.recoveredTerminalReason === undefined) return false
+      // The terminal was heard. One that brought usage gets its closing row a moment later; one
+      // without gets none, and then the turn's newest row is its answer, as it always was.
+      if (this.recoveredTerminalUsage !== undefined) {
+        this.endedPollsWithoutRow += 1
+        if (this.endedPollsWithoutRow < ENDED_POLLS_BEFORE_NEWEST) return false
+      }
+      const newest = page.content.find(
+        (message) =>
+          !this.turnBaselineIds.has(message.id) &&
+          message.sender !== "USER" &&
+          message.type !== "TOOL_USE",
+      )
+      if (!newest) return false
+      this._content = newest.content
+      this.finishTurn(reason, this.recoveredTerminalUsage)
+      return true
+    }
     if (recovered.type === "ERROR") {
       const error = new AgentTaskTurnError(recovered.content)
       this.emit("error", { error: error.message })
@@ -1093,6 +1119,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return
     }
     const lifecycle = asObject(payload?.lifecycle)
+    if (this.repeatsTheRunningTurn(event, lifecycle)) return
     if (event.type === "stepStart" || event.type === "steer") {
       // A box that names no message is answering ours: it decides one message at a time. Steered
       // into a turn another client opened, ours goes on in that turn, whose frames before the
@@ -1212,6 +1239,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       default:
         break
     }
+  }
+
+  private repeatsTheRunningTurn(
+    event: AgentTaskEvent,
+    lifecycle: Record<string, unknown> | null,
+  ): boolean {
+    if (this._status !== "streaming" && this._status !== "cancelled") return false
+    const turnId = lifecycle?.turnId
+    if (typeof turnId !== "string") return false
+    if (typeof event.sequence === "number") {
+      if (this.turnIds.has(turnId) && event.sequence <= this.turnSequenceHigh) return true
+      this.turnSequenceHigh = Math.max(this.turnSequenceHigh, event.sequence)
+    }
+    this.turnIds.add(turnId)
+    return false
   }
 
   private isFinishedTurnFrame(lifecycle: Record<string, unknown> | null): boolean {
@@ -1416,7 +1458,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private setStatus(status: AgentTaskSessionStatus): void {
     if (this._status === status) return
-    if (status !== "streaming" && status !== "cancelled") this.openingAwaitsStart = false
+    if (status !== "streaming" && status !== "cancelled") {
+      this.openingAwaitsStart = false
+      this.endedPollsWithoutRow = 0
+      this.turnIds.clear()
+      this.turnSequenceHigh = -1
+    }
     this._status = status
     this.emit("statusChange", { status })
   }
