@@ -183,11 +183,11 @@ export interface AgentTaskSessionEventMap {
   /** A subagent's status, progress or child thread changed. */
   subagent: AgentSubagent
   /**
-   * Text of a subagent's own thread. It never reaches `delta` or `content`: the chat's answer
-   * stays the parent's.
+   * Text of a subagent's own thread. It also reaches `delta` and `content`, as in 0.2.13; this
+   * event tells it apart from the parent's.
    */
   subagentDelta: { parentToolId: string; delta: string; kind: "text" | "thinking" }
-  /** A tool a subagent called, in its own thread. */
+  /** A tool a subagent called, in its own thread. It also comes as `tool`, as in 0.2.13. */
   subagentTool: AgentToolEvent & { parentToolId: string }
   error: { code?: string; error: string }
   /**
@@ -1306,27 +1306,32 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.emit("tool", toolEventOf(payload, phase, timestamp))
   }
 
-  // A child thread's frames are the subagent's conversation: they open no turn, settle no message
-  // and never reach the chat's `content`.
+  // A child thread's frames are the subagent's conversation: they open no turn and settle no
+  // message. Its text and tools still reach `delta`, `content` and `tool` as they did in 0.2.13,
+  // which knew no subagents, so an app that only bumps the version sees what it saw before.
   private handleSubagentFrame(event: AgentTaskEvent, payload: Record<string, unknown>): void {
     const parentToolId = payload.parentToolId as string
     switch (event.type) {
       case "textDelta":
       case "textChunk":
-      case "thinking":
-        this.emit("subagentDelta", {
-          parentToolId,
-          delta: typeof payload.text === "string" ? payload.text : "",
-          kind: event.type === "thinking" ? "thinking" : "text",
-        })
+      case "thinking": {
+        const delta = typeof payload.text === "string" ? payload.text : ""
+        const kind = event.type === "thinking" ? "thinking" : "text"
+        if (kind === "text") this._content += delta
+        this.emit("delta", { delta, kind })
+        this.emit("subagentDelta", { parentToolId, delta, kind })
         break
+      }
       case "toolCall":
-      case "toolResult":
-        this.emit("subagentTool", {
+      case "toolResult": {
+        const tool = {
           ...toolEventOf(payload, event.type === "toolCall" ? "call" : "result", event.timestamp),
           parentToolId,
-        })
+        }
+        this.emit("tool", tool)
+        this.emit("subagentTool", tool)
         break
+      }
       default:
         break
     }

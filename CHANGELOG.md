@@ -84,8 +84,9 @@ exact version.
   `progress`, `startedAt`, `endedAt` (epoch ms) and `childThreadId` from the box's
   `subagentUpdate` frame; an update with no status keeps the one before. Frames of the child
   thread, marked with `parentToolId`, come as `subagentDelta` and `subagentTool` and never touch
-  the chat's turn: they open none, end none, admit no message, stay out of `content` and do not
-  change the redial. `stopSubagent(subagentId)` stops one over the box channel; without it an
+  the chat's turn: they open none, end none, admit no message and do not change the redial. Their
+  text and tools also reach `delta`, `content` and `tool` (with `parentToolId`), as they did in
+  0.2.13, so an app that only bumps the version keeps seeing them. `stopSubagent(subagentId)` stops one over the box channel; without it an
   `error` says so and nothing goes out. `AgentTaskInput` gains `mode` and `subagent.stop`,
   `AgentToolEvent` gains `parentToolId`, and `AgentSubagent` and `AgentSubagentStatus` are
   exported.

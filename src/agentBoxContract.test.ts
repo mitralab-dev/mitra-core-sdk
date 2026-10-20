@@ -307,12 +307,13 @@ describe("Agent box late steer", () => {
 })
 
 describe("Agent box subagents", () => {
-  it("reports a subagent and its own thread apart from the chat's turn", async () => {
+  it("reports a subagent apart from the chat's turn and keeps its thread in delta, content and tool as 0.2.13 did", async () => {
     const { session, first, socket } = await runningTurn()
     const updates: unknown[] = []
     const childText: string[] = []
     const childTools: string[] = []
     const chatTools: string[] = []
+    const deltas: string[] = []
     const turnEnds = vi.fn()
     session.on("subagent", (subagent) => updates.push(subagent))
     session.on("subagentDelta", ({ parentToolId, delta }) =>
@@ -321,7 +322,10 @@ describe("Agent box subagents", () => {
     session.on("subagentTool", (tool) =>
       childTools.push(`${tool.parentToolId}:${tool.phase}:${tool.tool}`),
     )
-    session.on("tool", (tool) => chatTools.push(`${tool.phase}:${tool.tool}`))
+    session.on("tool", (tool) =>
+      chatTools.push(`${tool.parentToolId ?? "chat"}:${tool.phase}:${tool.tool}`),
+    )
+    session.on("delta", ({ delta, kind }) => deltas.push(`${kind}:${delta}`))
     session.on("turnEnd", turnEnds)
 
     frame(
@@ -409,10 +413,17 @@ describe("Agent box subagents", () => {
     frame(socket, "textDelta", { text: "Done.", lifecycle: { turnId: "turn-1" } })
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 10)
 
-    await expect(first).resolves.toMatchObject({ content: "Done." })
+    // The old events carry the child thread as 0.2.13 showed it; the new ones tell it apart.
+    await expect(first).resolves.toMatchObject({ content: "Three birdsDone." })
+    expect(deltas).toEqual(["text:Three birds", "text:Done."])
+    expect(chatTools).toEqual([
+      "chat:call:Task",
+      "tool-9:call:Read",
+      "tool-9:result:Read",
+      "chat:result:Task",
+    ])
     expect(childText).toEqual(["tool-9:Three birds"])
     expect(childTools).toEqual(["tool-9:call:Read", "tool-9:result:Read"])
-    expect(chatTools).toEqual(["call:Task", "result:Task"])
     expect(updates[0]).toEqual({
       subagentId: "sub-1",
       toolId: "tool-9",
