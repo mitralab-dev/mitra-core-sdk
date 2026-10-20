@@ -1185,6 +1185,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // must not end the turn running now.
         const finished = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : undefined
         if (finished !== undefined && this.finishedTurnIds.includes(finished)) break
+        // A box terminal that names no turn cannot end one the box named. A box asked to replay
+        // past its log ends with such a frame the turn of a box that is gone, and the turn
+        // running now was another one (dev, 2026-10-20).
+        if (finished === undefined && lifecycle && this.turnIds.size > 0) break
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.

@@ -587,6 +587,38 @@ describe("Agent task session", () => {
     expect(tools).toEqual(["call", "result"])
   })
 
+  it("does not end a turn the box named with a box terminal that names no turn", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turn = { lifecycle: { turnId: "turn-2" } }
+
+    const result = session.sendAndWait("SB-NEXT")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", turn), 0)
+    // What a box writes when asked to replay past its log, for a turn of a box that is gone.
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        turnId: null,
+        lifecycle: {
+          activityId: null,
+          turnId: null,
+          turnSequence: null,
+          terminal: true,
+          sessionIdle: true,
+          interruptTerminal: true,
+        },
+      }),
+      0,
+    )
+    expect(session.status).toBe("streaming")
+    source.emit(event("textDelta", { text: "SB-NEXT-OK", ...turn }), 0)
+    source.emit(event("stepFinish", { reason: "stop", ...turn }), 0)
+
+    await expect(result).resolves.toMatchObject({ content: "SB-NEXT-OK", reason: "stop" })
+  })
+
   it("closes a stopped turn without usage on its live terminal, with only partial rows in the history", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const comment = message("comment", "AGENT", "Running the command.")

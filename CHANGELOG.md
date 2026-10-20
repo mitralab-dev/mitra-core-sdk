@@ -47,6 +47,10 @@ exact version.
   replay only after the new box's `hello`: behind the dev proxy every box of a chat has the same
   address, and asking a new box for the old cursor ended the next message's turn as an empty
   `interrupted`.
+- A box `stepFinish` whose `lifecycle` names no turn no longer ends a turn whose `turnId` the
+  session already got from the box. A box asked to replay past its log sends such a terminal for
+  the turn of a box that is gone; it used to end the running turn as an empty `interrupted` and
+  the real terminal right after it was ignored.
 - The box's `steer` frame marks where T3 took a message into the running turn, with no turn of
   its own: the session answers that message with the running turn and emits the new `steered`
   event with its `text` and `messageId`, for the app to show it at that point. The frame also
