@@ -741,7 +741,13 @@ export class AgentDirectChannel implements AgentTaskEventSource {
             // terminal; the session ignores a second one for a turn it already ended.
             if (link.inTurn) onFrame(lostTurnFrame(link.turnId))
             box = nextBox
-            cursor = hello?.lastSequence ?? next.lastSequence
+            // Nothing in a new box's log was seen here, and it may hold the start of the next
+            // message's turn already. HTTP keeps the cursor the Copilot reported.
+            if (mode === "websocket") {
+              cursor = 0
+              return 0
+            }
+            cursor = next.lastSequence
             return undefined
           }
           // The socket brings the hello before any frame of the log, and the box holds the

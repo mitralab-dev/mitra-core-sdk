@@ -46,7 +46,9 @@ exact version.
   ignored. On the socket, once the box said which thread it serves, the redial asks for the
   replay only after the new box's `hello`: behind the dev proxy every box of a chat has the same
   address, and asking a new box for the old cursor ended the next message's turn as an empty
-  `interrupted`.
+  `interrupted`. On the socket, the new box is then replayed from the start of its log, which
+  may already hold the start of the next message's turn; over HTTP the stream still opens from
+  the sequence the Copilot reported.
 - A box `stepFinish` whose `lifecycle` names no turn no longer ends a turn whose `turnId` the
   session already got from the box. A box asked to replay past its log sends such a terminal for
   the turn of a box that is gone; it used to end the running turn as an empty `interrupted` and

@@ -1192,7 +1192,7 @@ describe("Agent direct channel over HTTP", () => {
 describe("Agent direct channel lifecycle", () => {
   const OTHER_BOX_URL = "wss://49999-box2.e2b.app/api/mitra/chat/ws?grant=other"
 
-  it("forgets the replay cursor when the Copilot points the chat to another box", async () => {
+  it("replays another box the Copilot points the chat to from the start of its log", async () => {
     vi.useFakeTimers()
     const channel = vi
       .fn<NonNullable<AgentTasksModule["channel"]>>()
@@ -1210,15 +1210,16 @@ describe("Agent direct channel lifecycle", () => {
 
     const otherBox = FakeWebSocket.last()
     expect(otherBox.url).toBe(OTHER_BOX_URL)
-    expect(otherBox.sent).toEqual([])
+    expect(otherBox.sent).toEqual([{ type: "replay", fromSequence: 0 }])
 
-    // The turn on the first box is closed with it; a turn on the new box counts from its log.
+    // The turn on the first box is closed with it; the new box counts from its own log.
     session.send("again")
-    await vi.waitFor(() => expect(otherBox.sent).toHaveLength(1))
+    await vi.waitFor(() => expect(otherBox.sent).toHaveLength(2))
+    otherBox.receive("stepStart", { lifecycle: { turnId: "turn-2" } }, 11)
     otherBox.drop()
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
-    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 10 }])
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 11 }])
     session.close()
   })
 
@@ -1247,10 +1248,10 @@ describe("Agent direct channel lifecycle", () => {
     await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000 w001" })
     expect(session.status).toBe("idle")
     const fresh = FakeWebSocket.last()
-    expect(fresh.sent).toEqual([])
+    expect(fresh.sent).toEqual([{ type: "replay", fromSequence: 0 }])
 
     const next = session.sendAndWait("Say hi")
-    await vi.waitFor(() => expect(fresh.sent).toHaveLength(1))
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(2))
     // The new box ends the dead turn too: it must not end the turn running now.
     fresh.receive(
       "stepFinish",
@@ -1263,7 +1264,7 @@ describe("Agent direct channel lifecycle", () => {
       {
         lifecycle: {
           turnId: "turn-2",
-          clientMessageId: (fresh.sent[0] as { clientMessageId: string }).clientMessageId,
+          clientMessageId: (fresh.sent[1] as { clientMessageId: string }).clientMessageId,
         },
       },
       2,
@@ -1292,11 +1293,11 @@ describe("Agent direct channel lifecycle", () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
 
     await expect(dead).resolves.toMatchObject({ reason: "interrupted" })
-    expect(FakeWebSocket.last().sent).toEqual([])
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 0 }])
     session.close()
   })
 
-  it("closes the turn when the hello names another thread behind the same address, without the old replay", async () => {
+  it("closes the turn when the hello names another thread behind the same address, and reads the next turn whole from the new box", async () => {
     vi.useFakeTimers()
     const channel = vi
       .fn<NonNullable<AgentTasksModule["channel"]>>()
@@ -1315,21 +1316,25 @@ describe("Agent direct channel lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
 
-    // Same address and a log that is not empty: only the hello says the box is another one.
+    // Same address and a log that is not empty: only the hello says the box is another one,
+    // and the replay is not asked before it.
     const fresh = FakeWebSocket.last()
     expect(fresh.sent).toEqual([])
     fresh.receive("hello", { threadId: "thread-2", lastSequence: 4 })
     await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000" })
-    expect(fresh.sent).toEqual([])
+    expect(fresh.sent).toEqual([{ type: "replay", fromSequence: 0 }])
 
-    // The next drop replays the new box from its own log.
-    session.send("again")
-    await vi.waitFor(() => expect(fresh.sent).toHaveLength(1))
-    fresh.drop()
-    await vi.advanceTimersByTimeAsync(1_000)
-    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
-    FakeWebSocket.last().receive("hello", { threadId: "thread-2", lastSequence: 4 })
-    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 4 }])
+    // The new box already logged the start of the next turn; the replay brings it, then live.
+    const next = session.sendAndWait("SB-NEXT")
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(2))
+    const turn = { lifecycle: { turnId: "turn-2" } }
+    fresh.receive("stepStart", turn, 1)
+    fresh.receive("textChunk", { text: "SB-", ...turn }, 2)
+    fresh.receive("textChunk", { text: "NEXT", ...turn }, 3)
+    fresh.receive("textDelta", { text: "-OK", ...turn }, 5)
+    fresh.receive("stepFinish", { reason: "stop", ...turn }, 6)
+
+    await expect(next).resolves.toMatchObject({ content: "SB-NEXT-OK", reason: "stop" })
     session.close()
   })
 
