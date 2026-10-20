@@ -43,6 +43,14 @@ function message(id: string, sender: string, content: string, type = "TEXT"): Ag
   return { id, sender, content, type, createdAt: `2026-01-01T00:00:0${id.length}Z` }
 }
 
+// The row a turn closes with: the Copilot records the turn's usage on it, naming the prompt.
+function closing(id: string, content: string, requestMessageId = `prompt-${id}`): AgentMessage {
+  return {
+    ...message(id, "AGENT", content),
+    usage: { inputTokens: 1, outputTokens: 1, requestMessageId },
+  }
+}
+
 function event(type: string, payload: unknown = {}, timestamp = 1): AgentTaskEvent {
   return { type, payload, timestamp }
 }
@@ -462,8 +470,8 @@ describe("Agent task session", () => {
 
   it("reconnects once during a turn and reconciles the persisted Agent message", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
-    const recoveredMessage = message("new", "AGENT", "recovered answer")
-    const secondRecovered = message("newer", "AGENT", "second recovered answer")
+    const recoveredMessage = closing("new", "recovered answer")
+    const secondRecovered = closing("newer", "second recovered answer")
     const tasks = createTasks()
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
@@ -495,7 +503,7 @@ describe("Agent task session", () => {
 
   it("still closes a turn from the history after its sendAndWait timed out and the stream dropped", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
-    const answer = message("new", "AGENT", "TM-OK")
+    const answer = closing("new", "TM-OK")
     const tasks = createTasks()
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
@@ -518,7 +526,7 @@ describe("Agent task session", () => {
 
   it("closes a stopped turn found in the history as interrupted, not as a full answer", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
-    const partial = message("new", "AGENT", "I will run the command and wait.")
+    const partial = closing("new", "I will run the command and wait.")
     const tasks = createTasks()
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
@@ -537,6 +545,45 @@ describe("Agent task session", () => {
       content: "I will run the command and wait.",
       reason: "interrupted",
     })
+  })
+
+  it("does not close a running turn with a row the Copilot wrote while it runs", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const comment = message("comment", "AGENT", "I will run the command in the terminal.")
+    const answer = closing("answer", "SC-OK")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([comment, oldMessage]))
+      .mockResolvedValue(page([answer, comment, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("run it")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.disconnect(new Error("network"), 0)
+    await expect(result).resolves.toMatchObject({ content: "SC-OK", reason: "reconciled" })
+    expect(tasks.listMessages.mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("does not close a turn with the late answer to the prompt before it", async () => {
+    const previousPrompt = message("prompt-0", "USER", "SB-0")
+    const prompt = message("prompt-1", "USER", "SB-1")
+    const previousAnswer = closing("answer-0", "SB-0-OK", "prompt-0")
+    const answer = closing("answer-1", "SB-1-OK", "prompt-1")
+    const tasks = createTasks()
+    tasks.listMessages
+      // The answer to SB-0 is not written yet when SB-1 goes out.
+      .mockResolvedValueOnce(page([previousPrompt]))
+      .mockResolvedValueOnce(page([prompt, previousAnswer, previousPrompt]))
+      .mockResolvedValue(page([answer, prompt, previousAnswer, previousPrompt]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("SB-1")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.disconnect(new Error("network"), 0)
+    await expect(result).resolves.toMatchObject({ content: "SB-1-OK", reason: "reconciled" })
   })
 
   it("reconciles persisted content before resolving a terminal event after recovery", async () => {

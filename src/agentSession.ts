@@ -1003,11 +1003,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     this.emit("historyLoaded", { history: this.history })
+    // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
+    // answer can land after the baseline was taken: a new row is not this turn's end. Only the
+    // row that closes a turn, with its usage, answers it, and not one closing the turn of a prompt
+    // the baseline already had. With the live terminal already heard, the turn is known to be over.
+    const ended = this.recoveredTerminalReason !== undefined
     const recovered = page.content.find(
       (message) =>
         !this.turnBaselineIds.has(message.id) &&
         message.sender !== "USER" &&
-        message.type !== "TOOL_USE",
+        message.type !== "TOOL_USE" &&
+        (ended || message.type === "ERROR" || this.closesThisTurn(message)),
     )
     if (!recovered) return false
     if (recovered.type === "ERROR") {
@@ -1019,6 +1025,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this._content = recovered.content
     this.finishTurn(reason, recovered.usage ?? this.recoveredTerminalUsage)
     return true
+  }
+
+  private closesThisTurn(message: AgentMessage): boolean {
+    if (!message.usage) return false
+    const prompt = message.usage.requestMessageId
+    return prompt === undefined || !this.turnBaselineIds.has(prompt)
   }
 
   /** True once the server took the input; false when the box refused it on the stream. */
