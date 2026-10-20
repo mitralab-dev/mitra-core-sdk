@@ -60,7 +60,9 @@ exact version.
   into a turn another client opened follows that turn from the `steer` on.
 - A turn whose `sendAndWait` already gave up on `timeoutMs` or `signal` is still closed from the
   history when the stream drops: the recovery no longer stops with the waiter, and the session
-  does not stay `streaming` forever.
+  does not stay `streaming` forever. A `sendAndWait` that gives up before the message went out,
+  while the task or the box channel is still on its way, no longer drops it: the message goes
+  out and the session follows its turn.
 - A turn the session closes from the history after the stream dropped closes only on the row
   that ends it: the agent row carrying the turn's usage, or an `ERROR` row. The Copilot writes a
   turn's rows while it runs, so the first new row was often a comment from the middle of the

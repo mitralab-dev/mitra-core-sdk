@@ -723,7 +723,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.openingPromise && !(await this.openingPromise)) {
       throw new Error("Agent task session could not be opened.")
     }
-    if (this.isClosed() || waiter?.settled) return false
+    // A waiter that gave up on `timeoutMs` or `signal` only stopped waiting: the message still
+    // goes out and the session follows its turn, as it does after the turn started.
+    if (this.isClosed()) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
     if (this.isClosed()) {
@@ -734,9 +736,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       await this.sendInput(input).catch(() => undefined)
       return false
     }
-    if (waiter?.settled) return false
     await this.ensureChannel()
-    if (this.isClosed() || waiter?.settled) return false
+    if (this.isClosed()) return false
     await this.captureTurnBaseline()
     this._content = ""
     this.recoveryUsed = false

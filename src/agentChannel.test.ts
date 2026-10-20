@@ -537,6 +537,35 @@ describe("Agent direct channel", () => {
     session.close()
   })
 
+  it("still sends a message whose sendAndWait timed out before the channel opened", async () => {
+    vi.useFakeTimers()
+    let offerChannel!: (channel: AgentTaskChannel) => void
+    const tasks = createTasks(
+      () =>
+        new Promise<AgentTaskChannel>((resolve) => {
+          offerChannel = resolve
+        }),
+    )
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("Busy box", { timeoutMs: 8_000 })
+    const rejected = expect(result).rejects.toThrow("timed out after 8000 ms")
+    await vi.waitFor(() => expect(tasks.channel).toHaveBeenCalledOnce())
+    await vi.advanceTimersByTimeAsync(8_000)
+    await rejected
+
+    // Timing out only stopped the waiting: the message goes out once the channel is there.
+    offerChannel({ wsUrl: BOX_URL, lastSequence: 0 })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect(FakeWebSocket.last().sent).toEqual([
+        expect.objectContaining({ type: "message", content: "Busy box" }),
+      ]),
+    )
+    expect(session.status).toBe("streaming")
+    session.close()
+  })
+
   it("fails the send when the box never answers for the message", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer())
