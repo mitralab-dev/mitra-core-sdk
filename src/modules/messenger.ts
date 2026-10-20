@@ -38,6 +38,7 @@ export function createMessengerModule(
   }
 }
 
+// Field by field on purpose: a `from` from an untyped caller must not reach the Messenger.
 function rawEmailPayload(input: SendEmailInput): Record<string, unknown> {
   return {
     type: "RAW",

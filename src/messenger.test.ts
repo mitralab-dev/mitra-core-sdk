@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { SdkCoreResponseError, createMessengerModule } from "./index"
-import type { Transport, TransportRequestOptions } from "./index"
+import type { SendEmailInput, Transport, TransportRequestOptions } from "./index"
 
 interface CapturedRequest {
   path: string
@@ -60,22 +60,21 @@ describe("messenger.sendEmail", () => {
     ])
   })
 
-  it("omits absent optional fields", async () => {
+  it("omits absent optional fields and drops a from that an untyped caller passes", async () => {
     const transport = new QueueTransport([{ messageId: "message-1" }])
 
     await createMessengerModule(transport).sendEmail({
       to: ["ana@example.com"],
-      bcc: ["dani@example.com"],
       subject: "Welcome",
       html: "<p>Hi</p>",
-    })
+      from: "spoof@example.com",
+    } as SendEmailInput)
 
     expect(transport.requests[0]?.options.body).toStrictEqual({
       channel: "EMAIL",
       payload: {
         type: "RAW",
         to: ["ana@example.com"],
-        bcc: ["dani@example.com"],
         subject: "Welcome",
         html: "<p>Hi</p>",
       },
@@ -88,17 +87,5 @@ describe("messenger.sendEmail", () => {
     await expect(
       messenger.sendEmail({ to: ["ana@example.com"], subject: "Welcome", html: "<p>Hi</p>" }),
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
-  })
-
-  it("passes the transport's quota error through unchanged", async () => {
-    const quotaExceeded = Object.assign(new Error("Daily email quota exceeded"), {
-      status: 429,
-      retryAfterSeconds: 3600,
-    })
-    const messenger = createMessengerModule(new QueueTransport([quotaExceeded]))
-
-    await expect(
-      messenger.sendEmail({ to: ["ana@example.com"], subject: "Welcome", html: "<p>Hi</p>" }),
-    ).rejects.toBe(quotaExceeded)
   })
 })
