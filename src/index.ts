@@ -22,6 +22,8 @@ export type {
   AgentTaskSessionOptions,
   AgentTaskSessionStatus,
   AgentTasksWithSessions,
+  AgentSubagent,
+  AgentSubagentStatus,
   AgentTimelineItem,
   AgentToolEvent,
   AgentTurnResult,

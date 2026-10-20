@@ -43,6 +43,14 @@ function message(id: string, sender: string, content: string, type = "TEXT"): Ag
   return { id, sender, content, type, createdAt: `2026-01-01T00:00:0${id.length}Z` }
 }
 
+// The row a turn closes with: the Copilot records the turn's usage on it, naming the prompt.
+function closing(id: string, content: string, requestMessageId = `prompt-${id}`): AgentMessage {
+  return {
+    ...message(id, "AGENT", content),
+    usage: { inputTokens: 1, outputTokens: 1, requestMessageId },
+  }
+}
+
 function event(type: string, payload: unknown = {}, timestamp = 1): AgentTaskEvent {
   return { type, payload, timestamp }
 }
@@ -316,47 +324,114 @@ describe("Agent task session", () => {
     expect(readings).toEqual([reading])
   })
 
-  it("rejects sendAndWait with a typed producer error and continues with the FIFO queue", async () => {
+  it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {
+    const { session, source, tasks } = createSession()
+    const first = session.sendAndWait("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    expect(tasks.sendInput).toHaveBeenLastCalledWith("task-1", {
+      type: "message",
+      content: "second",
+    })
+    expect(session.queue).toEqual([])
+
+    source.emit(event("textDelta", { text: "both answers" }))
+    source.emit(event("stepFinish", { reason: "stop" }))
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toMatchObject({ content: "both answers", reason: "stop" })
+    expect(secondResult).toBe(firstResult)
+  })
+
+  it("rejects every message of a turn the producer fails with its typed error", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
     const second = session.sendAndWait("second")
-    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
-    expect(session.queue).toHaveLength(1)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
 
     source.emit(event("error", { code: "NO_CREDENTIAL_AVAILABLE", message: "Connect first" }))
-    await expect(first).rejects.toEqual(
-      expect.objectContaining<Partial<AgentTaskTurnError>>({
-        name: "AgentTaskTurnError",
-        message: "Connect first",
-        code: "NO_CREDENTIAL_AVAILABLE",
-      }),
-    )
-    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
-    source.emit(event("textDelta", { text: "second answer" }))
-    source.emit(event("stepFinish", { reason: "stop" }))
-    await expect(second).resolves.toMatchObject({ content: "second answer", reason: "stop" })
+    const typed = expect.objectContaining<Partial<AgentTaskTurnError>>({
+      name: "AgentTaskTurnError",
+      message: "Connect first",
+      code: "NO_CREDENTIAL_AVAILABLE",
+    })
+    await expect(first).rejects.toEqual(typed)
+    await expect(second).rejects.toEqual(typed)
+    expect(session.status).toBe("idle")
   })
 
-  it("bounds, edits, removes, clears, cancels, and answers the queue", async () => {
+  it("reports a message the Copilot did not take as an error, with no queue to hold it", async () => {
+    const { session, tasks } = createSession()
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    void session.sendAndWait("first").catch(() => undefined)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    tasks.sendInput.mockRejectedValueOnce(new Error("offline"))
+
+    const second = session.sendAndWait("second")
+    await expect(second).rejects.toThrow("offline")
+    expect(errors).toContain("Failed to send Agent prompt: offline")
+    expect(session.queue).toEqual([])
+    expect(session.status).toBe("streaming")
+  })
+
+  it("does not deliver a steer the close rejected while it waited for the first message", async () => {
+    let created!: () => void
+    const tasks = createTasks({
+      create: vi.fn(
+        () =>
+          new Promise<AgentTask>((resolve) => {
+            created = () => resolve(TASK)
+          }),
+      ),
+    })
+    const { session } = createSession(tasks)
+    session.send("first")
+    const second = session.sendAndWait("second")
+    await vi.waitFor(() => expect(tasks.create).toHaveBeenCalledOnce())
+    session.close()
+    await expect(second).rejects.toThrow("Agent task session is closed.")
+
+    created()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "message", content: "first" },
+    ])
+  })
+
+  it("keeps the queue API as an empty no-op and sends every message at once", async () => {
     vi.useFakeTimers()
     try {
       const { session, source, tasks } = createSession()
       const errors: string[] = []
+      const queueChanges = vi.fn()
       session.on("error", ({ error }) => errors.push(error))
+      session.on("queueChange", queueChanges)
       session.send("active")
       await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
 
-      for (let index = 0; index < 11; index += 1) session.send(`queued-${index}`)
-      expect(session.queue).toHaveLength(10)
-      expect(errors).toContain("Agent message queue is full (maximum 10).")
-      const firstId = session.queue[0]!.id
-      session.editQueueItem(firstId, "edited")
-      expect(session.queue[0]?.text).toBe("edited")
-      session.editQueueItem(firstId, " ")
-      expect(session.queue).toHaveLength(9)
-      session.removeQueueItem("missing")
+      // No cap on the app side: every one goes out, and the box decides what to do with them.
+      for (let index = 0; index < 20; index += 1) session.send(`steer-${index}`)
+      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(21))
+      expect(tasks.sendInput.mock.calls.slice(1).map(([, input]) => input)).toEqual(
+        Array.from({ length: 20 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
+      )
+      expect(errors).toEqual([])
+      expect(session.queue).toEqual([])
+      session.editQueueItem("q-1", "edited")
+      session.removeQueueItem("q-1")
       session.clearQueue()
       expect(session.queue).toEqual([])
+      expect(queueChanges).not.toHaveBeenCalled()
+      // Only the box has subagents: without its channel nothing goes out.
+      session.stopSubagent("sub-1")
+      await vi.waitFor(() =>
+        expect(errors).toEqual([
+          "Failed to stop the Agent subagent: The Agent subagent.stop was not sent: the box channel is not connected right now.",
+        ]),
+      )
+      expect(tasks.sendInput).toHaveBeenCalledTimes(21)
 
       session.respondApproval(true)
       await vi.waitFor(() =>
@@ -385,17 +460,18 @@ describe("Agent task session", () => {
     expect(tasks.sendInput).not.toHaveBeenCalledWith("task-1", { type: "interrupt" })
 
     const controller = new AbortController()
-    const queued = session.sendAndWait("queued", { signal: controller.signal })
-    expect(session.queue).toHaveLength(1)
+    const steered = session.sendAndWait("steered", { signal: controller.signal })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
     controller.abort(new Error("caller stopped"))
-    await expect(queued).rejects.toThrow("caller stopped")
-    expect(session.queue).toHaveLength(0)
+    await expect(steered).rejects.toThrow("caller stopped")
+    expect(session.queue).toEqual([])
+    expect(tasks.sendInput).not.toHaveBeenCalledWith("task-1", { type: "interrupt" })
   })
 
   it("reconnects once during a turn and reconciles the persisted Agent message", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
-    const recoveredMessage = message("new", "AGENT", "recovered answer")
-    const secondRecovered = message("newer", "AGENT", "second recovered answer")
+    const recoveredMessage = closing("new", "recovered answer")
+    const secondRecovered = closing("newer", "second recovered answer")
     const tasks = createTasks()
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
@@ -423,6 +499,165 @@ describe("Agent task session", () => {
       reason: "reconciled",
     })
     expect(source.taskIds).toHaveLength(3)
+  })
+
+  it("still closes a turn from the history after its sendAndWait timed out and the stream dropped", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const answer = closing("new", "TM-OK")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([answer, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turnEnds: unknown[] = []
+    session.on("turnEnd", (result) => turnEnds.push(result))
+
+    const result = session.sendAndWait("long turn", { timeoutMs: 20 })
+    await expect(result).rejects.toThrow("timed out after 20 ms")
+    expect(session.status).toBe("streaming")
+
+    // The waiter gave up; the turn did not. The history still has to close it.
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(session.status).toBe("idle"), { timeout: 3_000 })
+    expect(turnEnds).toEqual([expect.objectContaining({ content: "TM-OK", reason: "reconciled" })])
+  })
+
+  it("closes a stopped turn found in the history as interrupted, not as a full answer", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const partial = closing("new", "I will run the command and wait.")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([partial, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("long task")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", { lifecycle: { turnId: "turn-1" } }))
+    await session.cancel()
+    expect(session.status).toBe("cancelled")
+    source.disconnect(new Error("network"), 0)
+
+    await expect(result).resolves.toMatchObject({
+      content: "I will run the command and wait.",
+      reason: "interrupted",
+    })
+  })
+
+  it("skips the frames of the running turn the Copilot stream replays after a drop", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const answer = closing("answer", "Hello world")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([answer, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const deltas: string[] = []
+    const tools: string[] = []
+    session.on("delta", ({ delta }) => deltas.push(delta))
+    session.on("tool", ({ phase }) => tools.push(phase))
+    const turn = { lifecycle: { turnId: "turn-1" } }
+    const sequenced = (type: string, payload: object, sequence: number): AgentTaskEvent => ({
+      ...event(type, payload),
+      sequence,
+    })
+
+    const result = session.sendAndWait("say hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(sequenced("stepStart", turn, 1), 0)
+    source.emit(sequenced("textChunk", { text: "Hello", ...turn }, 2), 0)
+    source.emit(sequenced("toolCall", { name: "Bash", toolId: "t1", ...turn }, 3), 0)
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+
+    // The Copilot stream replays from what its history had, before what this session saw.
+    source.emit(sequenced("textChunk", { text: "Hello", ...turn }, 2), 1)
+    source.emit(sequenced("toolCall", { name: "Bash", toolId: "t1", ...turn }, 3), 1)
+    source.emit(sequenced("toolResult", { name: "Bash", toolId: "t1", ...turn }, 4), 1)
+    source.emit(sequenced("textChunk", { text: " world", ...turn }, 5), 1)
+    source.emit(sequenced("stepFinish", { reason: "stop", ...turn }, 6), 1)
+
+    await expect(result).resolves.toMatchObject({ content: "Hello world" })
+    expect(deltas).toEqual(["Hello", " world"])
+    expect(tools).toEqual(["call", "result"])
+  })
+
+  it("closes a stopped turn without usage on its live terminal, with only partial rows in the history", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const comment = message("comment", "AGENT", "Running the command.")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      // A stop with no tokens writes no closing row and no ERROR: the history never ends it.
+      .mockResolvedValue(page([comment, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turn = { lifecycle: { turnId: "turn-1" } }
+
+    const result = session.sendAndWait("long task")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", turn), 0)
+    source.emit(event("textDelta", { text: "Running the command.", ...turn }), 0)
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { turnId: "turn-1", terminal: true, interruptTerminal: true },
+      }),
+      1,
+    )
+
+    await expect(result).resolves.toMatchObject({
+      content: "Running the command.",
+      reason: "interrupted",
+    })
+    expect(session.status).toBe("idle")
+  })
+
+  it("does not close a running turn with a row the Copilot wrote while it runs", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const comment = message("comment", "AGENT", "I will run the command in the terminal.")
+    const answer = closing("answer", "SC-OK")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([comment, oldMessage]))
+      .mockResolvedValue(page([answer, comment, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("run it")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.disconnect(new Error("network"), 0)
+    await expect(result).resolves.toMatchObject({ content: "SC-OK", reason: "reconciled" })
+    expect(tasks.listMessages.mock.calls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("does not close a turn with the late answer to the prompt before it", async () => {
+    const previousPrompt = message("prompt-0", "USER", "SB-0")
+    const prompt = message("prompt-1", "USER", "SB-1")
+    const previousAnswer = closing("answer-0", "SB-0-OK", "prompt-0")
+    const answer = closing("answer-1", "SB-1-OK", "prompt-1")
+    const tasks = createTasks()
+    tasks.listMessages
+      // The answer to SB-0 is not written yet when SB-1 goes out.
+      .mockResolvedValueOnce(page([previousPrompt]))
+      .mockResolvedValueOnce(page([prompt, previousAnswer, previousPrompt]))
+      .mockResolvedValue(page([answer, prompt, previousAnswer, previousPrompt]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+
+    const result = session.sendAndWait("SB-1")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.disconnect(new Error("network"), 0)
+    await expect(result).resolves.toMatchObject({ content: "SB-1-OK", reason: "reconciled" })
   })
 
   it("reconciles persisted content before resolving a terminal event after recovery", async () => {
@@ -725,22 +960,24 @@ describe("Agent task session", () => {
     expect(cancelled).toEqual([])
   })
 
-  it("rejects an unacknowledged cancellation and flushes the next queued prompt", async () => {
-    const { session, source, tasks } = createSession()
+  it("rejects an unacknowledged cancellation with the message sent into that turn", async () => {
+    const { session, tasks } = createSession()
     const first = session.sendAndWait("first")
     const rejection = expect(first).rejects.toThrow("cancellation was not acknowledged")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     const second = session.sendAndWait("second", { timeoutMs: 2_000 })
+    const secondRejection = expect(second).rejects.toThrow("cancellation was not acknowledged")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
 
     vi.useFakeTimers()
     try {
       await session.cancel()
+      expect(tasks.sendInput).toHaveBeenLastCalledWith("task-1", { type: "interrupt" })
       await vi.advanceTimersByTimeAsync(10_000)
       await rejection
-      await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
-      source.emit(event("textDelta", { text: "next" }))
-      source.emit(event("stepFinish", { reason: "endTurn" }))
-      await expect(second).resolves.toMatchObject({ content: "next" })
+      await secondRejection
+      expect(session.status).toBe("idle")
+      expect(tasks.sendInput).toHaveBeenCalledTimes(3)
     } finally {
       vi.useRealTimers()
     }
@@ -923,10 +1160,11 @@ describe("Agent turn usage", () => {
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
       .mockResolvedValueOnce(page([oldMessage]))
-      .mockResolvedValueOnce(page([finalMessage, oldMessage]))
+      .mockResolvedValue(page([finalMessage, oldMessage]))
     const source = new FakeEventSource()
     const { session } = createSession(tasks, source)
-    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    // A terminal with usage waits a few polls for the row carrying it; this Copilot wrote none.
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 8_000 })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     source.disconnect(new Error("network"), 0)
     await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
