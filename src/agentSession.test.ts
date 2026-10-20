@@ -587,6 +587,40 @@ describe("Agent task session", () => {
     expect(tools).toEqual(["call", "result"])
   })
 
+  it("closes a stopped turn without usage on its live terminal, with only partial rows in the history", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const comment = message("comment", "AGENT", "Running the command.")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      // A stop with no tokens writes no closing row and no ERROR: the history never ends it.
+      .mockResolvedValue(page([comment, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turn = { lifecycle: { turnId: "turn-1" } }
+
+    const result = session.sendAndWait("long task")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", turn), 0)
+    source.emit(event("textDelta", { text: "Running the command.", ...turn }), 0)
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        lifecycle: { turnId: "turn-1", terminal: true, interruptTerminal: true },
+      }),
+      1,
+    )
+
+    await expect(result).resolves.toMatchObject({
+      content: "Running the command.",
+      reason: "interrupted",
+    })
+    expect(session.status).toBe("idle")
+  })
+
   it("does not close a running turn with a row the Copilot wrote while it runs", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const comment = message("comment", "AGENT", "I will run the command in the terminal.")
