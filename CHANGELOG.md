@@ -40,9 +40,13 @@ exact version.
   event is emitted and the turn and the messages waiting for the box are left alone. With the box
   channel down, the answer is not sent and an `error` says so; the Copilot does not take it.
 - A turn whose box went away while the socket redialed (the Copilot points the chat to another
-  box, or the same address comes back with an empty log) ends as `interrupted` with the text it
-  had, so the next message opens a turn of its own. A terminal the new box sends for that turn
-  is ignored.
+  box, the same address comes back with an empty log, or the box's `hello` names another T3
+  thread or a log short of the session's cursor) ends as `interrupted` with the text it had, so
+  the next message opens a turn of its own. A terminal the new box sends for that turn is
+  ignored. On the socket, once the box said which thread it serves, the redial asks for the
+  replay only after the new box's `hello`: behind the dev proxy every box of a chat has the same
+  address, and asking a new box for the old cursor ended the next message's turn as an empty
+  `interrupted`.
 - The box's `steer` frame marks where T3 took a message into the running turn, with no turn of
   its own: the session answers that message with the running turn and emits the new `steered`
   event with its `text` and `messageId`, for the app to show it at that point. The frame also

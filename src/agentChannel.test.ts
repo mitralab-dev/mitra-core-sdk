@@ -1296,6 +1296,65 @@ describe("Agent direct channel lifecycle", () => {
     session.close()
   })
 
+  it("closes the turn when the hello names another thread behind the same address, without the old replay", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 4 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = FakeWebSocket.last()
+    first.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    first.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    first.receive("textDelta", { text: "w000", lifecycle: { turnId: "turn-1" } }, 5)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // Same address and a log that is not empty: only the hello says the box is another one.
+    const fresh = FakeWebSocket.last()
+    expect(fresh.sent).toEqual([])
+    fresh.receive("hello", { threadId: "thread-2", lastSequence: 4 })
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000" })
+    expect(fresh.sent).toEqual([])
+
+    // The next drop replays the new box from its own log.
+    session.send("again")
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(1))
+    fresh.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+    FakeWebSocket.last().receive("hello", { threadId: "thread-2", lastSequence: 4 })
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 4 }])
+    session.close()
+  })
+
+  it("asks the same thread for the replay once its hello arrives", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = FakeWebSocket.last()
+    first.receive("hello", { threadId: "thread-1", lastSequence: 3 })
+    first.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    const redialed = FakeWebSocket.last()
+    expect(redialed.sent).toEqual([])
+    redialed.receive("hello", { threadId: "thread-1", lastSequence: 4 })
+    expect(redialed.sent).toEqual([{ type: "replay", fromSequence: 4 }])
+    expect(session.status).toBe("streaming")
+    session.close()
+  })
+
   it("stops the redial when the session closes in the middle of the backoff", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer())
