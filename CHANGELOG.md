@@ -2,18 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.0-beta.3
 
 - `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
   takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
-  return is unaffected.
+  return is unaffected. The id also goes in the `POST /inputs` body when the message goes to the
+  Copilot, which keeps it and hands it to the box: `send` returns the id on every path.
 - The events the session already emits carry, as optional fields, what the box frame named:
   `sequence`, `itemId`, `turnId` (the frame's `lifecycle.turnId`) and `parentToolId` on a
-  subagent's text and tools. `steered` also carries the steered message's `turnId`, `sequence` and
+  subagent's text and tools. `delta` and `subagentDelta` also carry `itemDelta`, the frame's piece
+  of its item without the separator 0.2.13 joined two text items with. `steered` also carries the steered message's `turnId`, `sequence` and
   `clientMessageId`; `turnEnd` carries the `sequence` and `turnId` of its `stepFinish`. History
   items carry what the Copilot recorded: `sequence`, `epoch`, `itemId`, `parentToolId`,
-  `clientMessageId`, `reasoning`, `subagent` and `reason`. Nothing is derived: a frame or row
-  without a field leaves it out.
+  `clientMessageId`, `reasoning`, `subagent` and `reason`. `subagent` has the shape of the box's
+  `subagentUpdate` (`AgentSubagentFrame`, partial), with the subagent's own text in `text` and the
+  `sequence` of the last frame folded into it; a tool item keeps `parentToolId` on `tool` only.
+  Nothing is derived: a frame or row without a field leaves it out.
 - A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
   box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
   leaves `status` and `content` alone and, on the direct channel, does not mark the chat as in a
@@ -21,8 +25,13 @@ All notable changes to this project are documented in this file.
 - `queue` and `queueChange` mirror T3's queue of the chat from the box's `messageQueued` frames (the
   ones with a `position`), with `position`, `queueHeld`, `sequence` and `turnId` as optional
   fields. A message leaves when a turn takes it (`stepStart` or `steer` naming its
-  `clientMessageId`) or when it ends before running; that end rejects only its own `sendAndWait`
-  and leaves the running turn alone. `removeQueueItem` sends `queued-run.cancel`,
+  `clientMessageId`), when the box takes it out on a cancel (`messageQueued` with `position: null`
+  and `cancelled: true`, no terminal) or when it ends before running; that end rejects only its
+  own `sendAndWait` and leaves the running turn alone, unless it is the message that opened this
+  session's turn, which ends with it. A refusal of a queue command (an `error` with `command`)
+  is only emitted as `error` and fails no turn. On the direct channel, a queued message's frames
+  and a terminal naming another turn than the followed one never change the turn a redial
+  resumes or the one closed as interrupted when the box goes away. `removeQueueItem` sends `queued-run.cancel`,
   `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel per queued message,
   on the box channel only. The methods are no longer deprecated; their signatures are unchanged.
 - `session({ taskId })` opened in the middle of a run asks the box for the replay from where the
@@ -30,7 +39,10 @@ All notable changes to this project are documented in this file.
   already makes, before any live frame: what the Copilot has not recorded yet reaches the session
   and nothing the history has comes twice. When the channel's `epoch` (new optional field of
   `AgentTaskChannel`) is another log than the history's newest, the replay starts at the box log's
-  beginning. A history without `sequence` asks for no replay, as before. A turn the replay opens
+  beginning. On the socket the same decision as the redial is made from the box's `hello`: a
+  `lastSequence` short of the history's end is another log too. The channel cursor starts at the
+  replay point, so a drop in the middle of the replay asks again for what did not arrive. The
+  history's end counts the `subagent.sequence` of tool items. A history without `sequence` asks for no replay, as before. A turn the replay opens
   keeps the session `streaming` after the open. The event source gets the cursor as a fifth,
   optional `open` argument, which a concrete SDK may ignore.
 - The queue and subagent state the box sends again after a replay, each a copy of the line that
