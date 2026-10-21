@@ -558,6 +558,34 @@ describe("Agent box piece identity", () => {
     ])
   })
 
+  // The box keeps 0.2.13's `"\n\n"` between two text items in `text`, and sends the item's own
+  // piece in `itemDelta` (FRAMES-CONTRACT 3): both reach `delta` as they came.
+  it("exposes the item's own piece next to the text 0.2.13 joined items with", async () => {
+    const { session, first, socket } = await runningTurn()
+    const deltas: unknown[] = []
+    const subagentDeltas: unknown[] = []
+    session.on("delta", ({ delta, itemDelta, itemId }) => deltas.push({ delta, itemDelta, itemId }))
+    session.on("subagentDelta", ({ delta, itemDelta }) => subagentDeltas.push({ delta, itemDelta }))
+    const owner = { lifecycle: { turnId: "turn-1" } }
+    frame(socket, "textDelta", { text: "First.", itemDelta: "First.", itemId: "a1", ...owner }, 2)
+    frame(socket, "textDelta", { text: "\n\nNext.", itemDelta: "Next.", itemId: "a2", ...owner }, 3)
+    frame(
+      socket,
+      "textDelta",
+      { text: "\n\nSub", itemDelta: "Sub", itemId: "c2", parentToolId: "tool-9" },
+      4,
+    )
+    frame(socket, "stepFinish", { reason: "stop", ...owner }, 5)
+    expect(deltas).toEqual([
+      { delta: "First.", itemDelta: "First.", itemId: "a1" },
+      { delta: "\n\nNext.", itemDelta: "Next.", itemId: "a2" },
+      { delta: "\n\nSub", itemDelta: "Sub", itemId: "c2" },
+    ])
+    expect(subagentDeltas).toEqual([{ delta: "\n\nSub", itemDelta: "Sub" }])
+    // `content` stays the text 0.2.13 built.
+    await expect(first).resolves.toMatchObject({ content: "First.\n\nNext.\n\nSub" })
+  })
+
   it("leaves the fields out of an event whose frame did not carry them, as an older box sends", async () => {
     const { session, socket } = await runningTurn()
     const seen: unknown[] = []

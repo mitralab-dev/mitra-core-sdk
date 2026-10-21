@@ -231,8 +231,17 @@ export interface AgentTaskSessionEventMap {
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
   turnStart: Record<string, never>
-  /** On a subagent's own text, `parentToolId` is the tool call that spawned it. */
-  delta: { delta: string; kind: "text" | "thinking"; parentToolId?: string } & AgentPieceIdentity
+  /**
+   * On a subagent's own text, `parentToolId` is the tool call that spawned it. `itemDelta` is the
+   * box frame's piece of its item: the same as `delta` except on the first piece of a text item
+   * that follows another, where `delta` starts with the `"\n\n"` that 0.2.13 joined them with.
+   */
+  delta: {
+    delta: string
+    kind: "text" | "thinking"
+    parentToolId?: string
+    itemDelta?: string
+  } & AgentPieceIdentity
   tool: AgentToolEvent
   workspace: { payload: unknown; timestamp: number; sequence?: number }
   turnEnd: AgentTurnResult
@@ -268,6 +277,7 @@ export interface AgentTaskSessionEventMap {
     parentToolId: string
     delta: string
     kind: "text" | "thinking"
+    itemDelta?: string
   } & AgentPieceIdentity
   /** A tool a subagent called, in its own thread. It also comes as `tool`, as in 0.2.13. */
   subagentTool: AgentToolEvent & { parentToolId: string }
@@ -422,6 +432,10 @@ function pieceIdentityOf(
     ...(typeof payload?.itemId === "string" ? { itemId: payload.itemId } : {}),
     ...(typeof turnId === "string" ? { turnId } : {}),
   }
+}
+
+function itemDeltaOf(payload: Record<string, unknown> | null): { itemDelta?: string } {
+  return typeof payload?.itemDelta === "string" ? { itemDelta: payload.itemDelta } : {}
 }
 
 function sequenceOf(event: AgentTaskEvent): { sequence?: number } {
@@ -1597,7 +1611,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.emit("turnStart", {})
     }
     if (kind === "text") this._content += text
-    this.emit("delta", { delta: text, kind, ...pieceIdentityOf(event, payload) })
+    this.emit("delta", {
+      delta: text,
+      kind,
+      ...itemDeltaOf(payload),
+      ...pieceIdentityOf(event, payload),
+    })
   }
 
   private emitTool(
@@ -1619,7 +1638,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "thinking": {
         const delta = typeof payload.text === "string" ? payload.text : ""
         const kind = event.type === "thinking" ? "thinking" : "text"
-        const identity = pieceIdentityOf(event, payload)
+        const identity = { ...itemDeltaOf(payload), ...pieceIdentityOf(event, payload) }
         if (kind === "text") this._content += delta
         this.emit("delta", { delta, kind, parentToolId, ...identity })
         this.emit("subagentDelta", { parentToolId, delta, kind, ...identity })
