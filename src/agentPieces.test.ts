@@ -379,6 +379,7 @@ describe("Agent conversation opened in the middle of a run", () => {
     for (const [cursor, logged] of cuts) {
       BoxSocket.instances = []
       BoxSocket.log = recorded.frames.slice(0, logged)
+      BoxSocket.hello = { threadId: "thread-1", lastSequence: logged }
       const history = historyAt(recorded.frames, cursor, recorded.sent)
       const fresh = manager(history, logged, 0).session({ taskId: "task-1" })
       const app = draw(fresh)
@@ -522,7 +523,7 @@ describe("Agent conversation across a box that died", () => {
 
     // Reloaded before the new box handed anything over: its whole log comes in the replay.
     BoxSocket.instances = []
-    BoxSocket.hello = undefined
+    BoxSocket.hello = { threadId: "thread-2", lastSequence: 3 }
     BoxSocket.log = newBox(watched.second)
     const before = manager([...recordedOld, userRow(watched.second, "Also cats")], 3, 1).session({
       taskId: "task-1",
@@ -554,6 +555,7 @@ describe("Agent conversation across a box that died", () => {
   it("draws before the swap what the live session had drawn by then", async () => {
     const first = "cm-1"
     BoxSocket.log = oldBox(first)
+    BoxSocket.hello = { threadId: "thread-1", lastSequence: 5 }
     const fresh = manager(
       [
         userRow(first, "Count birds", { sequence: 1, epoch: 0 }),
@@ -584,5 +586,85 @@ describe("Agent conversation from an older box or Copilot", () => {
     const fresh = manager(history, 7, 0).session({ taskId: "task-1" })
     await vi.waitFor(() => expect(fresh.status).toBe("idle"))
     expect(BoxSocket.instances.at(-1)!.sent).toEqual([])
+  })
+})
+
+describe("Agent conversation opened on a box log the history may not be on", () => {
+  const user = {
+    id: "row-u",
+    sender: "USER",
+    type: "TEXT",
+    content: "Count birds",
+    createdAt: "2026-01-01T00:00:00Z",
+    clientMessageId: "cm-1",
+    sequence: 1,
+    epoch: 0,
+  }
+  const hello = {
+    id: "row-a1",
+    sender: "AGENT",
+    type: "TEXT",
+    content: "Hello",
+    createdAt: "2026-01-01T00:00:00Z",
+    itemId: "a1",
+    sequence: 3,
+    epoch: 0,
+  }
+  const turn = (turnId: string, pieces: string[], itemId: string): Frame[] =>
+    [
+      { type: "stepStart", payload: { lifecycle: { turnId, clientMessageId: "cm-x" } } },
+      ...pieces.map((text) => ({
+        type: "textDelta",
+        payload: { text, itemId, lifecycle: { turnId } },
+      })),
+      {
+        type: "stepFinish",
+        payload: { reason: "stop", lifecycle: { turnId, terminal: true, sessionIdle: true } },
+      },
+    ].map((frame, index) => ({ ...frame, sequence: index + 1, timestamp: index + 1 }))
+
+  it("reads a new box from its beginning when its log is already longer than the history", async () => {
+    BoxSocket.log = turn("turn-9", ["Ca", "ts", "!", "!"], "b1")
+    BoxSocket.hello = { threadId: "thread-2", lastSequence: 6 }
+    const fresh = manager([user, hello], 6, 1).session({ taskId: "task-1" })
+    const app = draw(fresh)
+    await vi.waitFor(() => expect(fresh.status).toBe("idle"))
+    expect(BoxSocket.instances.at(-1)!.sent[0]).toEqual({ type: "replay", fromSequence: 0 })
+    expect(app.list().map((piece) => [piece.key, piece.text])).toEqual([
+      ["user:cm-1", "Count birds"],
+      ["text:a1", "Hello"],
+      ["text:b1", "Cats!!"],
+    ])
+  })
+
+  it("reads the box from its beginning when its hello is short of the history, on the same epoch", async () => {
+    BoxSocket.log = turn("turn-9", ["Cats"], "b1")
+    BoxSocket.hello = { threadId: "thread-2", lastSequence: 2 }
+    const fresh = manager([user, hello], 2, 0).session({ taskId: "task-1" })
+    const app = draw(fresh)
+    await vi.waitFor(() => expect(fresh.status).toBe("idle"))
+    expect(BoxSocket.instances.at(-1)!.sent[0]).toEqual({ type: "replay", fromSequence: 0 })
+    expect(app.list().map((piece) => piece.key)).toEqual(["user:cm-1", "text:a1", "text:b1"])
+  })
+
+  it("asks again from what arrived when the socket drops in the middle of the replay", async () => {
+    const frames = turn("turn-1", ["Hel", "lo", " wor", "ld"], "a1")
+    // The box had logged the whole turn when the Copilot answered; the socket dies after one frame
+    // of the replay.
+    BoxSocket.log = frames.slice(0, 4)
+    BoxSocket.hello = { threadId: "thread-1", lastSequence: 6 }
+    const fresh = manager([user, hello], 6, 0).session({ taskId: "task-1" })
+    const app = draw(fresh)
+    await vi.waitFor(() => expect(fresh.status).toBe("streaming"))
+    const first = BoxSocket.instances.at(-1)!
+    expect(first.sent[0]).toEqual({ type: "replay", fromSequence: 3 })
+    BoxSocket.log = frames
+    first.onclose?.({ code: 1006 })
+    await vi.waitFor(() => expect(fresh.status).toBe("idle"), { timeout: 5_000 })
+    expect(BoxSocket.instances.at(-1)!.sent[0]).toEqual({ type: "replay", fromSequence: 4 })
+    expect(app.list().map((piece) => [piece.key, piece.text])).toEqual([
+      ["user:cm-1", "Count birds"],
+      ["text:a1", "Hello world"],
+    ])
   })
 })

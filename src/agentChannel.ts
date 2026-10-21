@@ -704,7 +704,15 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
     let box = boxAddress(channel.wsUrl)
     let thread: string | undefined
-    let cursor = channel.lastSequence
+    const otherLog =
+      historyCursor?.epoch !== undefined &&
+      channel.epoch !== undefined &&
+      historyCursor.epoch !== channel.epoch
+    const historyFrom =
+      historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
+    // The cursor starts where the replay starts, so a drop in the middle of it asks again for
+    // what did not arrive, and not from where the box log was when the Copilot answered.
+    let cursor = historyFrom ?? channel.lastSequence
     const abort = new AbortController()
     const onAbort = () => abort.abort(signal?.reason)
     signal?.addEventListener("abort", onAbort, { once: true })
@@ -788,18 +796,25 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       })
     }
 
-    const otherLog =
-      historyCursor?.epoch !== undefined &&
-      channel.epoch !== undefined &&
-      historyCursor.epoch !== channel.epoch
-    const replayFrom =
-      historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
+    // The same decision the redial makes: the socket's hello says whether the box log is the one
+    // the history ends in. A log short of the history's end is another one, nothing of it is in
+    // the history, and it is read from its beginning. HTTP decides before its stream opens.
+    const afterHello: ReplayAfterHello = (hello) => {
+      if (hello !== undefined && hello.lastSequence < cursor) cursor = 0
+      return cursor
+    }
+    const replay =
+      historyFrom === undefined
+        ? {}
+        : mode === "websocket"
+          ? { replayAfterHello: afterHello }
+          : { replayFrom: historyFrom }
     try {
       link.wire = await this.connect(taskId, mode, channel, {
         signal: abort.signal,
         onFrame,
         onLost,
-        ...(replayFrom === undefined ? {} : { replayFrom }),
+        ...replay,
       })
     } catch (error) {
       signal?.removeEventListener("abort", onAbort)
