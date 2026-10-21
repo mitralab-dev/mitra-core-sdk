@@ -16,10 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # A release/X.Y.x branch is a maintenance line: a fix or a small addition that has to ship
+      # before main, which may already carry the next minor, is ready to.
       - name: Validate branch
-        if: github.ref_name != 'main'
+        if: github.ref_name != 'main' && !startsWith(github.ref_name, 'release/')
         run: |
-          echo "::error::Releases are only allowed from the main branch."
+          echo "::error::Releases are only allowed from the main branch or a release/* branch."
           exit 1
       - name: Validate version
         env:
