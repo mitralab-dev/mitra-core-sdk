@@ -569,6 +569,15 @@ export interface PageOptions {
   sort?: string
 }
 
+export interface AgentMessageListOptions extends PageOptions {
+  /**
+   * `all` asks for every row the Copilot recorded from the box, one per piece: also `REASONING`,
+   * `SUBAGENT_TEXT` and a subagent's tools. Without it the Copilot answers only `TEXT`, `ERROR`
+   * and `TOOL_USE` rows of the chat itself, as before.
+   */
+  kinds?: "all"
+}
+
 export type AppColor =
   { type: "SOLID"; hex: string } | { type: "GRADIENT"; startHex: string; endHex: string }
 
@@ -1296,6 +1305,7 @@ export interface AgentTurnUsage {
 export interface AgentMessage {
   id: string
   sender: string
+  /** `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING` and `SUBAGENT_TEXT`. */
   type: string
   content: string
   createdAt: string
@@ -1307,12 +1317,10 @@ export interface AgentMessage {
   epoch?: number
   /** T3's id of the item the row holds. */
   itemId?: string
-  /** On a subagent's own text or tool: the tool call that spawned the subagent. */
+  /** On a subagent's own reasoning, text or tool: the tool call that spawned the subagent. */
   parentToolId?: string
   /** On the person's message: the `clientMessageId` it went out with. */
   clientMessageId?: string
-  /** On an Agent text: the reasoning written before it. */
-  reasoning?: string
   /** On a tool call that spawned a subagent: its last state, as the box sent it. */
   subagent?: Partial<AgentSubagentFrame>
   /** On the row that closed a turn: the reason the box ended it with. */
@@ -1321,7 +1329,7 @@ export interface AgentMessage {
 
 /**
  * A subagent's state as the box sends it in a `subagentUpdate` frame. The Copilot keeps the last
- * one on the rows of the tool call that spawned the subagent, with what the subagent wrote.
+ * one on the rows of the tool call that spawned the subagent.
  */
 export interface AgentSubagentFrame {
   /** The tool call that spawned the subagent. */
@@ -1333,10 +1341,6 @@ export interface AgentSubagentFrame {
   startedAt?: number | string
   endedAt?: number | string
   childThreadId?: string
-  /** History only: the subagent's own text, the pieces of its `subagentDelta` joined. */
-  text?: string
-  /** History only: the box log's sequence of the last frame that went into this state. */
-  sequence?: number
 }
 
 export interface AgentModel {

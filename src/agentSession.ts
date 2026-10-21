@@ -201,9 +201,16 @@ export type AgentTimelineItem =
       usage?: AgentTurnUsage
       /** On a `user` item: the id `send` returned for that message. */
       clientMessageId?: string
-      /** On an `agent` item: the reasoning the agent wrote before this text. */
-      reasoning?: string
-      /** On a subagent's own text: the tool call that spawned the subagent. */
+      /** On a subagent's own text (a `SUBAGENT_TEXT` row): the tool call that spawned it. */
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      /** A stretch of the agent's reasoning, as the box sent it: the `thinking` pieces of one item. */
+      kind: "reasoning"
+      text: string
+      at: string
+      /** On a subagent's own reasoning: the tool call that spawned the subagent. */
       parentToolId?: string
     } & AgentTimelineItemIdentity)
   | ({
@@ -211,10 +218,7 @@ export type AgentTimelineItem =
       kind: "tool"
       tool: AgentToolEvent
       at: string
-      /**
-       * On the tool call that spawned a subagent: its last state in the shape of the box's
-       * `subagentUpdate`, with the subagent's own text in `text`.
-       */
+      /** On the tool call that spawned a subagent: its last state, as the box's `subagentUpdate`. */
       subagent?: Partial<AgentSubagentFrame>
     } & AgentTimelineItemIdentity)
 
@@ -479,22 +483,40 @@ function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
   }
 }
 
-// The history comes in the box's order, so its last numbered item is in the newest box log. A
-// subagent's state and text go into the row of the tool call that spawned it, which keeps its own
-// place: the last frame that went into them counts apart.
+// The history comes in the box's order, so its last numbered item is in the newest box log.
 function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCursor | undefined {
   const newest = [...history].reverse().find((item) => typeof item.sequence === "number")
   if (!newest) return undefined
   let sequence = 0
   for (const item of history) {
-    if (item.epoch !== newest.epoch || typeof item.sequence !== "number") continue
-    const folded = item.kind === "tool" ? item.subagent?.sequence : undefined
-    sequence = Math.max(sequence, item.sequence, typeof folded === "number" ? folded : 0)
+    if (item.epoch === newest.epoch && typeof item.sequence === "number") {
+      sequence = Math.max(sequence, item.sequence)
+    }
   }
   return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }
 }
 
+// A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
+// turn's answer is read from.
+function isChatRow(message: AgentMessage): boolean {
+  return (
+    (message.type === "TEXT" || message.type === "ERROR" || message.type === "TOOL_USE") &&
+    message.parentToolId === undefined
+  )
+}
+
+// Every row as it came, one item per row: nothing is built from or attached to its neighbours.
 export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
+  if (message.type === "REASONING") {
+    return {
+      id: message.id,
+      kind: "reasoning",
+      text: message.content,
+      at: message.createdAt,
+      ...timelineIdentityOf(message),
+      ...parentToolIdOf(message.parentToolId),
+    }
+  }
   if (message.type === "TOOL_USE") {
     try {
       const payload = JSON.parse(message.content) as Record<string, unknown>
@@ -535,7 +557,6 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     ...(typeof message.clientMessageId === "string"
       ? { clientMessageId: message.clientMessageId }
       : {}),
-    ...(typeof message.reasoning === "string" ? { reasoning: message.reasoning } : {}),
     ...parentToolIdOf(message.parentToolId),
   }
 }
@@ -790,6 +811,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       ...(options.limit !== undefined ? { size: options.limit } : {}),
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     const history = this.history
@@ -1199,6 +1221,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
@@ -1208,6 +1231,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     this.emit("historyLoaded", { history: this.history })
@@ -1215,7 +1239,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
     // row that closes a turn, with its usage, answers it, and not one closing the turn of a prompt
     // the baseline already had. With the live terminal already heard, the turn is known to be over.
-    const recovered = page.content.find(
+    const rows = page.content.filter(isChatRow)
+    const recovered = rows.find(
       (message) =>
         !this.turnBaselineIds.has(message.id) &&
         message.sender !== "USER" &&
@@ -1230,7 +1255,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.endedPollsWithoutRow += 1
         if (this.endedPollsWithoutRow < ENDED_POLLS_BEFORE_NEWEST) return false
       }
-      const newest = page.content.find(
+      const newest = rows.find(
         (message) =>
           !this.turnBaselineIds.has(message.id) &&
           message.sender !== "USER" &&

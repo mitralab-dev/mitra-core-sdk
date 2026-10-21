@@ -65,7 +65,6 @@ const HISTORY = [
     sequence: 7,
     epoch: 0,
     itemId: "a-old",
-    reasoning: "Counted them",
     reason: "stop",
   },
   {
@@ -97,8 +96,6 @@ const HISTORY = [
       toolId: "tool-old",
       subagentId: "sub-old",
       status: "completed",
-      text: "Two birds",
-      sequence: 5,
     },
   },
   {

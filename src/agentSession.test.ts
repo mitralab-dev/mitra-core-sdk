@@ -726,6 +726,44 @@ describe("Agent task session", () => {
     })
   })
 
+  // With every row asked for, the newest rows can be reasoning or a subagent's: the answer is
+  // still read from the chat's own text.
+  it("reads the recovered answer from the chat's text, past newer reasoning and subagent rows", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const finalMessage = message("final", "AGENT", "complete persisted answer")
+    const thought = message("thought", "AGENT", "thinking it over", "REASONING")
+    const subagent = { ...message("sub", "AGENT", "subagent text", "SUBAGENT_TEXT") }
+    const subagentTool = {
+      ...message("subtool", "AGENT", '{"name":"Read"}', "TOOL_USE"),
+      parentToolId: "tool-1",
+    }
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(
+        page([
+          thought,
+          { ...subagent, parentToolId: "tool-1" },
+          subagentTool,
+          finalMessage,
+          oldMessage,
+        ]),
+      )
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(event("stepFinish", { reason: "endTurn" }), 1)
+
+    await expect(result).resolves.toMatchObject({
+      content: "complete persisted answer",
+      reason: "endTurn",
+    })
+  })
+
   it("rejects without hanging when the recovered channel disconnects again", async () => {
     const tasks = createTasks()
     const source = new FakeEventSource()
@@ -1047,6 +1085,7 @@ describe("Agent task session", () => {
     ])
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
+      kinds: "all",
     })
 
     const combined = withAgentTaskSessions(tasks, manager)
@@ -1072,6 +1111,7 @@ describe("Agent task session", () => {
 
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
+      kinds: "all",
     })
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
@@ -1241,51 +1281,64 @@ describe("Agent turn usage", () => {
 })
 
 describe("Agent history item identity", () => {
-  it("reads the box order, item and owner the Copilot recorded into each history item", async () => {
-    const tasks = createTasks({
-      listMessages: vi.fn(async () =>
-        page([
-          {
-            ...message("t", "AGENT", "Done"),
-            sequence: 9,
-            epoch: 2,
-            itemId: "item-a",
-            reasoning: "Thought first",
-            reason: "stop",
-          },
-          {
-            ...message(
-              "tc",
-              "AGENT",
-              '{"name":"Read","toolId":"t-1","parentToolId":"tool-9"}',
-              "TOOL_USE",
-            ),
-            sequence: 7,
-            epoch: 2,
-            itemId: "t-1",
-            parentToolId: "tool-9",
-          },
-          {
-            ...message("sp", "AGENT", '{"name":"Task","toolId":"tool-9"}', "TOOL_USE"),
-            sequence: 5,
-            epoch: 2,
-            itemId: "tool-9",
-            subagent: {
-              toolId: "tool-9",
-              subagentId: "sub-1",
-              status: "completed",
-              text: "Found it",
-              sequence: 8,
-            },
-          },
-          { ...message("u", "USER", "Hi"), sequence: 1, epoch: 2, clientMessageId: "cm-1" },
-          message("old", "USER", "Before"),
-        ]),
-      ),
-    })
+  it("asks for every row and maps each one to its own item, as the Copilot recorded it", async () => {
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("t", "AGENT", "Done"),
+          sequence: 9,
+          epoch: 2,
+          itemId: "item-a",
+          reason: "stop",
+        },
+        {
+          ...message("r", "AGENT", "Thought first", "REASONING"),
+          sequence: 8,
+          epoch: 2,
+          itemId: "r-1",
+        },
+        {
+          ...message(
+            "tc",
+            "AGENT",
+            '{"name":"Read","toolId":"t-1","parentToolId":"tool-9"}',
+            "TOOL_USE",
+          ),
+          sequence: 7,
+          epoch: 2,
+          itemId: "t-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("st", "AGENT", "Found it", "SUBAGENT_TEXT"),
+          sequence: 6,
+          epoch: 2,
+          itemId: "s-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("sr", "AGENT", "Where to look", "REASONING"),
+          sequence: 5,
+          epoch: 2,
+          itemId: "sr-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("sp", "AGENT", '{"name":"Task","toolId":"tool-9"}', "TOOL_USE"),
+          sequence: 4,
+          epoch: 2,
+          itemId: "tool-9",
+          subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
+        },
+        { ...message("u", "USER", "Hi"), sequence: 1, epoch: 2, clientMessageId: "cm-1" },
+        message("old", "USER", "Before"),
+      ]),
+    )
+    const tasks = createTasks({ listMessages })
     const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
     const session = manager.session({ taskId: "task-1" })
     await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(listMessages).toHaveBeenCalledWith("task-1", { sort: "createdAt,desc", kinds: "all" })
     expect(session.history).toEqual([
       { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
       {
@@ -1302,17 +1355,31 @@ describe("Agent history item identity", () => {
         kind: "tool",
         tool: { tool: "Task", toolId: "tool-9", phase: "call" },
         at: "2026-01-01T00:00:02Z",
-        sequence: 5,
+        sequence: 4,
         epoch: 2,
         itemId: "tool-9",
-        // The shape of the box's `subagentUpdate`, as the Copilot kept it, with the subagent's text.
-        subagent: {
-          toolId: "tool-9",
-          subagentId: "sub-1",
-          status: "completed",
-          text: "Found it",
-          sequence: 8,
-        },
+        // The shape of the box's `subagentUpdate`, as the Copilot kept it.
+        subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
+      },
+      {
+        id: "sr",
+        kind: "reasoning",
+        text: "Where to look",
+        at: "2026-01-01T00:00:02Z",
+        sequence: 5,
+        epoch: 2,
+        itemId: "sr-1",
+        parentToolId: "tool-9",
+      },
+      {
+        id: "st",
+        kind: "agent",
+        text: "Found it",
+        at: "2026-01-01T00:00:02Z",
+        sequence: 6,
+        epoch: 2,
+        itemId: "s-1",
+        parentToolId: "tool-9",
       },
       {
         id: "tc",
@@ -1324,6 +1391,15 @@ describe("Agent history item identity", () => {
         itemId: "t-1",
       },
       {
+        id: "r",
+        kind: "reasoning",
+        text: "Thought first",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 8,
+        epoch: 2,
+        itemId: "r-1",
+      },
+      {
         id: "t",
         kind: "agent",
         text: "Done",
@@ -1332,7 +1408,6 @@ describe("Agent history item identity", () => {
         epoch: 2,
         itemId: "item-a",
         reason: "stop",
-        reasoning: "Thought first",
       },
     ])
   })

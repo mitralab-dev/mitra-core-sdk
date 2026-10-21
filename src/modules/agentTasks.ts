@@ -10,13 +10,13 @@ import {
 import type { QueryParamValue, Transport } from "../transport"
 import type {
   AgentMessage,
+  AgentMessageListOptions,
   AgentTask,
   AgentTaskChannel,
   AgentTaskCreateInput,
   AgentTaskInput,
   AgentTaskListOptions,
   Page,
-  PageOptions,
 } from "../types"
 
 export interface AgentTasksModule {
@@ -35,7 +35,7 @@ export interface AgentTasksModule {
    */
   sendInput(id: string, input: AgentTaskInput): Promise<void>
   /** Lists persisted messages. Defaults: page 0, size 50, sort createdAt. */
-  listMessages(id: string, options?: PageOptions): Promise<Page<AgentMessage>>
+  listMessages(id: string, options?: AgentMessageListOptions): Promise<Page<AgentMessage>>
   /**
    * Asks the Copilot where the chat is served. It holds the request while the box boots and
    * answers with the box socket, or null (202) when it offers none. Optional so hand-written
@@ -107,7 +107,12 @@ export function createAgentTasksModule(
       const page = expectPage<AgentMessage>(
         await transport.request<unknown>(`${path(id)}/messages`, {
           method: "GET",
-          params: { page: options.page, size: options.size, sort: options.sort },
+          params: {
+            page: options.page,
+            size: options.size,
+            sort: options.sort,
+            kinds: options.kinds,
+          },
         }),
         context,
         errors,

@@ -137,6 +137,7 @@ export type {
   AgentDefinition,
   AgentInput,
   AgentMessage,
+  AgentMessageListOptions,
   AgentSubagentFrame,
   AgentModel,
   AgentTask,

@@ -120,9 +120,14 @@ interface Piece {
   sequence?: number
 }
 
-// The app: one piece per message, per stretch of text (by `itemId`), per tool (by `toolId`) and per
-// subagent's own text (by the tool call that spawned it), in the order they came, with a steered
-// message placed at the `sequence` it went in.
+// The app: one piece per message, per stretch of text or reasoning (by `itemId`, a subagent's
+// under the tool call that spawned it) and per tool (by `toolId`), in the order they came, with a
+// steered message placed at the `sequence` it went in. History items are drawn one per row, as
+// they come.
+function pieceKey(kind: string, itemId?: string, parentToolId?: string): string {
+  return parentToolId === undefined ? `${kind}:${itemId}` : `${kind}:${parentToolId}/${itemId}`
+}
+
 function draw(session: AgentTaskSession) {
   const pieces: Piece[] = []
   const find = (key: string) => pieces.find((piece) => piece.key === key)
@@ -153,14 +158,9 @@ function draw(session: AgentTaskSession) {
   const fromHistory = (history: readonly AgentTimelineItem[]) => {
     for (const item of history) {
       if (item.kind === "tool") {
-        const toolId = item.tool.toolId ?? item.id
-        tool(toolId, item.tool.phase, item.tool.content, item.sequence)
-        // Every row of the call carries the subagent's last state, its text included.
-        if (item.subagent?.text !== undefined) {
-          const key = `subagent:${toolId}`
-          const piece = find(key) ?? add({ key, text: "" })
-          piece.text = item.subagent.text
-        }
+        tool(item.tool.toolId ?? item.id, item.tool.phase, item.tool.content, item.sequence)
+      } else if (item.kind === "reasoning") {
+        text(pieceKey("reasoning", item.itemId, item.parentToolId), item.text, item.sequence)
       } else if (item.kind === "user") {
         add({
           key: `user:${item.clientMessageId ?? item.id}`,
@@ -168,16 +168,20 @@ function draw(session: AgentTaskSession) {
           ...(item.sequence === undefined ? {} : { sequence: item.sequence }),
         })
       } else {
-        text(item.itemId ? `text:${item.itemId}` : `row:${item.id}`, item.text, item.sequence)
+        const key = item.itemId
+          ? pieceKey("text", item.itemId, item.parentToolId)
+          : `row:${item.id}`
+        text(key, item.text, item.sequence)
       }
     }
   }
   session.on("historyLoaded", ({ history }) => fromHistory(history))
   session.on("delta", ({ delta, kind, itemId, sequence, parentToolId }) => {
-    if (kind === "text" && parentToolId === undefined) text(`text:${itemId}`, delta, sequence)
+    if (parentToolId !== undefined) return
+    text(pieceKey(kind === "text" ? "text" : "reasoning", itemId), delta, sequence)
   })
-  session.on("subagentDelta", ({ delta, kind, parentToolId }) => {
-    if (kind === "text") text(`subagent:${parentToolId}`, delta)
+  session.on("subagentDelta", ({ delta, kind, itemId, sequence, parentToolId }) => {
+    text(pieceKey(kind === "text" ? "text" : "reasoning", itemId, parentToolId), delta, sequence)
   })
   session.on("tool", ({ toolId, phase, content, sequence }) =>
     tool(toolId ?? "", phase, content, sequence),
@@ -193,7 +197,7 @@ function draw(session: AgentTaskSession) {
   }
 }
 
-const SENT_SECOND_AFTER = 3
+const SENT_SECOND_AFTER = 4
 
 function conversation(first: string, second: string): Frame[] {
   const turn = { lifecycle: { turnId: "turn-1" } }
@@ -201,12 +205,14 @@ function conversation(first: string, second: string): Frame[] {
   const wake = { lifecycle: { turnId: "wake-1" } }
   const frames: Omit<Frame, "sequence" | "timestamp">[] = [
     { type: "stepStart", payload: { lifecycle: { turnId: "turn-1", clientMessageId: first } } },
+    { type: "thinking", payload: { text: "Birds first", itemId: "r1", ...turn } },
     { type: "textDelta", payload: { text: "Hel", itemId: "a1", ...turn } },
     { type: "textDelta", payload: { text: "lo", itemId: "a1", ...turn } },
     {
       type: "toolCall",
       payload: { name: "Task", toolId: "tool-1", itemId: "tool-1", input: { n: 3 }, ...turn },
     },
+    { type: "thinking", payload: { text: "Look around", itemId: "c0", ...child } },
     { type: "textDelta", payload: { text: "Three birds", itemId: "s1", ...child } },
     {
       type: "toolCall",
@@ -258,11 +264,11 @@ function conversation(first: string, second: string): Frame[] {
   return frames.map((frame, index) => ({ ...frame, sequence: index + 1, timestamp: 1_000 + index }))
 }
 
-// The rows the Copilot has written once it recorded the box log up to `cursor`: one per message
-// where it entered, per stretch of text, per tool call and result, each with the sequence of the
-// last event in it. A subagent's own text goes into the rows of the tool call that spawned it, with
-// the sequence of its last piece apart. A message sent but not taken yet is there since it was sent, unnumbered, after
-// what was recorded then.
+// The rows the Copilot has written once it recorded the box log up to `cursor`, as `kinds=all`
+// answers them: one per message where it entered, per stretch of text or reasoning (`SUBAGENT_TEXT`
+// and `REASONING` with `parentToolId` for a subagent's), per tool call and result, each with the
+// sequence of the last event in it. A message sent but not taken yet is there since it was sent,
+// unnumbered, after what was recorded then.
 function historyAt(
   frames: Frame[],
   cursor: number,
@@ -289,34 +295,32 @@ function historyAt(
       rows.push(
         row({ id, sender: "USER", content: said.get(clientMessageId)!, sequence, clientMessageId }),
       )
-    } else if (frame.type === "textDelta" && payload.parentToolId) {
-      for (const owner of rows.filter((current) => current.itemId === payload.parentToolId)) {
-        owner.subagent = {
-          ...owner.subagent,
-          toolId: payload.parentToolId as string,
-          text: (owner.subagent?.text ?? "") + (payload.text as string),
-          sequence,
-        }
-      }
-    } else if (frame.type === "textDelta") {
+    } else if (frame.type === "textDelta" || frame.type === "thinking") {
+      const parentToolId = payload.parentToolId as string | undefined
+      const type = frame.type === "thinking" ? "REASONING" : parentToolId ? "SUBAGENT_TEXT" : "TEXT"
       const last = rows.at(-1)
-      if (last?.type === "TEXT" && last.sender === "AGENT" && last.itemId === payload.itemId) {
+      if (last?.type === type && last.sender === "AGENT" && last.itemId === payload.itemId) {
         last.content += payload.text as string
         last.sequence = sequence
       } else {
         rows.push(
-          row({ content: payload.text as string, sequence, itemId: payload.itemId as string }),
+          row({
+            type,
+            content: payload.text as string,
+            sequence,
+            itemId: payload.itemId as string,
+            ...(parentToolId ? { parentToolId } : {}),
+          }),
         )
       }
     } else if (frame.type === "toolCall" || frame.type === "toolResult") {
-      const subagent = rows.find((current) => current.itemId === payload.itemId)?.subagent
       rows.push(
         row({
           type: "TOOL_USE",
           content: JSON.stringify(payload),
           sequence,
           itemId: payload.itemId as string,
-          ...(subagent ? { subagent } : {}),
+          ...(payload.parentToolId ? { parentToolId: payload.parentToolId as string } : {}),
         }),
       )
     }
@@ -371,9 +375,11 @@ describe("Agent conversation opened in the middle of a run", () => {
     const recorded = await liveConversation()
     expect(recorded.list).toEqual([
       { key: `user:${recorded.sent[0]!.id}`, text: "Count birds", result: undefined },
+      { key: "reasoning:r1", text: "Birds first", result: undefined },
       { key: "text:a1", text: "Hello", result: undefined },
       { key: "tool:tool-1", text: "", result: "Three birds found" },
-      { key: "subagent:tool-1", text: "Three birds", result: undefined },
+      { key: "reasoning:tool-1/c0", text: "Look around", result: undefined },
+      { key: "text:tool-1/s1", text: "Three birds", result: undefined },
       { key: "tool:ct-1", text: "", result: "ok" },
       { key: `user:${recorded.sent[1]!.id}`, text: "Also cats", result: undefined },
       { key: "text:a2", text: "And cats", result: undefined },
@@ -382,17 +388,19 @@ describe("Agent conversation opened in the middle of a run", () => {
 
     // [what the Copilot recorded, what the box had logged] when the page was reloaded.
     const cuts: [number, number][] = [
-      [1, 3], // the Copilot has only the start of the turn
-      [2, 5], // in the middle of a stretch of text, with frames the Copilot has not received
-      [3, 3], // right after the Copilot's cursor
-      [5, 7], // the subagent's text recorded, the next numbered row only in the box
-      [7, 8], // the steer only in the box
-      [8, 10], // the steer recorded, the end of the turn only in the box
-      [9, 9],
-      [10, 11], // the late subagent result only in the box
-      [11, 13], // inside the turn the agent opened by itself
-      [13, 14],
-      [14, 14], // everything recorded
+      [1, 4], // the Copilot has only the start of the turn
+      [2, 3], // the reasoning recorded, the text after it only in the box
+      [3, 7], // in the middle of a stretch of text, with frames the Copilot has not received
+      [4, 4], // right after the Copilot's cursor
+      [6, 7], // the subagent's reasoning recorded, its text only in the box
+      [7, 9], // the subagent's text recorded, its tool only in the box
+      [9, 10], // the steer only in the box
+      [10, 12], // the steer recorded, the end of the turn only in the box
+      [11, 11],
+      [12, 13], // the late subagent result only in the box
+      [13, 15], // inside the turn the agent opened by itself
+      [15, 16],
+      [16, 16], // everything recorded
     ]
     for (const [cursor, logged] of cuts) {
       BoxSocket.instances = []
@@ -403,11 +411,9 @@ describe("Agent conversation opened in the middle of a run", () => {
       const app = draw(fresh)
       await vi.waitFor(() => expect(fresh.status).not.toBe("opening"))
       const socket = BoxSocket.instances.at(-1)!
-      // Where the history ends: its rows, and the subagent text folded into a tool call's rows.
-      const ends = history.flatMap((row) => [row.sequence ?? 0, row.subagent?.sequence ?? 0])
       expect(socket.sent[0], `cut ${cursor}/${logged}`).toEqual({
         type: "replay",
-        fromSequence: Math.max(...ends),
+        fromSequence: Math.max(...history.map((row) => row.sequence ?? 0)),
       })
       for (const frame of recorded.frames.slice(logged)) socket.deliver(frame)
       await vi.waitFor(() => expect(fresh.status).toBe("idle"))
