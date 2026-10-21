@@ -571,3 +571,76 @@ describe("Agent box piece identity", () => {
     ])
   })
 })
+
+describe("Agent box late subagent result", () => {
+  it("emits a result that comes after its turn ended as that tool's result, touching no turn", async () => {
+    const { session, first, socket } = await runningTurn()
+    frame(
+      socket,
+      "toolCall",
+      { name: "Task", toolId: "tool-9", lifecycle: { turnId: "turn-1" } },
+      2,
+    )
+    frame(socket, "textDelta", { text: "Started it", lifecycle: { turnId: "turn-1" } }, 3)
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 4)
+    await first
+    const seen: string[] = []
+    session.on("tool", (tool) => seen.push(`${tool.phase}:${tool.toolId}:${tool.sequence}`))
+    session.on("turnStart", () => seen.push("turnStart"))
+    session.on("statusChange", ({ status }) => seen.push(status))
+    const raw: string[] = []
+    session.on("raw", ({ type }) => raw.push(type))
+
+    frame(
+      socket,
+      "toolResult",
+      {
+        name: "Task",
+        toolId: "tool-9",
+        content: "Three birds",
+        lifecycle: { turnId: "turn-1", terminal: false },
+      },
+      5,
+    )
+    expect(seen).toEqual(["result:tool-9:5"])
+    expect(session.status).toBe("idle")
+    expect(session.content).toBe("Started it")
+
+    // The result opened no turn on the channel either: a drop now is an idle chat, not redialed.
+    socket.onclose?.({ code: 1000 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(raw).not.toContain("channelReconnecting")
+  })
+
+  it("emits a late result while another turn runs without ending or feeding that turn", async () => {
+    const { session, first, socket } = await runningTurn()
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 2)
+    await first
+    const next = session.sendAndWait("Next")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    frame(
+      socket,
+      "stepStart",
+      { lifecycle: { turnId: "turn-2", clientMessageId: idOf(socket.sent[1]) } },
+      3,
+    )
+    frame(socket, "textDelta", { text: "Answer", lifecycle: { turnId: "turn-2" } }, 4)
+    const tools: string[] = []
+    session.on("tool", (tool) => tools.push(`${tool.phase}:${tool.toolId}:${tool.turnId}`))
+    frame(
+      socket,
+      "toolResult",
+      {
+        name: "Task",
+        toolId: "tool-9",
+        content: "late",
+        lifecycle: { turnId: "turn-1", terminal: false },
+      },
+      5,
+    )
+    expect(tools).toEqual(["result:tool-9:turn-1"])
+    expect(session.status).toBe("streaming")
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 6)
+    await expect(next).resolves.toMatchObject({ content: "Answer", turnId: "turn-2" })
+  })
+})

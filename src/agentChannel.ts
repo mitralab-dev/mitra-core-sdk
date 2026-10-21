@@ -383,13 +383,14 @@ function asDelta(event: AgentTaskEvent): AgentTaskEvent {
   return { ...event, type: kind === "thinking" ? "thinking" : "textDelta" }
 }
 
+// A `toolResult` is left out: a background subagent's result comes under the turn that called it,
+// after that turn ended, and opens no turn.
 const TURN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "stepStart",
   "steer",
   "textDelta",
   "thinking",
   "toolCall",
-  "toolResult",
 ])
 
 const TURN_END_REASONS: ReadonlySet<unknown> = new Set(["stop", "endTurn", "interrupted"])
@@ -699,7 +700,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         return
       }
       const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
-      if (typeof turnId === "string") link.turnId = turnId
+      if (typeof turnId === "string" && event.type !== "toolResult") link.turnId = turnId
       link.inTurn = turnAfter(event, link.inTurn)
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)

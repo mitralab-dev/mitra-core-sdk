@@ -1258,8 +1258,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "toolCall":
         if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(event, payload, "call")
         break
+      // A result can come after its turn ended: a subagent in the background settles later, and
+      // the box sends its result under the turn that called it. It reaches the app as that tool's
+      // result and touches no turn.
       case "toolResult":
-        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(event, payload, "result")
+        this.emitTool(event, payload, "result")
         break
       case "workspace":
         this.emit("workspace", {

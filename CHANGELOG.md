@@ -14,6 +14,10 @@ All notable changes to this project are documented in this file.
   items carry what the Copilot recorded: `sequence`, `epoch`, `itemId`, `parentToolId`,
   `clientMessageId`, `reasoning`, `subagent` and `reason`. Nothing is derived: a frame or row
   without a field leaves it out.
+- A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
+  box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
+  leaves `status` and `content` alone and, on the direct channel, does not mark the chat as in a
+  turn: it used to be dropped.
 
 ## 0.3.0
 
