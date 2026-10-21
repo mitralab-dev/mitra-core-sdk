@@ -1488,15 +1488,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     payload: Record<string, unknown> | null,
     lifecycle: Record<string, unknown> | null,
   ): boolean {
-    if (event.type !== "error" && event.type !== "stepFinish") return false
-    const id = payload?.clientMessageId ?? lifecycle?.clientMessageId
-    const turnId = lifecycle?.turnId
+    // A refusal names no turn: the box refusing a cancel or edit leaves the message where it is.
+    if ((event.type !== "error" && event.type !== "stepFinish") || !lifecycle) return false
+    const id = payload?.clientMessageId ?? lifecycle.clientMessageId
+    const turnId = lifecycle.turnId
     const item = this.queueItems.find(
       (current) => current.id === id || (turnId !== undefined && current.turnId === turnId),
     )
     if (!item) return false
     this.leaveQueue(item.id)
-    if (item.id === this.openingMessageId || !lifecycle) return false
+    if (item.id === this.openingMessageId) return false
     const message =
       typeof payload?.message === "string"
         ? payload.message

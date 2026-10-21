@@ -805,6 +805,17 @@ describe("Agent box queue", () => {
     queued(socket, "other-1", "turn-8", 1, 2, { text: "From another tab" })
     queued(socket, "other-2", "turn-9", 2, 3, { text: "Also queued" })
 
+    // The box refuses a command for a message it cannot take out (not in T3's queue yet, or
+    // running): the refusal goes to this client only and the message stays.
+    session.removeQueueItem("other-2")
+    frame(socket, "error", {
+      code: "INVALID_MESSAGE",
+      message: "The message is not in the queue",
+      clientMessageId: "other-2",
+    })
+    expect(session.queue.map((item) => item.id)).toEqual(["other-1", "other-2"])
+    expect(session.status).toBe("streaming")
+
     session.editQueueItem("other-1", "Edited")
     expect(socket.sent.at(-1)).toEqual({
       type: "queued-run.edit",
