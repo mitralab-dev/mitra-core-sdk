@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.2.14
+
+- `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
+  Messenger's `POST /api/v1/messages/send` as a `RAW` payload on the `EMAIL` channel and resolves
+  with the `messageId` of the accepted message. There is no `from`: Messenger sends with the
+  sender of the app in the token, so only the app's backend sends (a token exchanged from an api
+  key or the Server Function token). `to`, `cc` and `bcc` are lists with one address per entry;
+  absent optional fields are left out of the body.
+- Recipient limits, the app's daily quota and the token check stay on Messenger. Their errors
+  (`400` above Messenger's recipient cap, `429` with `Retry-After` above the quota, `403` for an
+  app end-user token) come from the transport unchanged.
+
 ## 0.2.13
 
 - `AgentTurnUsage` gains `contextTokens` and `contextWindow`. `contextTokens` is the number of

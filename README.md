@@ -66,7 +66,8 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - `functions`, `publicFunctions`, `functionsAdmin` e `workflows`: executar e administrar Server Functions e workflows.
 - `integration`, `integrationAdmin`, `integrationResources` e `integrationTemplates`: chamadas a APIs externas e a configuração delas.
 - `agentTasks`, com `createAgentTaskSessionManager` e `withAgentTaskSessions`: chats de agente com `send`, `sendAndWait`, `cancel` e eventos. O gerenciador recebe `tasks`, o `eventSource` do seu SDK e `directChannel`, com o `apiUrl` do gateway e, se quiser, `WebSocket` e `fetch`.
-- `apps`, `context`, `agents`, `agentConnections`, `agentCredentials`, `members`, `messenger`, `imports`, `dataSources` e `auth`: o app em si, a configuração de agentes e os demais recursos.
+- `apps`, `context`, `agents`, `agentConnections`, `agentCredentials`, `members`, `imports`, `dataSources` e `auth`: o app em si, a configuração de agentes e os demais recursos.
+- `messenger`: `notify` avisa o usuário autenticado e `sendEmail` manda e-mail com o remetente do app.
 - `resolveApiKeyToken`, `readTokenAppId` e `tokenAuthorizesApp`: contrato da troca de API key por token, para o SDK que autentica por chave.
 
 ## Configuração
@@ -95,6 +96,7 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - Fixe o app no adaptador: `getAppId` e o header `X-App-Id` vêm do valor configurado no seu SDK, nunca de um argumento de quem chama. Aplique as credenciais depois dos headers de `options`, como no exemplo, para que eles não as substituam.
 - O Core não repete requisição nem renova token. Se o seu transporte repetir, repita só o que não grava.
 - `publicFunctions` precisa de um transporte sem credencial. O Core não usa o transporte autenticado no lugar dele.
+- `sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` não tem `from`: o Messenger usa o remetente do app do token. Por isso só o backend do app manda e-mail, com o token trocado pela API key ou o token da Server Function; token de usuário final do app recebe `403`. `to`, `cc` e `bcc` são listas com um endereço por item. Os limites ficam no Messenger e chegam como erro do seu `Transport`: `400` acima do limite de destinatários dele somando os três campos e `429` acima da cota diária do app, com o header `Retry-After` e `retry_after_seconds` no corpo.
 - `sendAndWait` com `timeoutMs` ou `signal` só para de esperar; o turno continua no servidor. Para interromper, chame `cancel()`.
 - `cancel()` chamado antes de a box aceitar o prompt espera esse aceite e só então manda o stop; a promise resolve depois disso. Se o prompt não chegar a virar turno, nada é enviado e o status não passa por `cancelled`.
 - O `open()` do seu `eventSource` só deve resolver depois que o stream estiver conectado, para nenhum evento do turno se perder.
