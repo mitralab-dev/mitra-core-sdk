@@ -25,6 +25,14 @@ All notable changes to this project are documented in this file.
   and leaves the running turn alone. `removeQueueItem` sends `queued-run.cancel`,
   `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel per queued message,
   on the box channel only. The methods are no longer deprecated; their signatures are unchanged.
+- `session({ taskId })` opened in the middle of a run asks the box for the replay from where the
+  loaded history ends (the highest `sequence` of its newest `epoch`), with the request the redial
+  already makes, before any live frame: what the Copilot has not recorded yet reaches the session
+  and nothing the history has comes twice. When the channel's `epoch` (new optional field of
+  `AgentTaskChannel`) is another log than the history's newest, the replay starts at the box log's
+  beginning. A history without `sequence` asks for no replay, as before. A turn the replay opens
+  keeps the session `streaming` after the open. The event source gets the cursor as a fifth,
+  optional `open` argument, which a concrete SDK may ignore.
 
 ## 0.3.0
 

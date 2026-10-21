@@ -57,7 +57,18 @@ export interface AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection>
+}
+
+/**
+ * How far the history the session loaded goes in the box log: the highest `sequence` of the
+ * newest box log it holds. A chat opened with it gets the box's replay from there, so what the
+ * history has not recorded yet still reaches the session.
+ */
+export interface AgentHistoryCursor {
+  sequence: number
+  epoch?: number
 }
 
 export type AgentSessionTransport = "auto" | "websocket" | "http"
@@ -451,6 +462,19 @@ function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
   }
 }
 
+// The history comes in the box's order, so its last numbered item is in the newest box log.
+function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCursor | undefined {
+  const newest = [...history].reverse().find((item) => typeof item.sequence === "number")
+  if (!newest) return undefined
+  let sequence = 0
+  for (const item of history) {
+    if (item.epoch === newest.epoch && typeof item.sequence === "number") {
+      sequence = Math.max(sequence, item.sequence)
+    }
+  }
+  return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }
+}
+
 export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   if (message.type === "TOOL_USE") {
     try {
@@ -608,6 +632,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private turnBaselineIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
   private queueItems: AgentQueueItem[] = []
+  // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
+  private openingCursor: AgentHistoryCursor | undefined
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -811,9 +837,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (this.isClosed()) return false
       await this.loadHistory()
       if (this.isClosed()) return false
+      this.openingCursor = historyCursorOf(this._history)
       await this.ensureChannel()
       if (this.isClosed()) return false
-      this.setStatus("idle")
+      // The replay may have opened the turn that runs on the box.
+      if (this._status === "opening") this.setStatus("idle")
       return true
     } catch (error) {
       if (this.isClosed()) return false
@@ -1072,6 +1100,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // was before the direct channel. A chat with an agent asks, and the Copilot has the last
     // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
+    const historyCursor = this.openingCursor
+    this.openingCursor = undefined
     this.connectionPromise = source
       .open(
         this._taskId,
@@ -1081,6 +1111,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         },
         abort.signal,
         this.options.transport,
+        historyCursor,
       )
       .then((connection) => {
         if (this.isClosed() || this._status === "error") {

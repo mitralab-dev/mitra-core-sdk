@@ -1223,6 +1223,11 @@ export interface AgentTaskChannel {
   wsUrl: string
   /** Last sequence in the box log, 0 when the box reported none. */
   lastSequence: number
+  /**
+   * Which box log the chat is on now, counted by the Copilot: a box that comes up without the
+   * log starts a new one. The `epoch` of the history items. Absent from an older Copilot.
+   */
+  epoch?: number
 }
 
 /** One call to the provider inside a turn, or one model's total when the source gives only that. */

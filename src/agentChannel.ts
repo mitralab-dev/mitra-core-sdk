@@ -1,4 +1,5 @@
 import type {
+  AgentHistoryCursor,
   AgentSessionTransport,
   AgentTaskEventConnection,
   AgentTaskEventObserver,
@@ -520,6 +521,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection> {
     if (!this.enabled()) return this.fallback.open(taskId, observer, signal, transport)
     const mode = this.modeFor(transport)
@@ -532,7 +534,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       return this.fallback.open(taskId, observer, signal, transport)
     }
     try {
-      return await this.openDirect(taskId, mode, answer, observer, signal)
+      return await this.openDirect(taskId, mode, answer, observer, signal, historyCursor)
     } catch (error) {
       // A box that cannot be reached (a proxy blocking its host, a handshake refused, a network
       // that never answers) is a channel this client cannot follow, not a broken chat: the
@@ -670,9 +672,12 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * only when the redial gives up, when the Copilot no longer offers the box, or when there is
    * no turn to resume: dialing an idle box again would wake it for nobody.
    *
-   * Opening never asks for an older replay. What an idle chat missed is history, which the
-   * session loads by REST; replaying from an older cursor would put old turns on screen as live
-   * text. The HTTP stream opens from the sequence the Copilot reported, which is the same thing.
+   * Opening asks for the replay from where the session's history ends, with the same request the
+   * redial makes: what the history has, the replay does not repeat, and what the Copilot has not
+   * recorded yet (the turn running now, or one it is still behind on) comes in the replay before
+   * any live frame. When the Copilot says the box log is another one than the history's newest,
+   * nothing of it is in the history and the replay starts at its beginning. A history with no
+   * box sequence asks for nothing, and the open starts at the sequence the Copilot reported.
    */
   private async openDirect(
     taskId: string,
@@ -680,6 +685,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     channel: AgentTaskChannel,
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection> {
     const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
     let box = boxAddress(channel.wsUrl)
@@ -766,11 +772,18 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       })
     }
 
+    const otherLog =
+      historyCursor?.epoch !== undefined &&
+      channel.epoch !== undefined &&
+      historyCursor.epoch !== channel.epoch
+    const replayFrom =
+      historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
     try {
       link.wire = await this.connect(taskId, mode, channel, {
         signal: abort.signal,
         onFrame,
         onLost,
+        ...(replayFrom === undefined ? {} : { replayFrom }),
       })
     } catch (error) {
       signal?.removeEventListener("abort", onAbort)
@@ -1130,8 +1143,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         settled = true
         clearTimeout(timer)
         touch()
-        // Back from a drop in the middle of a turn: the box keeps its log by `sequence` and
-        // repeats what this session did not see on that box, never from zero.
+        // Opened from a history, or back from a drop in the middle of a turn: the box keeps its
+        // log by `sequence` and repeats what this session did not see on that box.
         if (replayFrom !== undefined) {
           try {
             socket.send(JSON.stringify({ type: "replay", fromSequence: replayFrom }))

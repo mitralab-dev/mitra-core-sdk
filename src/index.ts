@@ -7,6 +7,7 @@ export {
   withAgentTaskSessions,
 } from "./agentSession"
 export type {
+  AgentHistoryCursor,
   AgentPieceIdentity,
   AgentProviderUsage,
   AgentQueueItem,
