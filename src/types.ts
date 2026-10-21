@@ -1314,8 +1314,13 @@ export interface AgentMessage {
   createdAt: string
   /** Present on the Agent message that closed a turn, when the Copilot recorded its usage. */
   usage?: AgentTurnUsage
-  /** The box log's sequence of the event that wrote the row; absent on older rows. */
+  /**
+   * The box log's sequence of the row's first chunk, the same as its live event; absent on older
+   * rows.
+   */
   sequence?: number
+  /** The box log's sequence of the row's last chunk, only when the row came in more than one. */
+  lastSequence?: number
   /** Which box log `sequence` counts in; absent on older rows. */
   epoch?: number
   /** T3's id of the item the row holds. */

@@ -300,7 +300,7 @@ function conversation(first: string, second: string): Frame[] {
 // The rows the Copilot has written once it recorded the box log up to `cursor`, as `kinds=all`
 // answers them: one per message where it entered, per stretch of text or reasoning (`SUBAGENT_TEXT`
 // and `REASONING` with `parentToolId` for a subagent's), per tool call and result, each with the
-// sequence of the last event in it. A message the box has not taken into a turn yet is not there:
+// sequence of its first event and, when it took more than one, `lastSequence` of its last. A message the box has not taken into a turn yet is not there:
 // `kinds=all` leaves it out, and the app shows it from `queue` until its turn starts.
 function historyAt(
   frames: Frame[],
@@ -334,7 +334,7 @@ function historyAt(
       const last = rows.at(-1)
       if (last?.type === type && last.sender === "AGENT" && last.itemId === payload.itemId) {
         last.content += payload.text as string
-        last.sequence = sequence
+        last.lastSequence = sequence
       } else {
         rows.push(
           row({
@@ -451,7 +451,7 @@ describe("Agent conversation opened in the middle of a run", () => {
       const socket = BoxSocket.instances.at(-1)!
       expect(socket.sent[0], `cut ${cursor}/${logged}`).toEqual({
         type: "replay",
-        fromSequence: Math.max(...history.map((row) => row.sequence ?? 0)),
+        fromSequence: Math.max(...history.map((row) => row.lastSequence ?? row.sequence ?? 0)),
       })
       for (const frame of recorded.frames.slice(logged)) socket.deliver(frame)
       await vi.waitFor(() => expect(fresh.status).toBe("idle"))

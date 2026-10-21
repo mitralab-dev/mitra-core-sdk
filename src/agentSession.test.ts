@@ -1297,6 +1297,8 @@ describe("Agent history item identity", () => {
         {
           ...message("t", "AGENT", "Done"),
           sequence: 9,
+          // The text came in chunks 9 to 11: `sequence` is where it starts, `lastSequence` its end.
+          lastSequence: 11,
           epoch: 2,
           itemId: "item-a",
           reason: "stop",
@@ -1448,6 +1450,7 @@ describe("Agent history item identity", () => {
         text: "Done",
         at: "2026-01-01T00:00:01Z",
         sequence: 9,
+        lastSequence: 11,
         epoch: 2,
         itemId: "item-a",
         reason: "stop",

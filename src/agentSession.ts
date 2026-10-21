@@ -183,6 +183,8 @@ export interface AgentToolEvent extends AgentPieceIdentity {
 export interface AgentTimelineItemIdentity {
   /** The box log's sequence of the item: the same number its live frame carried. */
   sequence?: number
+  /** The box log's sequence of the item's last chunk, only when it came in more than one. */
+  lastSequence?: number
   /** Which box log the sequence counts in: a box that came up without the log starts again. */
   epoch?: number
   /** T3's id of the item: the `itemId` of its live frames. */
@@ -501,20 +503,22 @@ function epochOf(value: unknown): number | undefined {
 function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
   return {
     ...(typeof message.sequence === "number" ? { sequence: message.sequence } : {}),
+    ...(typeof message.lastSequence === "number" ? { lastSequence: message.lastSequence } : {}),
     ...(typeof message.epoch === "number" ? { epoch: message.epoch } : {}),
     ...(typeof message.itemId === "string" ? { itemId: message.itemId } : {}),
     ...(typeof message.reason === "string" ? { reason: message.reason } : {}),
   }
 }
 
-// The history comes in the box's order, so its last numbered item is in the newest box log.
+// The history comes in the box's order, so its last numbered item is in the newest box log. A
+// piece's `sequence` is its first chunk; the replay starts after its last one, or it repeats text.
 function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCursor | undefined {
   const newest = [...history].reverse().find((item) => typeof item.sequence === "number")
   if (!newest) return undefined
   let sequence = 0
   for (const item of history) {
     if (item.epoch === newest.epoch && typeof item.sequence === "number") {
-      sequence = Math.max(sequence, item.sequence)
+      sequence = Math.max(sequence, item.lastSequence ?? item.sequence)
     }
   }
   return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }

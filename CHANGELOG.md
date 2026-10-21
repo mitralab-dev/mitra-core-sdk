@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## 0.3.0-beta.3
 
+- History items carry `lastSequence` when the Copilot sends it: the box sequence of the last
+  chunk of a piece that came in more than one, while `sequence` is its first chunk, the same as
+  its live event. The F5 replay starts after the highest `lastSequence ?? sequence` of the newest
+  `epoch`, so the replay does not repeat the end of a piece the history already has.
 - `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
   takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
   return is unaffected. The id also goes in the `POST /inputs` body when the message goes to the
