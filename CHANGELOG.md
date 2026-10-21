@@ -22,8 +22,9 @@ All notable changes to this project are documented in this file.
   the new kind `reasoning`; a `SUBAGENT_TEXT` row is an `agent` item with `parentToolId`; a
   subagent's tools are `tool` items; `APPROVAL` and `USER_INPUT_REQUEST` rows are items of the new
   kinds `approval` and `userInputRequest`, with the payload of the box frame as it came (the same
-  that reaches the session live as `raw`). A lost turn is recovered from the default query,
-  without `kinds=all`. With `kinds=all` a question still waiting in the queue is not in the
+  that reaches the session live as `raw`). A lost turn is recovered with `kinds=all` too, so
+  `history` keeps every piece, and reads its answer only from the chat's own `TEXT`, `ERROR` and
+  `TOOL_USE` rows. With `kinds=all` a question still waiting in the queue is not in the
   history: it shows in `queue` until its turn starts. `turnStart` opened by the box's `stepStart`
   carries the `text` and `clientMessageId` of the message whose turn it is, with `sequence`,
   `itemId` and `turnId`: the question reaches the app there also when the history does not have it

@@ -726,16 +726,31 @@ describe("Agent task session", () => {
     })
   })
 
-  // The history the app draws asks for every row; the turn's answer is read from the default
-  // query, which answers only the chat's own text, tools and errors.
-  it("reads a lost turn's answer from the default history query", async () => {
+  // With every row asked for, the newest rows can be reasoning or a subagent's: the answer is
+  // still read from the chat's own text.
+  it("reads the recovered answer from the chat's text, past newer reasoning and subagent rows", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const finalMessage = message("final", "AGENT", "complete persisted answer")
+    const thought = message("thought", "AGENT", "thinking it over", "REASONING")
+    const subagent = { ...message("sub", "AGENT", "subagent text", "SUBAGENT_TEXT") }
+    const subagentTool = {
+      ...message("subtool", "AGENT", '{"name":"Read"}', "TOOL_USE"),
+      parentToolId: "tool-1",
+    }
     const tasks = createTasks()
     tasks.listMessages
       .mockResolvedValueOnce(page([oldMessage]))
       .mockResolvedValueOnce(page([oldMessage]))
-      .mockResolvedValueOnce(page([finalMessage, oldMessage]))
+      .mockResolvedValueOnce(
+        page([
+          message("ask", "AGENT", '{"requestId":"req-1"}', "APPROVAL"),
+          thought,
+          { ...subagent, parentToolId: "tool-1" },
+          subagentTool,
+          finalMessage,
+          oldMessage,
+        ]),
+      )
     const source = new FakeEventSource()
     const { session } = createSession(tasks, source)
     const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
@@ -748,10 +763,14 @@ describe("Agent task session", () => {
       content: "complete persisted answer",
       reason: "endTurn",
     })
-    expect(tasks.listMessages.mock.calls.map(([, options]) => options)).toEqual([
-      { size: 100, sort: "createdAt,desc" },
-      { size: 100, sort: "createdAt,desc" },
-      { size: 100, sort: "createdAt,desc" },
+    // The history the recovery loaded keeps every piece, not only the answer's rows.
+    expect(session.history.map((item) => item.kind)).toEqual([
+      "agent",
+      "agent",
+      "tool",
+      "agent",
+      "reasoning",
+      "approval",
     ])
   })
 
