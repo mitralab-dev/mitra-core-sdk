@@ -1,7 +1,7 @@
 {
   "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
   "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
-  "note": "A steer: one terminal, under the last prompt. `turnIds` lists every prompt the turn took in, in order; the copilot closes all and records the turn under the last.",
+  "note": "A steer: one turn, under the prompt that opened it, with a `steer` frame where the steered message went in (its own turnId, activityId and turnSequence, and its clientMessageId in the lifecycle). `turnIds` lists every prompt the turn took in, in order; the copilot closes all and records the turn under the first.",
   "requests": [
     {
       "path": "/api/v1/tasks/task-1/channel-events",
@@ -10,6 +10,7 @@
       },
       "body": {
         "generation": 2,
+        "threadId": "thread:project:<projectId>:<uuid>",
         "turnIds": ["turn-1", "turn-2"],
         "events": [
           {
@@ -25,8 +26,8 @@
                 "clientMessageId": "cm-1"
               }
             },
-            "sequence": 1,
-            "timestamp": 1760600000050
+            "sequence": 2,
+            "timestamp": 1760600000030
           },
           {
             "type": "textChunk",
@@ -40,26 +41,34 @@
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "a1",
+              "itemDelta": "Once upon a time"
             },
-            "sequence": 2,
-            "timestamp": 1760600000060
+            "sequence": 3,
+            "timestamp": 1760600000040
           },
           {
-            "type": "stepStart",
+            "type": "steer",
             "payload": {
+              "messageId": "mitra-msg-turn-2",
+              "text": "x",
+              "turnId": "turn-2",
+              "activityId": "act-2",
+              "turnSequence": 2,
               "lifecycle": {
-                "activityId": "act-2",
-                "turnId": "turn-2",
-                "turnSequence": 2,
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false,
                 "clientMessageId": "cm-2"
-              }
+              },
+              "itemId": "item-user-mitra-msg-turn-2"
             },
-            "sequence": 3,
-            "timestamp": 1760600000110
+            "sequence": 5,
+            "timestamp": 1760600000070
           },
           {
             "type": "textChunk",
@@ -67,16 +76,18 @@
               "text": ", the end.",
               "kind": "text",
               "lifecycle": {
-                "activityId": "act-2",
-                "turnId": "turn-2",
-                "turnSequence": 2,
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "a1",
+              "itemDelta": ", the end."
             },
-            "sequence": 4,
-            "timestamp": 1760600000120
+            "sequence": 6,
+            "timestamp": 1760600000080
           },
           {
             "type": "stepFinish",
@@ -84,18 +95,19 @@
               "reason": "stop",
               "turnId": "run-1",
               "lifecycle": {
-                "activityId": "act-2",
-                "turnId": "turn-2",
-                "turnSequence": 2,
+                "activityId": "act-1",
+                "turnId": "turn-1",
+                "turnSequence": 1,
                 "terminal": true,
                 "sessionIdle": true,
                 "interruptTerminal": false
               }
             },
-            "sequence": 5,
-            "timestamp": 1760600000130
+            "sequence": 7,
+            "timestamp": 1760600000090
           }
-        ]
+        ],
+        "final": true
       }
     }
   ]

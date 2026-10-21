@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { createAgentTaskSessionManager } from "./agentSession"
+import { playDirectScenario } from "./fixtures/session-parity/directScenario"
 import { playScenario } from "./fixtures/session-parity/scenario"
 import type { RecordedEvent } from "./fixtures/session-parity/scenario"
 
@@ -16,6 +17,7 @@ const ADDED_FIELDS = new Set([
   "reasoning",
   "subagent",
   "reason",
+  "itemDelta",
 ])
 
 function differences(before: unknown, now: unknown, path: string, found: string[]): void {
@@ -46,6 +48,20 @@ function differences(before: unknown, now: unknown, path: string, found: string[
   }
 }
 
+function recordedBy(file: string): RecordedEvent[] {
+  return JSON.parse(
+    readFileSync(new URL(`./fixtures/session-parity/${file}`, import.meta.url), "utf8"),
+  ) as RecordedEvent[]
+}
+
+function formatDifferences(before: RecordedEvent[], now: RecordedEvent[]): string[] {
+  const found: string[] = []
+  before.forEach((recorded, index) =>
+    differences(recorded.payload, now[index]!.payload, `${index}:${recorded.event}`, found),
+  )
+  return found
+}
+
 describe("Agent session parity with 0.2.13", () => {
   it("emits the events 0.2.13 emitted, field by field, with only optional fields added", async () => {
     const before = JSON.parse(
@@ -66,6 +82,19 @@ describe("Agent session parity with 0.2.13", () => {
     expect(now.find((recorded) => recorded.event === "delta")?.payload).toMatchObject({
       itemId: "a1",
       sequence: 9,
+    })
+  })
+
+  it("emits on the box socket what 0.2.13 emitted for the box's own frames, field by field", async () => {
+    const before = recordedBy("v0.2.13.direct.events.json")
+    const now = await playDirectScenario(createAgentTaskSessionManager as never)
+
+    expect(now.map((recorded) => recorded.event)).toEqual(before.map((recorded) => recorded.event))
+    expect(formatDifferences(before, now)).toEqual([])
+    expect(now.find((recorded) => recorded.event === "delta")?.payload).toMatchObject({
+      itemId: "a1",
+      itemDelta: "Let me look.\n\n",
+      turnId: "turn-1",
     })
   })
 })
