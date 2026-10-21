@@ -915,7 +915,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       // Apps close the creating session inside taskCreated and reopen by task id, so the
       // input still goes out over REST. No channel, status, or event for a closed session,
       // and a failure has no listener left to hear it.
-      await this.sendInput(input).catch(() => undefined)
+      await this.handOver(input, clientMessageId).catch(() => undefined)
       return false
     }
     await this.ensureChannel()
@@ -1273,17 +1273,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`.
+    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
+    // echoes it as on the direct channel.
+    const id = clientMessageId === undefined ? {} : { clientMessageId }
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content }
+          ? { type: "message", content: input.content, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
     await this.dependencies.tasks.sendInput(this._taskId, rest)

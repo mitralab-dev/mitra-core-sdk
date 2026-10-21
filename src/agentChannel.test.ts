@@ -739,7 +739,11 @@ describe("Agent direct channel", () => {
       payload: { reason: "unavailable", error: "Not Found" },
     })
     expect(fallback.transports).toEqual([undefined])
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hello" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hello",
+      clientMessageId: expect.any(String),
+    })
   })
 
   it("dials with the injected implementation on a runtime without a global WebSocket", async () => {
@@ -2622,6 +2626,7 @@ describe("Agent direct channel steering", () => {
     expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
       type: "message",
       content: "Stop and say BANANA",
+      clientMessageId: expect.any(String),
     })
     session.close()
   })
@@ -2648,13 +2653,15 @@ describe("Agent direct channel steering", () => {
     await vi.waitFor(() => expect(session.status).toBe("idle"))
     socket.drop()
 
-    session.send("Now say MANGO", { agentType: "CODEX", reasoningEffort: "low" })
+    const id = session.send("Now say MANGO", { agentType: "CODEX", reasoningEffort: "low" })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    // The Copilot keeps the id and hands it to the box: `send` returns it on this path too.
     expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
       type: "message",
       content: "Now say MANGO",
       agentType: "CODEX",
       reasoningEffort: "low",
+      clientMessageId: id,
     })
     session.close()
   })
@@ -2799,6 +2806,7 @@ describe("Agent direct channel steering", () => {
       expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
         type: "message",
         content: "Stop and say BANANA",
+        clientMessageId: expect.any(String),
       }),
     )
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
@@ -2872,6 +2880,7 @@ describe("Agent direct channel steering", () => {
       expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
         type: "message",
         content: "Stop and say BANANA",
+        clientMessageId: expect.any(String),
       }),
     )
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))

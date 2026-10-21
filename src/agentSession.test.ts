@@ -165,6 +165,7 @@ describe("Agent task session", () => {
       content: "Analyze",
       agentType: "CODEX",
       reasoningEffort: "high",
+      clientMessageId: expect.any(String),
     })
 
     source.emit(event("textDelta", { text: "Hello " }))
@@ -234,7 +235,11 @@ describe("Agent task session", () => {
     session.send("hi")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hi",
+      clientMessageId: expect.any(String),
+    })
     expect(session.status).toBe("closed")
     expect(source.taskIds).toEqual([])
   })
@@ -251,7 +256,11 @@ describe("Agent task session", () => {
     resolveCreate(TASK)
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hi",
+      clientMessageId: expect.any(String),
+    })
     expect(source.taskIds).toEqual([])
   })
 
@@ -333,6 +342,7 @@ describe("Agent task session", () => {
     expect(tasks.sendInput).toHaveBeenLastCalledWith("task-1", {
       type: "message",
       content: "second",
+      clientMessageId: expect.any(String),
     })
     expect(session.queue).toEqual([])
 
@@ -396,7 +406,7 @@ describe("Agent task session", () => {
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
-      { type: "message", content: "first" },
+      { type: "message", content: "first", clientMessageId: expect.any(String) },
     ])
   })
 
@@ -415,7 +425,11 @@ describe("Agent task session", () => {
       for (let index = 0; index < 20; index += 1) session.send(`steer-${index}`)
       await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(21))
       expect(tasks.sendInput.mock.calls.slice(1).map(([, input]) => input)).toEqual(
-        Array.from({ length: 20 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
+        Array.from({ length: 20 }, (_, index) => ({
+          type: "message",
+          content: `steer-${index}`,
+          clientMessageId: expect.any(String),
+        })),
       )
       expect(errors).toEqual([])
       // The session holds no queue of its own: only T3's, which the box reports.

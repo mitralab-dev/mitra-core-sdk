@@ -1188,6 +1188,12 @@ export type AgentTaskInput =
        * The session always sends `steer`. The Copilot does not take the field.
        */
       mode?: "steer"
+      /**
+       * The id the box echoes on the frames that take the message (`stepStart`, `steer`,
+       * `messageQueued`) and the history item of the question carries. The session sends the one
+       * `send` returned, to the box and to the Copilot, which keeps it and hands it to the box.
+       */
+      clientMessageId?: string
     }
   | { type: "interrupt" }
   | { type: "approval_response"; approved: boolean }
