@@ -20,7 +20,10 @@ All notable changes to this project are documented in this file.
   asks for every row with `kinds=all` (new `AgentMessageListOptions.kinds`, which `listMessages`
   sends as a query parameter), and each row becomes its own item. A `REASONING` row is an item of
   the new kind `reasoning`; a `SUBAGENT_TEXT` row is an `agent` item with `parentToolId`; a
-  subagent's tools are `tool` items. Without the parameter the Copilot answers the rows 0.2.13
+  subagent's tools are `tool` items; `APPROVAL` and `USER_INPUT_REQUEST` rows are items of the new
+  kinds `approval` and `userInputRequest`, with the payload of the box frame as it came (the same
+  that reaches the session live as `raw`). A turn recovered from the history reads its answer
+  from today's row types of the chat only. Without the parameter the Copilot answers the rows 0.2.13
   read. Nothing is derived or attached: a frame or row without a field leaves it out.
 - A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
   box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,

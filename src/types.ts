@@ -572,7 +572,7 @@ export interface PageOptions {
 export interface AgentMessageListOptions extends PageOptions {
   /**
    * `all` asks for every row the Copilot recorded from the box, one per piece: also `REASONING`,
-   * `SUBAGENT_TEXT` and a subagent's tools. Without it the Copilot answers only `TEXT`, `ERROR`
+   * `SUBAGENT_TEXT`, `APPROVAL`, `USER_INPUT_REQUEST` and a subagent's tools. Without it the Copilot answers only `TEXT`, `ERROR`
    * and `TOOL_USE` rows of the chat itself, as before.
    */
   kinds?: "all"
@@ -1305,7 +1305,10 @@ export interface AgentTurnUsage {
 export interface AgentMessage {
   id: string
   sender: string
-  /** `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING` and `SUBAGENT_TEXT`. */
+  /**
+   * `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING`, `SUBAGENT_TEXT`,
+   * `APPROVAL` and `USER_INPUT_REQUEST`.
+   */
   type: string
   content: string
   createdAt: string

@@ -215,6 +215,25 @@ export type AgentTimelineItem =
     } & AgentTimelineItemIdentity)
   | ({
       id: string
+      /**
+       * An approval T3 asked for (`APPROVAL` row) or a question it asked the person mid-turn
+       * (`USER_INPUT_REQUEST` row): the payload of the box's `approval` or `user_input_request`
+       * frame, as it came, the same that reached the session live as a `raw` event.
+       */
+      kind: "approval"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      kind: "userInputRequest"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
       kind: "tool"
       tool: AgentToolEvent
       at: string
@@ -505,7 +524,21 @@ function isChatRow(message: AgentMessage): boolean {
   )
 }
 
-// Every row as it came, one item per row: nothing is built from or attached to its neighbours.
+const REQUEST_ROW_KINDS: Record<string, "approval" | "userInputRequest" | undefined> = {
+  APPROVAL: "approval",
+  USER_INPUT_REQUEST: "userInputRequest",
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// Every row as it came, one item per row: nothing is built from or attached to its neighbours. A
+// row whose payload does not parse stays useful as plain Agent text, as a tool row does.
 export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   if (message.type === "REASONING") {
     return {
@@ -515,6 +548,20 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
       at: message.createdAt,
       ...timelineIdentityOf(message),
       ...parentToolIdOf(message.parentToolId),
+    }
+  }
+  const requestKind = REQUEST_ROW_KINDS[message.type]
+  if (requestKind) {
+    const payload = asObject(parseJson(message.content))
+    if (payload) {
+      return {
+        id: message.id,
+        kind: requestKind,
+        payload,
+        at: message.createdAt,
+        ...timelineIdentityOf(message),
+        ...parentToolIdOf(message.parentToolId),
+      }
     }
   }
   if (message.type === "TOOL_USE") {

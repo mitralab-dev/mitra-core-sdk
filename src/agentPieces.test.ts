@@ -159,6 +159,8 @@ function draw(session: AgentTaskSession) {
     for (const item of history) {
       if (item.kind === "tool") {
         tool(item.tool.toolId ?? item.id, item.tool.phase, item.tool.content, item.sequence)
+      } else if (item.kind === "approval" || item.kind === "userInputRequest") {
+        add({ key: `${item.kind}:${item.itemId}`, text: "", result: item.payload })
       } else if (item.kind === "reasoning") {
         text(pieceKey("reasoning", item.itemId, item.parentToolId), item.text, item.sequence)
       } else if (item.kind === "user") {
@@ -179,6 +181,13 @@ function draw(session: AgentTaskSession) {
   session.on("delta", ({ delta, kind, itemId, sequence, parentToolId }) => {
     if (parentToolId !== undefined) return
     text(pieceKey(kind === "text" ? "text" : "reasoning", itemId), delta, sequence)
+  })
+  // T3's requests reach the session live as `raw` frames, the same payload the history row keeps.
+  session.on("raw", ({ type, payload }) => {
+    const kind =
+      type === "approval" ? "approval" : type === "user_input_request" ? "userInputRequest" : null
+    const itemId = (payload as { itemId?: string }).itemId
+    if (kind) add({ key: `${kind}:${itemId}`, text: "", result: payload })
   })
   session.on("subagentDelta", ({ delta, kind, itemId, sequence, parentToolId }) => {
     text(pieceKey(kind === "text" ? "text" : "reasoning", itemId, parentToolId), delta, sequence)
@@ -252,6 +261,20 @@ function conversation(first: string, second: string): Frame[] {
     },
     // A turn the agent opened by itself.
     { type: "stepStart", payload: { ...wake } },
+    {
+      type: "approval",
+      payload: {
+        requestId: "req-1",
+        requestKind: "command",
+        detail: "Run it?",
+        itemId: "ap1",
+        ...wake,
+      },
+    },
+    {
+      type: "user_input_request",
+      payload: { id: "in1", requestId: "req-2", questions: [{ id: "q1" }], itemId: "in1", ...wake },
+    },
     { type: "textDelta", payload: { text: "Subagent done", itemId: "a3", ...wake } },
     {
       type: "stepFinish",
@@ -313,6 +336,15 @@ function historyAt(
           }),
         )
       }
+    } else if (frame.type === "approval" || frame.type === "user_input_request") {
+      rows.push(
+        row({
+          type: frame.type === "approval" ? "APPROVAL" : "USER_INPUT_REQUEST",
+          content: JSON.stringify(payload),
+          sequence,
+          itemId: payload.itemId as string,
+        }),
+      )
     } else if (frame.type === "toolCall" || frame.type === "toolResult") {
       rows.push(
         row({
@@ -383,6 +415,16 @@ describe("Agent conversation opened in the middle of a run", () => {
       { key: "tool:ct-1", text: "", result: "ok" },
       { key: `user:${recorded.sent[1]!.id}`, text: "Also cats", result: undefined },
       { key: "text:a2", text: "And cats", result: undefined },
+      {
+        key: "approval:ap1",
+        text: "",
+        result: expect.objectContaining({ requestId: "req-1", itemId: "ap1" }),
+      },
+      {
+        key: "userInputRequest:in1",
+        text: "",
+        result: expect.objectContaining({ requestId: "req-2", itemId: "in1" }),
+      },
       { key: "text:a3", text: "Subagent done", result: undefined },
     ])
 
@@ -398,9 +440,11 @@ describe("Agent conversation opened in the middle of a run", () => {
       [10, 12], // the steer recorded, the end of the turn only in the box
       [11, 11],
       [12, 13], // the late subagent result only in the box
-      [13, 15], // inside the turn the agent opened by itself
-      [15, 16],
-      [16, 16], // everything recorded
+      [13, 15], // the approval only in the box
+      [15, 16], // the approval recorded, the input request only in the box
+      [16, 17], // inside the turn the agent opened by itself
+      [17, 18],
+      [18, 18], // everything recorded
     ]
     for (const [cursor, logged] of cuts) {
       BoxSocket.instances = []

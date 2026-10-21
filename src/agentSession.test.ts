@@ -743,6 +743,7 @@ describe("Agent task session", () => {
       .mockResolvedValueOnce(page([oldMessage]))
       .mockResolvedValueOnce(
         page([
+          message("ask", "AGENT", '{"requestId":"req-1"}', "APPROVAL"),
           thought,
           { ...subagent, parentToolId: "tool-1" },
           subagentTool,
@@ -1330,6 +1331,20 @@ describe("Agent history item identity", () => {
           itemId: "tool-9",
           subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
         },
+        {
+          ...message("q", "AGENT", '{"id":"in-1","requestId":"req-2"}', "USER_INPUT_REQUEST"),
+          sequence: 3,
+          epoch: 2,
+          itemId: "in-1",
+        },
+        {
+          ...message("ap", "AGENT", '{"requestId":"req-1","detail":"Run it?"}', "APPROVAL"),
+          sequence: 2,
+          epoch: 2,
+          itemId: "ap-1",
+        },
+        // A payload that does not parse stays readable as text.
+        message("bad", "AGENT", "not json", "APPROVAL"),
         { ...message("u", "USER", "Hi"), sequence: 1, epoch: 2, clientMessageId: "cm-1" },
         message("old", "USER", "Before"),
       ]),
@@ -1349,6 +1364,25 @@ describe("Agent history item identity", () => {
         sequence: 1,
         epoch: 2,
         clientMessageId: "cm-1",
+      },
+      { id: "bad", kind: "agent", text: "not json", at: "2026-01-01T00:00:03Z" },
+      {
+        id: "ap",
+        kind: "approval",
+        payload: { requestId: "req-1", detail: "Run it?" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 2,
+        epoch: 2,
+        itemId: "ap-1",
+      },
+      {
+        id: "q",
+        kind: "userInputRequest",
+        payload: { id: "in-1", requestId: "req-2" },
+        at: "2026-01-01T00:00:01Z",
+        sequence: 3,
+        epoch: 2,
+        itemId: "in-1",
       },
       {
         id: "sp",
