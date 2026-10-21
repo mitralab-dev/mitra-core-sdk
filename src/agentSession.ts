@@ -1355,6 +1355,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         })
         break
       case "messageQueued":
+        if (payload?.cancelled === true) {
+          this.cancelQueued(payload, lifecycle)
+          break
+        }
         this.applyQueued(event, payload, lifecycle)
         this.steerQueuedBy(asObject(payload?.lifecycle))
         break
@@ -1412,9 +1416,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
         this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
-        // The box refused an answer to a T3 input request: T3 still waits on that request and the
-        // turn goes on.
+        // The box refused an answer to a T3 input request, or a queue command: T3 still waits on
+        // that request, the queued message stays where it is, and no turn ends.
         if (!payload?.lifecycle && payload?.requestId !== undefined) break
+        if (typeof payload?.command === "string") break
         // A refusal names no turn. One naming a message other than the turn's opening one is
         // that message's: the box refused it and the turn goes on. A box that names none:
         // once the turn that runs was accepted, one arriving with a steer pending is the steer's.
@@ -1463,6 +1468,29 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ? this.queueItems.map((current) => (current === known ? item : current))
       : [...this.queueItems, item]
     this.emit("queueChange", { queue: this.queue })
+  }
+
+  // The box took the message out of T3's queue on a `queued-run.cancel`, with no terminal of its
+  // own: it leaves the queue and only its own `sendAndWait` ends. The message that opened this
+  // session's turn was that turn, still waiting behind another one, which ends with it.
+  private cancelQueued(
+    payload: Record<string, unknown>,
+    lifecycle: Record<string, unknown> | null,
+  ): void {
+    const id = payload.clientMessageId ?? lifecycle?.clientMessageId
+    if (typeof id !== "string") return
+    this.leaveQueue(id)
+    const cancelled = new AgentTaskTurnError("The queued Agent message was cancelled.")
+    if (id === this.openingMessageId) {
+      if (this._status === "streaming" || this._status === "cancelled") this.failTurn(cancelled)
+      return
+    }
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === id,
+    )
+    if (!steered) return
+    this.forgetSteer(steered)
+    steered.waiter?.reject(cancelled)
   }
 
   // After a replay the box sends the queue and the subagents as they are, each a copy of the line

@@ -745,38 +745,67 @@ describe("Agent box queue", () => {
     await expect(next).resolves.toMatchObject({ reason: "stop" })
   })
 
-  // The box closes a message cancelled in the queue as a stop of its own, naming its turn and no
-  // stepStart (FRAMES-CONTRACT 6): the running turn goes on.
-  it("leaves the running turn alone when the box closes a cancelled message as interrupted", async () => {
+  // The box takes a cancelled message out of the queue with a `messageQueued` of no position and
+  // `cancelled: true`, and no terminal: the running turn goes on.
+  it("takes a cancelled message out of the queue and rejects only its own sendAndWait", async () => {
     const { session, first, socket } = await runningTurn()
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
     const waiting = session.sendAndWait("Later")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     const id = idOf(socket.sent[1])
     queued(socket, id, "turn-4", 1, 2, { text: "Later", clientMessageId: id })
     session.removeQueueItem(id)
-    frame(
-      socket,
-      "stepFinish",
-      {
-        reason: "interrupted",
-        turnId: "run-3",
-        lifecycle: {
-          activityId: "act-4",
-          turnId: "turn-4",
-          turnSequence: 4,
-          terminal: true,
-          sessionIdle: true,
-          interruptTerminal: true,
-        },
-      },
-      3,
-    )
-    await expect(waiting).rejects.toThrow("The queued Agent message ended before it ran.")
+    queued(socket, id, "turn-4", null, 3, { cancelled: true, clientMessageId: id })
+    await expect(waiting).rejects.toThrow("The queued Agent message was cancelled.")
     expect(session.queue).toEqual([])
     expect(session.status).toBe("streaming")
+    expect(errors).toEqual([])
     frame(socket, "textDelta", { text: "Still here", lifecycle: { turnId: "turn-1" } }, 4)
     frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
     await expect(first).resolves.toMatchObject({ content: "Still here", reason: "stop" })
+  })
+
+  // The opening message of this session, queued behind a turn another client opened.
+  it("keeps the turn when the box refuses a cancel of the opening message in the queue", async () => {
+    const { session } = openSession()
+    const errors: string[] = []
+    session.on("error", ({ code, error }) => errors.push(`${code}:${error}`))
+    const answer = session.sendAndWait("Count birds")
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    const id = idOf(socket.sent[0])
+    queued(socket, id, "turn-2", 1, 2, { text: "Count birds", clientMessageId: id })
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+
+    session.removeQueueItem(id)
+    frame(socket, "error", {
+      code: "INVALID_MESSAGE",
+      message: "The message is already running",
+      command: "queued-run.cancel",
+      clientMessageId: id,
+    })
+    expect(errors).toEqual(["INVALID_MESSAGE:The message is already running"])
+    expect(session.status).toBe("streaming")
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+
+    frame(socket, "stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: id } }, 3)
+    frame(socket, "textDelta", { text: "Seven", lifecycle: { turnId: "turn-2" } }, 4)
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 5)
+    await expect(answer).resolves.toMatchObject({ content: "Seven", reason: "stop" })
+  })
+
+  it("ends this session's turn when its opening message is cancelled in the queue", async () => {
+    const { session } = openSession()
+    const answer = session.sendAndWait("Count birds")
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    const id = idOf(socket.sent[0])
+    queued(socket, id, "turn-2", 1, 2, { text: "Count birds", clientMessageId: id })
+    queued(socket, id, "turn-2", null, 3, { cancelled: true, clientMessageId: id })
+    await expect(answer).rejects.toThrow("The queued Agent message was cancelled.")
+    expect(session.queue).toEqual([])
+    expect(session.status).toBe("idle")
   })
 
   // After a replay the box sends the current queue and subagents again, each a copy of the line
@@ -811,6 +840,7 @@ describe("Agent box queue", () => {
     frame(socket, "error", {
       code: "INVALID_MESSAGE",
       message: "The message is not in the queue",
+      command: "queued-run.cancel",
       clientMessageId: "other-2",
     })
     expect(session.queue.map((item) => item.id)).toEqual(["other-1", "other-2"])

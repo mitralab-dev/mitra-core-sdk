@@ -186,11 +186,14 @@ export function newClientMessageId(): string {
 // lifecycle, and a refusal names the message it refuses in its payload; one naming another
 // message (another tab on the same chat) answers none of ours. A box that names no message
 // answers the oldest, which is the one it is deciding. An error that names a turn is the turn
-// failing, and one that names a `requestId` is the box refusing an answer to a T3 input request:
-// neither answers a message.
+// failing, one that names a `requestId` is the box refusing an answer to a T3 input request, and
+// one that names a `command` is the box refusing a queue command: none answers a message.
 function admissionFor(link: DirectLink, event: AgentTaskEvent): PendingAdmission | undefined {
   const payload = asObject(event.payload)
-  if (event.type === "error" && (payload?.lifecycle || payload?.requestId !== undefined)) {
+  if (
+    event.type === "error" &&
+    (payload?.lifecycle || payload?.requestId !== undefined || payload?.command !== undefined)
+  ) {
     return undefined
   }
   const id =
@@ -407,6 +410,17 @@ function turnAfter(event: AgentTaskEvent, inTurn: boolean): boolean {
     return asObject(payload?.lifecycle)?.interruptTerminal !== true
   }
   return inTurn
+}
+
+// Whether a frame speaks for the turn the redial would resume. A queued message's frames name its
+// own turn, cancelled or not, and a terminal naming another turn than the followed one ends a
+// message that never ran: neither moves the followed turn, or a drop after them would not redial
+// a turn still running and a box that died would close the wrong turn.
+function followsTurn(link: DirectLink, event: AgentTaskEvent): boolean {
+  if (event.type === "messageQueued") return false
+  if (event.type !== "stepFinish" && event.type !== "error") return true
+  const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
+  return typeof turnId !== "string" || link.turnId === undefined || turnId === link.turnId
 }
 
 /** The terminal of a turn whose box went away, as the box writes an interrupted one. */
@@ -705,9 +719,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         observer.onEvent(event)
         return
       }
-      const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
-      if (typeof turnId === "string" && event.type !== "toolResult") link.turnId = turnId
-      link.inTurn = turnAfter(event, link.inTurn)
+      if (followsTurn(link, event)) {
+        const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
+        if (typeof turnId === "string" && event.type !== "toolResult") link.turnId = turnId
+        link.inTurn = turnAfter(event, link.inTurn)
+      }
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)

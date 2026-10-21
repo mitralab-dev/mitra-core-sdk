@@ -1306,6 +1306,101 @@ describe("Agent direct channel lifecycle", () => {
     session.close()
   })
 
+  // A queued message's frames name its own turn: they must not move the turn the redial resumes.
+  it("redials and closes the running turn, not the cancelled queued message, when the box drops", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 3 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const running = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const opening = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: opening } }, 1)
+    const later = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    const queued = { lifecycle: { turnId: "turn-2", clientMessageId: id }, clientMessageId: id }
+    socket.receive("messageQueued", { position: 1, text: "Later", ...queued }, 2)
+    session.removeQueueItem(id)
+    socket.receive("messageQueued", { position: null, cancelled: true, ...queued }, 3)
+    await expect(later).rejects.toThrow("The queued Agent message was cancelled.")
+    expect(session.status).toBe("streaming")
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    // The box the turn ran on went away: the turn it closes is the running one, not the cancelled
+    // message's.
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 0 }])
+    await expect(running).resolves.toMatchObject({ reason: "interrupted", turnId: "turn-1" })
+    session.close()
+  })
+
+  it("keeps redialing the running turn after a queued message ended with a terminal of its own", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    const later = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    socket.receive(
+      "messageQueued",
+      { position: 1, lifecycle: { turnId: "turn-2", clientMessageId: id } },
+      2,
+    )
+    socket.receive(
+      "error",
+      { message: "Dropped", lifecycle: { turnId: "turn-2", terminal: true, sessionIdle: true } },
+      3,
+    )
+    await expect(later).rejects.toThrow("Dropped")
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 3 }])
+    session.close()
+  })
+
+  it("closes the running turn as interrupted when its box dies with a message queued", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const ends: unknown[] = []
+    session.on("turnEnd", ({ reason, turnId }) => ends.push({ reason, turnId }))
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    void session.sendAndWait("Later").catch(() => undefined)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    socket.receive(
+      "messageQueued",
+      { position: 1, lifecycle: { turnId: "turn-2", clientMessageId: id } },
+      2,
+    )
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted", turnId: "turn-1" })
+    expect(ends).toEqual([{ reason: "interrupted", turnId: "turn-1" }])
+    session.close()
+  })
+
   it("closes the turn when the same box comes back with an empty log", async () => {
     vi.useFakeTimers()
     const channel = vi
