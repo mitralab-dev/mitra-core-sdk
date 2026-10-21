@@ -60,7 +60,7 @@ describe("messenger.sendEmail", () => {
     ])
   })
 
-  it("omits absent optional fields and drops a from that an untyped caller passes", async () => {
+  it("omits absent optional fields and drops the from and appId an untyped caller passes", async () => {
     const transport = new QueueTransport([{ messageId: "message-1" }])
 
     await createMessengerModule(transport).sendEmail({
@@ -68,6 +68,7 @@ describe("messenger.sendEmail", () => {
       subject: "Welcome",
       html: "<p>Hi</p>",
       from: "spoof@example.com",
+      appId: "11111111-1111-1111-1111-111111111111",
     } as SendEmailInput)
 
     expect(transport.requests[0]?.options.body).toStrictEqual({
