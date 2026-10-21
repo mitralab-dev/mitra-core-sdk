@@ -631,6 +631,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openingAwaitsStart = false
   private turnBaselineIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
+  private readonly subagentSequences = new Map<string, number>()
   private queueItems: AgentQueueItem[] = []
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
@@ -1448,6 +1449,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const position = payload?.position
     if (typeof id !== "string" || typeof position !== "number") return
     const known = this.queueItems.find((item) => item.id === id)
+    if (this.alreadyApplied(known?.sequence, event)) return
     const item: AgentQueueItem = {
       id,
       text: typeof payload?.text === "string" ? payload.text : (known?.text ?? ""),
@@ -1461,6 +1463,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ? this.queueItems.map((current) => (current === known ? item : current))
       : [...this.queueItems, item]
     this.emit("queueChange", { queue: this.queue })
+  }
+
+  // After a replay the box sends the queue and the subagents as they are, each a copy of the line
+  // that said it last, with that line's sequence: state this session may already hold.
+  private alreadyApplied(applied: number | undefined, event: AgentTaskEvent): boolean {
+    return applied !== undefined && typeof event.sequence === "number" && event.sequence <= applied
   }
 
   private leaveQueue(id: unknown): AgentQueueItem | undefined {
@@ -1607,6 +1615,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const subagentId = payload?.subagentId
     const toolId = payload?.toolId
     if (typeof subagentId !== "string" || typeof toolId !== "string") return
+    if (this.alreadyApplied(this.subagentSequences.get(subagentId), event)) return
+    if (typeof event.sequence === "number") this.subagentSequences.set(subagentId, event.sequence)
     // T3 can report a subagent without a status; it keeps the one it had.
     const status =
       typeof payload?.status === "string"

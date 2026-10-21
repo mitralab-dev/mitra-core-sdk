@@ -745,6 +745,61 @@ describe("Agent box queue", () => {
     await expect(next).resolves.toMatchObject({ reason: "stop" })
   })
 
+  // The box closes a message cancelled in the queue as a stop of its own, naming its turn and no
+  // stepStart (FRAMES-CONTRACT 6): the running turn goes on.
+  it("leaves the running turn alone when the box closes a cancelled message as interrupted", async () => {
+    const { session, first, socket } = await runningTurn()
+    const waiting = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = idOf(socket.sent[1])
+    queued(socket, id, "turn-4", 1, 2, { text: "Later", clientMessageId: id })
+    session.removeQueueItem(id)
+    frame(
+      socket,
+      "stepFinish",
+      {
+        reason: "interrupted",
+        turnId: "run-3",
+        lifecycle: {
+          activityId: "act-4",
+          turnId: "turn-4",
+          turnSequence: 4,
+          terminal: true,
+          sessionIdle: true,
+          interruptTerminal: true,
+        },
+      },
+      3,
+    )
+    await expect(waiting).rejects.toThrow("The queued Agent message ended before it ran.")
+    expect(session.queue).toEqual([])
+    expect(session.status).toBe("streaming")
+    frame(socket, "textDelta", { text: "Still here", lifecycle: { turnId: "turn-1" } }, 4)
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await expect(first).resolves.toMatchObject({ content: "Still here", reason: "stop" })
+  })
+
+  // After a replay the box sends the current queue and subagents again, each a copy of the line
+  // that said it last, with that line's sequence (FRAMES-CONTRACT 7): state, not new steps.
+  it("takes the state the box repeats after a replay as what it already holds", async () => {
+    const { session, socket } = await runningTurn()
+    const queueChanges = vi.fn()
+    const subagents = vi.fn()
+    session.on("queueChange", queueChanges)
+    session.on("subagent", subagents)
+    const update = { toolId: "tool-9", subagentId: "sub-1", status: "running" }
+    queued(socket, "other-1", "turn-8", 1, 2, { text: "Queued" })
+    frame(socket, "subagentUpdate", update, 3)
+    frame(socket, "replayComplete", { lastSequence: 3 })
+    queued(socket, "other-1", "turn-8", 1, 2, { text: "Queued" })
+    frame(socket, "subagentUpdate", update, 3)
+
+    expect(queueChanges).toHaveBeenCalledOnce()
+    expect(subagents).toHaveBeenCalledOnce()
+    expect(session.queue.map((item) => item.id)).toEqual(["other-1"])
+    expect(session.subagents).toHaveLength(1)
+  })
+
   it("edits with queued-run.edit and clears with one cancel per queued message", async () => {
     const { session, socket } = await runningTurn()
     queued(socket, "other-1", "turn-8", 1, 2, { text: "From another tab" })

@@ -33,6 +33,10 @@ All notable changes to this project are documented in this file.
   beginning. A history without `sequence` asks for no replay, as before. A turn the replay opens
   keeps the session `streaming` after the open. The event source gets the cursor as a fifth,
   optional `open` argument, which a concrete SDK may ignore.
+- The queue and subagent state the box sends again after a replay, each a copy of the line that
+  said it last with that line's `sequence`, is taken as state: a copy of what the session already
+  holds emits no `queueChange` or `subagent` again, and on a fresh open it fills `queue` and
+  `subagents`.
 
 ## 0.3.0
 
