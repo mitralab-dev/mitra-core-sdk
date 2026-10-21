@@ -49,6 +49,12 @@ All notable changes to this project are documented in this file.
   said it last with that line's `sequence`, is taken as state: a copy of what the session already
   holds emits no `queueChange` or `subagent` again, and on a fresh open it fills `queue` and
   `subagents`.
+- A `stepStart` naming a turn while no turn runs starts that turn with its content clean, and
+  `accepted` is emitted at the frame that names the message (`stepStart`, `steer` or
+  `messageQueued`). A message sent right after a `turnEnd`, before the previous admission was
+  heard, no longer takes the text of the turn that ended, and a turn whose frames arrive in one
+  tick gives the same events as one whose frames arrive spaced out. A turn the agent opens by
+  itself no longer carries the previous turn's text in `turnEnd.content`.
 
 ## 0.3.0
 

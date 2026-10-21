@@ -77,7 +77,11 @@ describe("Agent session parity with 0.2.13", () => {
     before.forEach((recorded, index) =>
       differences(recorded.payload, now[index]!.payload, `${index}:${recorded.event}`, found),
     )
-    expect(found).toEqual([])
+    // The one value that changes on purpose: a turn the box announces with `stepStart` starts with
+    // its content clean. 0.2.13 carried the turn before into the turn the agent opened by itself.
+    expect(found).toEqual([
+      '18:turnEnd.content: "Subagent done" instead of "HelThree birdsloSubagent done"',
+    ])
     // The added fields are there: the comparison is not passing on an empty stream.
     expect(now.find((recorded) => recorded.event === "delta")?.payload).toMatchObject({
       itemId: "a1",
@@ -96,5 +100,24 @@ describe("Agent session parity with 0.2.13", () => {
       itemDelta: "Let me look.\n\n",
       turnId: "turn-1",
     })
+  })
+
+  // A socket that read several frames at once hands them over in one tick. The next message then
+  // goes out before the previous admission was heard: it must still get a clean turn of its own
+  // when the box announces one, and the events must be the ones of frames spaced out.
+  it("emits the same events when each turn's frames arrive in one tick", async () => {
+    const spaced = await playDirectScenario(createAgentTaskSessionManager as never, "spaced")
+    const batched = await playDirectScenario(createAgentTaskSessionManager as never, "batched")
+
+    expect(batched).toEqual(spaced)
+    const before = recordedBy("v0.2.13.direct.events.json")
+    expect(batched.map((recorded) => recorded.event)).toEqual(
+      before.map((recorded) => recorded.event),
+    )
+    expect(formatDifferences(before, batched)).toEqual([])
+    const contents = batched
+      .filter((recorded) => recorded.event === "turnEnd")
+      .map((recorded) => (recorded.payload as { content: string }).content)
+    expect(contents).toEqual(["Let me look.\n\nTwo files.", "Once upon a time, the end."])
   })
 })

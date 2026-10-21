@@ -655,6 +655,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private readonly subagentsById = new Map<string, AgentSubagent>()
   private readonly subagentSequences = new Map<string, number>()
   private queueItems: AgentQueueItem[] = []
+  // Messages of this session `accepted` was already emitted for. The frame that names a message
+  // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
+  // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
+  private readonly acceptedIds: string[] = []
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
 
@@ -943,7 +947,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!direct) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
-    this.emit("accepted", {})
+    this.acceptOnce(clientMessageId)
     return true
   }
 
@@ -994,7 +998,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         // A box that does not echo the id is only heard here. A queued one is not in a turn yet.
         if (!steered.queued) this.steerTaken(steered)
-        this.emit("accepted", {})
+        this.acceptOnce(steered.clientMessageId)
       })
       .catch((error: unknown) => {
         this.forgetSteer(steered)
@@ -1363,12 +1367,26 @@ class CoreAgentTaskSession implements AgentTaskSession {
         })
         break
       case "stepStart":
+        // The box announcing a turn is what starts one, with its content clean: whether a message
+        // steered or got a turn of its own is the box's call, never this session's timing. A
+        // message sent right after a `turnEnd`, before the previous one's admission was heard,
+        // must not take the text of the turn that ended.
+        if (
+          typeof lifecycle?.turnId === "string" &&
+          !this.isFinishedTurnFrame(lifecycle) &&
+          this._status !== "streaming" &&
+          this._status !== "cancelled"
+        ) {
+          this.openTurnFor()
+        }
         this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(asObject(payload?.lifecycle))
+        this.acceptNamed(lifecycle?.clientMessageId)
         break
       case "steer":
         this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(lifecycle)
+        this.acceptNamed(lifecycle?.clientMessageId)
         this.emit("steered", {
           text: typeof payload?.text === "string" ? payload.text : "",
           messageId: typeof payload?.messageId === "string" ? payload.messageId : "",
@@ -1386,6 +1404,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         this.applyQueued(event, payload, lifecycle)
         this.steerQueuedBy(asObject(payload?.lifecycle))
+        this.acceptNamed(lifecycle?.clientMessageId)
         break
       case "subagentUpdate":
         this.applySubagent(event, payload)
@@ -1516,6 +1535,36 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!steered) return
     this.forgetSteer(steered)
     steered.waiter?.reject(cancelled)
+  }
+
+  // A frame naming one of this session's messages in flight is the box taking it.
+  private acceptNamed(id: unknown): void {
+    if (typeof id !== "string") return
+    const ours =
+      id === this.openingMessageId ||
+      [...this.steers, ...this.strayedSteers].some((pending) => pending.clientMessageId === id)
+    if (ours) this.acceptOnce(id)
+  }
+
+  private acceptOnce(id: string): void {
+    if (this.acceptedIds.includes(id)) return
+    this.acceptedIds.push(id)
+    if (this.acceptedIds.length > 32) this.acceptedIds.shift()
+    this.emit("accepted", {})
+  }
+
+  // As in T3, cancelling a queued run only takes that run out: no turn ends with it. The message
+  // this session opened its turn with never ran, so only its own `sendAndWait` is rejected. A
+  // message of this session still queued behind it keeps the session waiting for the turn the
+  // box opens for it; with none, nothing of this session runs and it goes back to idle.
+  private cancelOpening(cancelled: AgentTaskTurnError): void {
+    this.openingMessageId = undefined
+    if (!this.openingAwaitsStart) return
+    this.openingAwaitsStart = false
+    this.activeWaiter?.reject(cancelled)
+    this.activeWaiter = undefined
+    if (this._status !== "streaming" && this._status !== "cancelled") return
+    if (this.steers.length === 0 && this.strayedSteers.length === 0) this.setStatus("idle")
   }
 
   // After a replay the box sends the queue and the subagents as they are, each a copy of the line

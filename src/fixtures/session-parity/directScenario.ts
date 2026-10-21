@@ -103,11 +103,17 @@ class BoxSocket {
 
   // The fixture names the turn's message `cm-1`: here, the message this session sent for it. A
   // version that sends no id gets a frame that names none. Other ids are another client's. Both
-  // fixtures run as `turn-1`; the turn played is given its own id, as the box would. Each frame
-  // comes in a task of its own, as off a socket.
-  async play(frames: LoggedFrame[], opening: Record<string, unknown>, turnId: string) {
+  // fixtures run as `turn-1`; the turn played is given its own id, as the box would. Spaced, each
+  // frame comes in a task of its own; batched, the whole turn comes in one, as a socket that read
+  // several frames at once delivers them. Both have to give the same events.
+  async play(
+    frames: LoggedFrame[],
+    opening: Record<string, unknown>,
+    turnId: string,
+    batched: boolean,
+  ) {
     for (const frame of frames) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (!batched) await new Promise((resolve) => setTimeout(resolve, 0))
       const lifecycle = frame.payload.lifecycle as Record<string, unknown> | undefined
       if (!lifecycle) {
         this.deliver(frame)
@@ -137,7 +143,11 @@ async function until(condition: () => boolean): Promise<void> {
   throw new Error("The scenario did not reach the expected state.")
 }
 
-export async function playDirectScenario(createManager: CreateManager): Promise<RecordedEvent[]> {
+export async function playDirectScenario(
+  createManager: CreateManager,
+  delivery: "spaced" | "batched" = "spaced",
+): Promise<RecordedEvent[]> {
+  const batched = delivery === "batched"
   BoxSocket.instances = []
   const tasks = {
     list: async () => ({
@@ -180,13 +190,23 @@ export async function playDirectScenario(createManager: CreateManager): Promise<
 
   session.send("List the files")
   await until(() => socket.messages().length === 1)
-  await socket.play(loggedTurn("turn-simple.channel-events.json"), socket.messages()[0]!, "turn-1")
+  await socket.play(
+    loggedTurn("turn-simple.channel-events.json"),
+    socket.messages()[0]!,
+    "turn-1",
+    batched,
+  )
   await until(() => session.status === "idle")
 
   // The steer in this turn is another client's message, which this session only sees.
   session.send("Tell me a story")
   await until(() => socket.messages().length === 2)
-  await socket.play(loggedTurn("turn-steer.channel-events.json"), socket.messages()[1]!, "turn-3")
+  await socket.play(
+    loggedTurn("turn-steer.channel-events.json"),
+    socket.messages()[1]!,
+    "turn-3",
+    batched,
+  )
   await until(() => session.status === "idle")
   session.close()
   return JSON.parse(JSON.stringify(recorded)) as RecordedEvent[]
