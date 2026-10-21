@@ -27,8 +27,9 @@ All notable changes to this project are documented in this file.
   fields. A message leaves when a turn takes it (`stepStart` or `steer` naming its
   `clientMessageId`), when the box takes it out on a cancel (`messageQueued` with `position: null`
   and `cancelled: true`, no terminal) or when it ends before running; that end rejects only its
-  own `sendAndWait` and leaves the running turn alone, unless it is the message that opened this
-  session's turn, which ends with it. A refusal of a queue command (an `error` with `command`)
+  own `sendAndWait` and ends no turn, as in T3: when it is the message that opened this session's
+  turn, the session follows its next queued message once the box starts it, or goes back to
+  `idle` with no `turnEnd` when none is left. A refusal of a queue command (an `error` with `command`)
   is only emitted as `error` and fails no turn. On the direct channel, a queued message's frames
   and a terminal naming another turn than the followed one never change the turn a redial
   resumes or the one closed as interrupted when the box goes away. `removeQueueItem` sends `queued-run.cancel`,

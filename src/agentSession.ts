@@ -1526,7 +1526,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.leaveQueue(id)
     const cancelled = new AgentTaskTurnError("The queued Agent message was cancelled.")
     if (id === this.openingMessageId) {
-      if (this._status === "streaming" || this._status === "cancelled") this.failTurn(cancelled)
+      this.cancelOpening(cancelled)
       return
     }
     const steered = [...this.steers, ...this.strayedSteers].find(
