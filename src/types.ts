@@ -1314,9 +1314,29 @@ export interface AgentMessage {
   /** On an Agent text: the reasoning written before it. */
   reasoning?: string
   /** On a tool call that spawned a subagent: its last state, as the box sent it. */
-  subagent?: Record<string, unknown>
+  subagent?: Partial<AgentSubagentFrame>
   /** On the row that closed a turn: the reason the box ended it with. */
   reason?: string
+}
+
+/**
+ * A subagent's state as the box sends it in a `subagentUpdate` frame. The Copilot keeps the last
+ * one on the rows of the tool call that spawned the subagent, with what the subagent wrote.
+ */
+export interface AgentSubagentFrame {
+  /** The tool call that spawned the subagent. */
+  toolId: string
+  subagentId: string
+  status: string
+  progress?: string
+  /** As the box sent it: epoch milliseconds or an ISO string. */
+  startedAt?: number | string
+  endedAt?: number | string
+  childThreadId?: string
+  /** History only: the subagent's own text, the pieces of its `subagentDelta` joined. */
+  text?: string
+  /** History only: the box log's sequence of the last frame that went into this state. */
+  sequence?: number
 }
 
 export interface AgentModel {

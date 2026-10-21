@@ -1264,7 +1264,19 @@ describe("Agent history item identity", () => {
             epoch: 2,
             itemId: "t-1",
             parentToolId: "tool-9",
-            subagent: { subagentId: "sub-1", status: "completed" },
+          },
+          {
+            ...message("sp", "AGENT", '{"name":"Task","toolId":"tool-9"}', "TOOL_USE"),
+            sequence: 5,
+            epoch: 2,
+            itemId: "tool-9",
+            subagent: {
+              toolId: "tool-9",
+              subagentId: "sub-1",
+              status: "completed",
+              text: "Found it",
+              sequence: 8,
+            },
           },
           { ...message("u", "USER", "Hi"), sequence: 1, epoch: 2, clientMessageId: "cm-1" },
           message("old", "USER", "Before"),
@@ -1286,6 +1298,23 @@ describe("Agent history item identity", () => {
         clientMessageId: "cm-1",
       },
       {
+        id: "sp",
+        kind: "tool",
+        tool: { tool: "Task", toolId: "tool-9", phase: "call" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 5,
+        epoch: 2,
+        itemId: "tool-9",
+        // The shape of the box's `subagentUpdate`, as the Copilot kept it, with the subagent's text.
+        subagent: {
+          toolId: "tool-9",
+          subagentId: "sub-1",
+          status: "completed",
+          text: "Found it",
+          sequence: 8,
+        },
+      },
+      {
         id: "tc",
         kind: "tool",
         tool: { tool: "Read", toolId: "t-1", parentToolId: "tool-9", phase: "call" },
@@ -1293,8 +1322,6 @@ describe("Agent history item identity", () => {
         sequence: 7,
         epoch: 2,
         itemId: "t-1",
-        parentToolId: "tool-9",
-        subagent: { subagentId: "sub-1", status: "completed" },
       },
       {
         id: "t",

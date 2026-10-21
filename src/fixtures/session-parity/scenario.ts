@@ -93,7 +93,13 @@ const HISTORY = [
     sequence: 3,
     epoch: 0,
     itemId: "tool-old",
-    subagent: { subagentId: "sub-old", status: "completed" },
+    subagent: {
+      toolId: "tool-old",
+      subagentId: "sub-old",
+      status: "completed",
+      text: "Two birds",
+      sequence: 5,
+    },
   },
   {
     id: "m-1",
@@ -126,7 +132,11 @@ export const FRAMES: { type: string; payload: unknown; timestamp: number; sequen
     payload: { lifecycle: { turnId: "turn-1", clientMessageId: "cm-1" } },
     sequence: 8,
   },
-  { type: "textDelta", payload: { text: "Hel", itemId: "a1", ...turn }, sequence: 9 },
+  {
+    type: "textDelta",
+    payload: { text: "Hel", itemDelta: "Hel", itemId: "a1", ...turn },
+    sequence: 9,
+  },
   { type: "thinking", payload: { text: "Which birds", itemId: "r1", ...turn }, sequence: 10 },
   {
     type: "toolCall",

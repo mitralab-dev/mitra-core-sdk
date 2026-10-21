@@ -10,6 +10,7 @@ import { agentTurnUsageOf, expectCredentialUsage } from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
+  AgentSubagentFrame,
   AgentTask,
   AgentTaskEvent,
   AgentTaskInput,
@@ -186,8 +187,6 @@ export interface AgentTimelineItemIdentity {
   epoch?: number
   /** T3's id of the item: the `itemId` of its live frames. */
   itemId?: string
-  /** On a subagent's own text or tool: the tool call that spawned the subagent. */
-  parentToolId?: string
   /** Only on the item that closed a turn: the reason the box ended it with. */
   reason?: string
 }
@@ -204,14 +203,19 @@ export type AgentTimelineItem =
       clientMessageId?: string
       /** On an `agent` item: the reasoning the agent wrote before this text. */
       reasoning?: string
+      /** On a subagent's own text: the tool call that spawned the subagent. */
+      parentToolId?: string
     } & AgentTimelineItemIdentity)
   | ({
       id: string
       kind: "tool"
       tool: AgentToolEvent
       at: string
-      /** On the tool call that spawned a subagent: the subagent's last state, as the box sent it. */
-      subagent?: Record<string, unknown>
+      /**
+       * On the tool call that spawned a subagent: its last state in the shape of the box's
+       * `subagentUpdate`, with the subagent's own text in `text`.
+       */
+      subagent?: Partial<AgentSubagentFrame>
     } & AgentTimelineItemIdentity)
 
 export interface AgentTurnResult {
@@ -471,20 +475,21 @@ function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
     ...(typeof message.sequence === "number" ? { sequence: message.sequence } : {}),
     ...(typeof message.epoch === "number" ? { epoch: message.epoch } : {}),
     ...(typeof message.itemId === "string" ? { itemId: message.itemId } : {}),
-    ...(typeof message.parentToolId === "string" ? { parentToolId: message.parentToolId } : {}),
     ...(typeof message.reason === "string" ? { reason: message.reason } : {}),
   }
 }
 
-// The history comes in the box's order, so its last numbered item is in the newest box log.
+// The history comes in the box's order, so its last numbered item is in the newest box log. A
+// subagent's state and text go into the row of the tool call that spawned it, which keeps its own
+// place: the last frame that went into them counts apart.
 function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCursor | undefined {
   const newest = [...history].reverse().find((item) => typeof item.sequence === "number")
   if (!newest) return undefined
   let sequence = 0
   for (const item of history) {
-    if (item.epoch === newest.epoch && typeof item.sequence === "number") {
-      sequence = Math.max(sequence, item.sequence)
-    }
+    if (item.epoch !== newest.epoch || typeof item.sequence !== "number") continue
+    const folded = item.kind === "tool" ? item.subagent?.sequence : undefined
+    sequence = Math.max(sequence, item.sequence, typeof folded === "number" ? folded : 0)
   }
   return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }
 }
@@ -500,9 +505,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           tool: {
             tool: typeof payload.name === "string" ? payload.name : "",
             ...(typeof payload.toolId === "string" ? { toolId: payload.toolId } : {}),
-            ...(typeof payload.parentToolId === "string"
-              ? { parentToolId: payload.parentToolId }
-              : {}),
+            ...parentToolIdOf(payload.parentToolId ?? message.parentToolId),
             ...(payload.input !== undefined ? { input: payload.input } : {}),
             ...(payload.content !== undefined
               ? { content: payload.content }
@@ -514,7 +517,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           },
           at: message.createdAt,
           ...timelineIdentityOf(message),
-          ...(asObject(message.subagent) ? { subagent: asObject(message.subagent)! } : {}),
+          ...(asObject(message.subagent) ? { subagent: message.subagent } : {}),
         }
       }
     } catch {
@@ -533,7 +536,12 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
       ? { clientMessageId: message.clientMessageId }
       : {}),
     ...(typeof message.reasoning === "string" ? { reasoning: message.reasoning } : {}),
+    ...parentToolIdOf(message.parentToolId),
   }
+}
+
+function parentToolIdOf(value: unknown): { parentToolId?: string } {
+  return typeof value === "string" ? { parentToolId: value } : {}
 }
 
 export function createAgentTaskSessionManager(
