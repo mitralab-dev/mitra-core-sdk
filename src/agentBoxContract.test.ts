@@ -466,3 +466,21 @@ describe("Agent box subagents", () => {
     await expect(result).resolves.toMatchObject({ reason: "stop" })
   })
 })
+
+describe("Agent box message id", () => {
+  it("returns from send the clientMessageId each message goes out with", async () => {
+    const { session } = openSession()
+    const opening = session.send("List 40 animals")
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    expect(opening).toBe(idOf(socket.sent[0]))
+    frame(socket, "stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: opening } }, 1)
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+
+    const steer = session.send("Also birds")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(steer).toBe(idOf(socket.sent[1]))
+    expect(steer).not.toBe(opening)
+    expect(session.send("   ")).toBeUndefined()
+  })
+})

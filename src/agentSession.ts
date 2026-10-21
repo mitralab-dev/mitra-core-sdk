@@ -214,7 +214,12 @@ export interface AgentTaskSession {
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
-  send(prompt: string, options?: AgentSendOptions): void
+  /**
+   * Sends the message at once and returns the id it goes out with: the `clientMessageId` the box
+   * echoes when it takes the message (in `steered`, in `queue` and in the history item of the
+   * question). Undefined for a blank prompt, which is not sent.
+   */
+  send(prompt: string, options?: AgentSendOptions): string | undefined
   sendAndWait(prompt: string, options?: AgentSendAndWaitOptions): Promise<AgentTurnResult>
   cancel(): Promise<void>
   respondApproval(approved: boolean): void
@@ -536,14 +541,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return [...this.subagentsById.values()]
   }
 
-  send(prompt: string, options: AgentSendOptions = {}): void {
+  send(prompt: string, options: AgentSendOptions = {}): string | undefined {
     this.requireOpen()
-    if (!prompt.trim()) return
-    if (this.isBusy()) {
-      this.steer(prompt, options)
-      return
-    }
-    this.startDispatch(prompt, options)
+    if (!prompt.trim()) return undefined
+    if (this.isBusy()) return this.steer(prompt, options)
+    const clientMessageId = newClientMessageId()
+    this.startDispatch(prompt, options, clientMessageId)
+    return clientMessageId
   }
 
   sendAndWait(prompt: string, options: AgentSendAndWaitOptions = {}): Promise<AgentTurnResult> {
@@ -559,7 +563,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.steer(prompt, sendOptions, waiter)
       return waiter.promise
     }
-    this.startDispatch(prompt, sendOptions, waiter)
+    this.startDispatch(prompt, sendOptions, newClientMessageId(), waiter)
     return waiter.promise
   }
 
@@ -690,13 +694,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private startDispatch(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+  private startDispatch(
+    prompt: string,
+    options: AgentSendOptions,
+    clientMessageId: string,
+    waiter?: TurnWaiter,
+  ): void {
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
       handedOver = resolve
     })
-    const dispatch = this.dispatchSend(prompt, options, handedOver, waiter)
+    const dispatch = this.dispatchSend(prompt, options, clientMessageId, handedOver, waiter)
       .catch((error: unknown) => {
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
@@ -717,6 +726,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private async dispatchSend(
     prompt: string,
     options: AgentSendOptions,
+    clientMessageId: string,
     handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
@@ -747,7 +757,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    this.openingMessageId = newClientMessageId()
+    this.openingMessageId = clientMessageId
     this.openingAwaitsStart = true
     const { admitted, direct } = await this.handOver(input, this.openingMessageId)
     if (!direct) this.openingAwaitsStart = false
@@ -767,7 +777,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // model alone by itself and needs them for a message that becomes a turn of its own. Only on
   // the Copilot path, with a turn running, they are dropped: the Copilot restarts the live
   // session for a message that asks for another model, which would end that turn.
-  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): string {
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
@@ -814,6 +824,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .finally(() => {
         this.pendingSteers -= 1
       })
+    return steered.clientMessageId
   }
 
   // The box took the steer. Into the turn it was sent to, when that turn still runs; into a turn

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
+  takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
+  return is unaffected.
+
 ## 0.3.0
 
 Rollout gate: this version goes into the app SDKs (`@mitralab.io/platform-sdk` and the Functions
