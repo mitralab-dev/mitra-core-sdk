@@ -400,7 +400,7 @@ describe("Agent task session", () => {
     ])
   })
 
-  it("keeps the queue API as an empty no-op and sends every message at once", async () => {
+  it("holds no queue of its own and sends every message at once", async () => {
     vi.useFakeTimers()
     try {
       const { session, source, tasks } = createSession()
@@ -418,10 +418,7 @@ describe("Agent task session", () => {
         Array.from({ length: 20 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
       )
       expect(errors).toEqual([])
-      expect(session.queue).toEqual([])
-      session.editQueueItem("q-1", "edited")
-      session.removeQueueItem("q-1")
-      session.clearQueue()
+      // The session holds no queue of its own: only T3's, which the box reports.
       expect(session.queue).toEqual([])
       expect(queueChanges).not.toHaveBeenCalled()
       // Only the box has subagents: without its channel nothing goes out.
@@ -1297,5 +1294,23 @@ describe("Agent history item identity", () => {
         reasoning: "Thought first",
       },
     ])
+  })
+})
+
+describe("Agent queue without the box channel", () => {
+  it("sends no queue command and says so when the box channel is not connected", async () => {
+    const { session } = createSession()
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    session.send("first")
+    await vi.waitFor(() => expect(session.taskId).toBe("task-1"))
+    session.removeQueueItem("q-1")
+    session.editQueueItem("q-1", "edited")
+    await vi.waitFor(() =>
+      expect(errors).toEqual([
+        "Failed to remove the queued Agent message: The Agent queued-run.cancel was not sent: the box channel is not connected right now.",
+        "Failed to edit the queued Agent message: The Agent queued-run.edit was not sent: the box channel is not connected right now.",
+      ]),
+    )
   })
 })

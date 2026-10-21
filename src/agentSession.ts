@@ -101,11 +101,24 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
-/** @deprecated Messages are no longer held by the session; the queue is always empty. */
+/**
+ * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
+ * client's message, not only this session's.
+ */
 export interface AgentQueueItem extends AgentSendOptions {
+  /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
   text: string
+  /** Epoch milliseconds of the box frame that first reported it in the queue. */
   createdAt: number
+  /** Its place in T3's queue, as the box sent it. */
+  position?: number
+  /** T3 holds the queue: nothing in it runs until the hold is lifted. */
+  queueHeld?: boolean
+  /** The `sequence` of the last box frame that reported it. */
+  sequence?: number
+  /** The message's own turn id: the `id` of its history item. */
+  turnId?: string
 }
 
 /** T3's subagent statuses; a status this version does not know comes through as it was sent. */
@@ -219,7 +232,7 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
-  /** @deprecated Never emitted: every message is sent at once, so there is no queue to change. */
+  /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
@@ -268,7 +281,10 @@ export interface AgentTaskSession {
   readonly status: AgentTaskSessionStatus
   readonly history: readonly AgentTimelineItem[]
   readonly content: string
-  /** @deprecated Always empty: a message sent while a turn runs goes to the box at once. */
+  /**
+   * T3's queue of the chat as the box reports it, in the order it reported the messages. A
+   * message leaves when it is taken into a turn, or when it ends before running.
+   */
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
@@ -288,11 +304,11 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
-  /** @deprecated No effect: the queue is always empty. */
+  /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
-  /** @deprecated No effect: the queue is always empty. */
+  /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
   removeQueueItem(id: string): void
-  /** @deprecated No effect: the queue is always empty. */
+  /** Takes every message in `queue` out, one `queued-run.cancel` each. */
   clearQueue(): void
   /** Stops one subagent and leaves the turn running (T3's `subagent.stop`). */
   stopSubagent(subagentId: string): void
@@ -591,6 +607,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openingAwaitsStart = false
   private turnBaselineIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
+  private queueItems: AgentQueueItem[] = []
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -630,7 +647,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get queue(): readonly AgentQueueItem[] {
-    return []
+    return [...this.queueItems]
   }
 
   get subagents(): readonly AgentSubagent[] {
@@ -727,11 +744,27 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return history
   }
 
-  editQueueItem(): void {}
+  editQueueItem(id: string, text: string): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queued-run.edit", clientMessageId: id, text }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to edit the queued Agent message", error)
+      },
+    )
+  }
 
-  removeQueueItem(): void {}
+  removeQueueItem(id: string): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queued-run.cancel", clientMessageId: id }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to remove the queued Agent message", error)
+      },
+    )
+  }
 
-  clearQueue(): void {}
+  clearQueue(): void {
+    for (const item of this.queueItems) this.removeQueueItem(item.id)
+  }
 
   stopSubagent(subagentId: string): void {
     this.requireOpen()
@@ -1227,6 +1260,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return
     }
     const lifecycle = asObject(payload?.lifecycle)
+    if (this.endsQueuedMessage(event, payload, lifecycle)) return
     if (this.repeatsTheRunningTurn(event, lifecycle)) return
     if (event.type === "stepStart" || event.type === "steer") {
       // A box that names no message is answering ours: it decides one message at a time. Steered
@@ -1272,9 +1306,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
         })
         break
       case "stepStart":
+        this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(asObject(payload?.lifecycle))
         break
       case "steer":
+        this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(lifecycle)
         this.emit("steered", {
           text: typeof payload?.text === "string" ? payload.text : "",
@@ -1287,6 +1323,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         })
         break
       case "messageQueued":
+        this.applyQueued(event, payload, lifecycle)
         this.steerQueuedBy(asObject(payload?.lifecycle))
         break
       case "subagentUpdate":
@@ -1367,6 +1404,76 @@ class CoreAgentTaskSession implements AgentTaskSession {
       default:
         break
     }
+  }
+
+  // The box admits every message with a `messageQueued` of no position; only one with a position
+  // is in T3's queue.
+  private applyQueued(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    lifecycle: Record<string, unknown> | null,
+  ): void {
+    const id = payload?.clientMessageId ?? lifecycle?.clientMessageId
+    const position = payload?.position
+    if (typeof id !== "string" || typeof position !== "number") return
+    const known = this.queueItems.find((item) => item.id === id)
+    const item: AgentQueueItem = {
+      id,
+      text: typeof payload?.text === "string" ? payload.text : (known?.text ?? ""),
+      createdAt: known?.createdAt ?? event.timestamp,
+      position,
+      ...(typeof payload?.queueHeld === "boolean" ? { queueHeld: payload.queueHeld } : {}),
+      ...sequenceOf(event),
+      ...(typeof lifecycle?.turnId === "string" ? { turnId: lifecycle.turnId } : {}),
+    }
+    this.queueItems = known
+      ? this.queueItems.map((current) => (current === known ? item : current))
+      : [...this.queueItems, item]
+    this.emit("queueChange", { queue: this.queue })
+  }
+
+  private leaveQueue(id: unknown): AgentQueueItem | undefined {
+    const item = this.queueItems.find((current) => current.id === id)
+    if (!item) return undefined
+    this.queueItems = this.queueItems.filter((current) => current !== item)
+    this.emit("queueChange", { queue: this.queue })
+    return item
+  }
+
+  // A queued message that ends before running (taken out of the queue, or dropped by T3) closes
+  // with a terminal of its own while another turn may run: it leaves the queue and ends its own
+  // `sendAndWait`, and the running turn goes on. The opening message of this session's turn is
+  // that turn, and ends it as before.
+  private endsQueuedMessage(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    lifecycle: Record<string, unknown> | null,
+  ): boolean {
+    if (event.type !== "error" && event.type !== "stepFinish") return false
+    const id = payload?.clientMessageId ?? lifecycle?.clientMessageId
+    const turnId = lifecycle?.turnId
+    const item = this.queueItems.find(
+      (current) => current.id === id || (turnId !== undefined && current.turnId === turnId),
+    )
+    if (!item) return false
+    this.leaveQueue(item.id)
+    if (item.id === this.openingMessageId || !lifecycle) return false
+    const message =
+      typeof payload?.message === "string"
+        ? payload.message
+        : "The queued Agent message ended before it ran."
+    if (event.type === "error") {
+      const code = typeof payload?.code === "string" ? payload.code : undefined
+      this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
+    }
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === item.id,
+    )
+    if (steered) {
+      this.forgetSteer(steered)
+      steered.waiter?.reject(new AgentTaskTurnError(message))
+    }
+    return true
   }
 
   private repeatsTheRunningTurn(

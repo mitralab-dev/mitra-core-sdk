@@ -644,3 +644,125 @@ describe("Agent box late subagent result", () => {
     await expect(next).resolves.toMatchObject({ content: "Answer", turnId: "turn-2" })
   })
 })
+
+describe("Agent box queue", () => {
+  function queued(
+    socket: BoxSocket,
+    clientMessageId: string,
+    turnId: string,
+    position: number | null,
+    sequence: number,
+    extra: Record<string, unknown> = {},
+  ) {
+    frame(
+      socket,
+      "messageQueued",
+      { position, runId: `run-${turnId}`, lifecycle: { turnId, clientMessageId }, ...extra },
+      sequence,
+    )
+  }
+
+  it("mirrors T3's queue from messageQueued and drops a message once a turn takes it", async () => {
+    const { session, socket } = await runningTurn()
+    const changes: string[][] = []
+    session.on("queueChange", ({ queue }) =>
+      changes.push(queue.map((item) => `${item.text}@${item.position}`)),
+    )
+    const second = session.send("Second")!
+    const third = session.send("Third")!
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    // The admission names no position: the message is not in T3's queue.
+    queued(socket, second, "turn-2", null, 2)
+    expect(session.queue).toEqual([])
+
+    queued(socket, second, "turn-2", 1, 3, { text: "Second", queueHeld: false })
+    queued(socket, third, "turn-3", 2, 4, { text: "Third" })
+    expect(session.queue).toEqual([
+      {
+        id: second,
+        text: "Second",
+        createdAt: 1,
+        position: 1,
+        queueHeld: false,
+        sequence: 3,
+        turnId: "turn-2",
+      },
+      { id: third, text: "Third", createdAt: 1, position: 2, sequence: 4, turnId: "turn-3" },
+    ])
+
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    frame(socket, "stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: second } }, 6)
+    queued(socket, third, "turn-3", 1, 7, { text: "Third" })
+    frame(
+      socket,
+      "steer",
+      { messageId: "m-3", text: "Third", lifecycle: { turnId: "turn-2", clientMessageId: third } },
+      8,
+    )
+    expect(session.queue).toEqual([])
+    expect(changes).toEqual([["Second@1"], ["Second@1", "Third@2"], ["Third@2"], ["Third@1"], []])
+  })
+
+  it("takes a message out with queued-run.cancel and leaves the running turn alone when it ends", async () => {
+    const { session, first, socket } = await runningTurn()
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    const waiting = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = idOf(socket.sent[1])
+    queued(socket, id, "turn-2", 1, 2, { text: "Later" })
+
+    session.removeQueueItem(id)
+    expect(socket.sent.at(-1)).toEqual({ type: "queued-run.cancel", clientMessageId: id })
+    // T3 drops the run before it started: the box ends it with a terminal of its own.
+    frame(
+      socket,
+      "error",
+      {
+        message: "The message was dropped before it ran",
+        lifecycle: { turnId: "turn-2", terminal: true, sessionIdle: true },
+      },
+      3,
+    )
+    await expect(waiting).rejects.toThrow("The message was dropped before it ran")
+    expect(session.queue).toEqual([])
+    expect(session.status).toBe("streaming")
+    expect(errors).toEqual(["The message was dropped before it ran"])
+
+    frame(socket, "textDelta", { text: "Still here", lifecycle: { turnId: "turn-1" } }, 4)
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await expect(first).resolves.toMatchObject({ content: "Still here" })
+    // The session is not left waiting for a turn the cancelled message would have had.
+    const next = session.sendAndWait("Next")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(4))
+    frame(
+      socket,
+      "stepStart",
+      { lifecycle: { turnId: "turn-3", clientMessageId: idOf(socket.sent[3]) } },
+      6,
+    )
+    frame(socket, "stepFinish", { reason: "stop", lifecycle: { turnId: "turn-3" } }, 7)
+    await expect(next).resolves.toMatchObject({ reason: "stop" })
+  })
+
+  it("edits with queued-run.edit and clears with one cancel per queued message", async () => {
+    const { session, socket } = await runningTurn()
+    queued(socket, "other-1", "turn-8", 1, 2, { text: "From another tab" })
+    queued(socket, "other-2", "turn-9", 2, 3, { text: "Also queued" })
+
+    session.editQueueItem("other-1", "Edited")
+    expect(socket.sent.at(-1)).toEqual({
+      type: "queued-run.edit",
+      clientMessageId: "other-1",
+      text: "Edited",
+    })
+    queued(socket, "other-1", "turn-8", 1, 4, { text: "Edited" })
+    expect(session.queue.map((item) => item.text)).toEqual(["Edited", "Also queued"])
+
+    session.clearQueue()
+    expect(socket.sent.slice(-2)).toEqual([
+      { type: "queued-run.cancel", clientMessageId: "other-1" },
+      { type: "queued-run.cancel", clientMessageId: "other-2" },
+    ])
+  })
+})

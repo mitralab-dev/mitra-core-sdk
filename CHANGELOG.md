@@ -18,6 +18,13 @@ All notable changes to this project are documented in this file.
   box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
   leaves `status` and `content` alone and, on the direct channel, does not mark the chat as in a
   turn: it used to be dropped.
+- `queue` and `queueChange` mirror T3's queue of the chat from the box's `messageQueued` frames (the
+  ones with a `position`), with `position`, `queueHeld`, `sequence` and `turnId` as optional
+  fields. A message leaves when a turn takes it (`stepStart` or `steer` naming its
+  `clientMessageId`) or when it ends before running; that end rejects only its own `sendAndWait`
+  and leaves the running turn alone. `removeQueueItem` sends `queued-run.cancel`,
+  `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel per queued message,
+  on the box channel only. The methods are no longer deprecated; their signatures are unchanged.
 
 ## 0.3.0
 

@@ -1203,6 +1203,10 @@ export type AgentTaskInput =
     }
   /** Stops one subagent, as T3's own `subagent.stop`; only the box channel takes it. */
   | { type: "subagent.stop"; subagentId: string }
+  /** Takes a message out of T3's queue, named by its `clientMessageId`; only the box takes it. */
+  | { type: "queued-run.cancel"; clientMessageId: string }
+  /** Changes the text of a message in T3's queue; only the box channel takes it. */
+  | { type: "queued-run.edit"; clientMessageId: string; text: string }
 
 export interface AgentTaskEvent {
   /** Event names are open and can grow without a client release. */
