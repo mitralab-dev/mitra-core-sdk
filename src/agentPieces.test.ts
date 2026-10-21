@@ -290,8 +290,8 @@ function conversation(first: string, second: string): Frame[] {
 // The rows the Copilot has written once it recorded the box log up to `cursor`, as `kinds=all`
 // answers them: one per message where it entered, per stretch of text or reasoning (`SUBAGENT_TEXT`
 // and `REASONING` with `parentToolId` for a subagent's), per tool call and result, each with the
-// sequence of the last event in it. A message sent but not taken yet is there since it was sent,
-// unnumbered, after what was recorded then.
+// sequence of the last event in it. A message the box has not taken into a turn yet is not there:
+// `kinds=all` leaves it out, and the app shows it from `queue` until its turn starts.
 function historyAt(
   frames: Frame[],
   cursor: number,
@@ -356,22 +356,6 @@ function historyAt(
         }),
       )
     }
-  }
-  const taken = new Set(rows.map((current) => current.clientMessageId).filter(Boolean))
-  for (const message of sent.filter((candidate) => !taken.has(candidate.id))) {
-    const before = Math.min(message.after, cursor)
-    let index = -1
-    rows.forEach((current, position) => {
-      if (current.sequence !== undefined && current.sequence <= before) index = position
-    })
-    rows.splice(index + 1, 0, {
-      id: `pending-${message.id}`,
-      sender: "USER",
-      type: "TEXT",
-      content: message.text,
-      createdAt: "2026-01-01T00:00:00Z",
-      clientMessageId: message.id,
-    })
   }
   return rows
 }

@@ -515,15 +515,6 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
   return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }
 }
 
-// A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
-// turn's answer is read from.
-function isChatRow(message: AgentMessage): boolean {
-  return (
-    (message.type === "TEXT" || message.type === "ERROR" || message.type === "TOOL_USE") &&
-    message.parentToolId === undefined
-  )
-}
-
 const REQUEST_ROW_KINDS: Record<string, "approval" | "userInputRequest" | undefined> = {
   APPROVAL: "approval",
   USER_INPUT_REQUEST: "userInputRequest",
@@ -1268,17 +1259,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
-      kinds: "all",
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
 
+  // The default query, without `kinds=all`: the chat's own text, tools and errors, which is where a
+  // turn's answer is read from.
   private async reconcilePersistedTurn(reason: string): Promise<boolean> {
     if (!this._taskId) return false
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
-      kinds: "all",
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     this.emit("historyLoaded", { history: this.history })
@@ -1286,8 +1277,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
     // row that closes a turn, with its usage, answers it, and not one closing the turn of a prompt
     // the baseline already had. With the live terminal already heard, the turn is known to be over.
-    const rows = page.content.filter(isChatRow)
-    const recovered = rows.find(
+    const recovered = page.content.find(
       (message) =>
         !this.turnBaselineIds.has(message.id) &&
         message.sender !== "USER" &&
@@ -1302,7 +1292,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.endedPollsWithoutRow += 1
         if (this.endedPollsWithoutRow < ENDED_POLLS_BEFORE_NEWEST) return false
       }
-      const newest = rows.find(
+      const newest = page.content.find(
         (message) =>
           !this.turnBaselineIds.has(message.id) &&
           message.sender !== "USER" &&

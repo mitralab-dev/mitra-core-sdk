@@ -22,8 +22,9 @@ All notable changes to this project are documented in this file.
   the new kind `reasoning`; a `SUBAGENT_TEXT` row is an `agent` item with `parentToolId`; a
   subagent's tools are `tool` items; `APPROVAL` and `USER_INPUT_REQUEST` rows are items of the new
   kinds `approval` and `userInputRequest`, with the payload of the box frame as it came (the same
-  that reaches the session live as `raw`). A turn recovered from the history reads its answer
-  from today's row types of the chat only. Without the parameter the Copilot answers the rows 0.2.13
+  that reaches the session live as `raw`). A lost turn is recovered from the default query,
+  without `kinds=all`. With `kinds=all` a question still waiting in the queue is not in the
+  history: it shows in `queue` until its turn starts. Without the parameter the Copilot answers the rows 0.2.13
   read. Nothing is derived or attached: a frame or row without a field leaves it out.
 - A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
   box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
