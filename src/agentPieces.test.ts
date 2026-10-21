@@ -195,6 +195,13 @@ function draw(session: AgentTaskSession) {
   session.on("tool", ({ toolId, phase, content, sequence }) =>
     tool(toolId ?? "", phase, content, sequence),
   )
+  // The box names the message whose turn starts, with its text: the question is shown there, also
+  // when the history does not have it yet.
+  session.on("turnStart", ({ clientMessageId, text: said }) => {
+    if (clientMessageId === undefined || said === undefined) return
+    const key = `user:${clientMessageId}`
+    if (!find(key)) add({ key, text: said })
+  })
   session.on("steered", ({ clientMessageId, text: said, sequence }) => {
     const key = `user:${clientMessageId}`
     const piece = find(key) ?? add({ key, text: said })
@@ -213,7 +220,10 @@ function conversation(first: string, second: string): Frame[] {
   const child = { parentToolId: "tool-1", lifecycle: { turnId: "child-1" } }
   const wake = { lifecycle: { turnId: "wake-1" } }
   const frames: Omit<Frame, "sequence" | "timestamp">[] = [
-    { type: "stepStart", payload: { lifecycle: { turnId: "turn-1", clientMessageId: first } } },
+    {
+      type: "stepStart",
+      payload: { text: "Count birds", lifecycle: { turnId: "turn-1", clientMessageId: first } },
+    },
     { type: "thinking", payload: { text: "Birds first", itemId: "r1", ...turn } },
     { type: "textDelta", payload: { text: "Hel", itemId: "a1", ...turn } },
     { type: "textDelta", payload: { text: "lo", itemId: "a1", ...turn } },
@@ -473,7 +483,10 @@ describe("Agent conversation across a box that died", () => {
   const turnOne = { lifecycle: { turnId: "turn-1" } }
   const oldBox = (first: string): Frame[] =>
     [
-      { type: "stepStart", payload: { lifecycle: { turnId: "turn-1", clientMessageId: first } } },
+      {
+        type: "stepStart",
+        payload: { text: "Count birds", lifecycle: { turnId: "turn-1", clientMessageId: first } },
+      },
       { type: "textDelta", payload: { text: "Hel", itemId: "a1", ...turnOne } },
       { type: "textDelta", payload: { text: "lo", itemId: "a1", ...turnOne } },
       // The box died before it handed these two to the Copilot.
@@ -485,7 +498,10 @@ describe("Agent conversation across a box that died", () => {
     ].map((frame, index) => ({ ...frame, sequence: index + 1, timestamp: index + 1 }))
   const newBox = (second: string): Frame[] =>
     [
-      { type: "stepStart", payload: { lifecycle: { turnId: "turn-2", clientMessageId: second } } },
+      {
+        type: "stepStart",
+        payload: { text: "Also cats", lifecycle: { turnId: "turn-2", clientMessageId: second } },
+      },
       {
         type: "textDelta",
         payload: { text: "Cats", itemId: "b1", lifecycle: { turnId: "turn-2" } },
@@ -578,7 +594,9 @@ describe("Agent conversation across a box that died", () => {
     BoxSocket.instances = []
     BoxSocket.hello = { threadId: "thread-2", lastSequence: 3 }
     BoxSocket.log = newBox(watched.second)
-    const before = manager([...recordedOld, userRow(watched.second, "Also cats")], 3, 1).session({
+    // `kinds=all` leaves out a question whose turn the Copilot has not seen start: the `stepStart`
+    // in the replay brings it.
+    const before = manager(recordedOld, 3, 1).session({
       taskId: "task-1",
     })
     const beforeApp = draw(before)

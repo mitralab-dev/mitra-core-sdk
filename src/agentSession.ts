@@ -257,7 +257,12 @@ export interface AgentTaskSessionEventMap {
   statusChange: { status: AgentTaskSessionStatus }
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
-  turnStart: Record<string, never>
+  /**
+   * A turn started. When the box's `stepStart` opened it, the fields it carried: the `text` and
+   * `clientMessageId` of the message whose turn it is, and the frame's `sequence`, `itemId` and
+   * `turnId`. The place to show that question, also when the history does not have it yet.
+   */
+  turnStart: { text?: string; clientMessageId?: string } & AgentPieceIdentity
   /**
    * On a subagent's own text, `parentToolId` is the tool call that spawned it. `itemDelta` is the
    * box frame's piece of its item: the same as `delta` except on the first piece of a text item
@@ -961,8 +966,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       })
       .finally(() => {
         handedOver()
-        this.dispatching = false
-        if (this.dispatch === dispatch) this.dispatch = null
+        // A later message may be dispatching already: the box took this one before it ended here.
+        if (this.dispatch === dispatch) {
+          this.dispatching = false
+          this.dispatch = null
+        }
       })
     this.dispatch = dispatch
   }
@@ -1121,7 +1129,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private openTurnFor(waiter?: TurnWaiter): void {
+  private openTurnFor(
+    waiter?: TurnWaiter,
+    start: AgentTaskSessionEventMap["turnStart"] = {},
+  ): void {
     if (this.isClosed()) return
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this._content = ""
@@ -1134,7 +1145,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.turnBaselineIds = new Set(this._history.map((item) => item.id))
       void this.captureTurnBaseline().catch(() => undefined)
       this.setStatus("streaming")
-      this.emit("turnStart", {})
+      this.emit("turnStart", start)
     }
     if (!waiter) return
     if (!this.activeWaiter) this.activeWaiter = waiter
@@ -1439,7 +1450,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
           this._status !== "streaming" &&
           this._status !== "cancelled"
         ) {
-          this.openTurnFor()
+          this.openTurnFor(undefined, {
+            ...(typeof payload?.text === "string" ? { text: payload.text } : {}),
+            ...(typeof lifecycle.clientMessageId === "string"
+              ? { clientMessageId: lifecycle.clientMessageId }
+              : {}),
+            ...pieceIdentityOf(event, payload),
+          })
         }
         this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(asObject(payload?.lifecycle))
@@ -1602,6 +1619,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // A frame naming one of this session's messages in flight is the box taking it.
   private acceptNamed(id: unknown): void {
     if (typeof id !== "string") return
+    // The box took the opening message: from here a new message is the box's to place, not one
+    // this session holds as a steer because the admission had not reached it yet.
+    if (id === this.openingMessageId) this.dispatching = false
     const ours =
       id === this.openingMessageId ||
       [...this.steers, ...this.strayedSteers].some((pending) => pending.clientMessageId === id)

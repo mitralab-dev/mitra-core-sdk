@@ -18,6 +18,7 @@ const ADDED_FIELDS = new Set([
   "subagent",
   "reason",
   "itemDelta",
+  "text",
 ])
 
 function differences(before: unknown, now: unknown, path: string, found: string[]): void {
