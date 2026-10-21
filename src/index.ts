@@ -7,6 +7,7 @@ export {
   withAgentTaskSessions,
 } from "./agentSession"
 export type {
+  AgentPieceIdentity,
   AgentProviderUsage,
   AgentQueueItem,
   AgentSendAndWaitOptions,
@@ -25,6 +26,7 @@ export type {
   AgentSubagent,
   AgentSubagentStatus,
   AgentTimelineItem,
+  AgentTimelineItemIdentity,
   AgentToolEvent,
   AgentTurnResult,
   ExistingAgentTaskSessionOptions,

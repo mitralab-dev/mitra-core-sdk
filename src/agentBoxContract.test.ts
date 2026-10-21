@@ -431,6 +431,7 @@ describe("Agent box subagents", () => {
       progress: "Counting",
       startedAt: Date.parse("2026-10-19T12:00:00.000Z"),
       childThreadId: "thread-child",
+      sequence: 3,
     })
     expect(session.subagents).toEqual([
       {
@@ -482,5 +483,91 @@ describe("Agent box message id", () => {
     expect(steer).toBe(idOf(socket.sent[1]))
     expect(steer).not.toBe(opening)
     expect(session.send("   ")).toBeUndefined()
+  })
+})
+
+describe("Agent box piece identity", () => {
+  it("carries the sequence, item, turn and owner each frame names on the events it already emits", async () => {
+    const { session, socket } = await runningTurn()
+    const seen: unknown[] = []
+    session.on("delta", (delta) => seen.push(["delta", delta]))
+    session.on("tool", (tool) => seen.push(["tool", tool]))
+    session.on("steered", (steered) => seen.push(["steered", steered]))
+    session.on("turnEnd", ({ sequence, turnId }) => seen.push(["turnEnd", { sequence, turnId }]))
+
+    const steerId = session.send("Also birds")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const owner = { lifecycle: { turnId: "turn-1" } }
+    frame(socket, "textDelta", { text: "Lions", itemId: "item-a", ...owner }, 2)
+    frame(socket, "toolCall", { name: "Task", toolId: "tool-9", itemId: "tool-9", ...owner }, 3)
+    frame(
+      socket,
+      "textDelta",
+      { text: "Three", itemId: "item-c", parentToolId: "tool-9", lifecycle: { turnId: "child" } },
+      4,
+    )
+    frame(
+      socket,
+      "steer",
+      {
+        messageId: "msg-2",
+        text: "Also birds",
+        turnId: "turn-2",
+        lifecycle: { turnId: "turn-1", clientMessageId: steerId },
+      },
+      5,
+    )
+    frame(socket, "stepFinish", { reason: "stop", ...owner }, 6)
+
+    expect(seen).toEqual([
+      ["delta", { delta: "Lions", kind: "text", sequence: 2, itemId: "item-a", turnId: "turn-1" }],
+      [
+        "tool",
+        {
+          tool: "Task",
+          phase: "call",
+          timestamp: 1,
+          sequence: 3,
+          itemId: "tool-9",
+          turnId: "turn-1",
+          toolId: "tool-9",
+        },
+      ],
+      [
+        "delta",
+        {
+          delta: "Three",
+          kind: "text",
+          parentToolId: "tool-9",
+          sequence: 4,
+          itemId: "item-c",
+          turnId: "child",
+        },
+      ],
+      [
+        "steered",
+        {
+          text: "Also birds",
+          messageId: "msg-2",
+          turnId: "turn-2",
+          sequence: 5,
+          clientMessageId: steerId,
+        },
+      ],
+      ["turnEnd", { sequence: 6, turnId: "turn-1" }],
+    ])
+  })
+
+  it("leaves the fields out of an event whose frame did not carry them, as an older box sends", async () => {
+    const { session, socket } = await runningTurn()
+    const seen: unknown[] = []
+    session.on("delta", (delta) => seen.push(delta))
+    session.on("steered", (steered) => seen.push(steered))
+    frame(socket, "textDelta", { text: "Lions" })
+    frame(socket, "steer", { messageId: "msg-2", text: "Also birds" })
+    expect(seen).toEqual([
+      { delta: "Lions", kind: "text" },
+      { text: "Also birds", messageId: "msg-2" },
+    ])
   })
 })

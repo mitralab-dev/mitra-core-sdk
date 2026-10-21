@@ -127,7 +127,20 @@ export interface AgentSubagent {
   childThreadId?: string
 }
 
-export interface AgentToolEvent {
+/**
+ * Where a piece of the conversation goes, as the box sent it on the frame: the same `sequence` and
+ * `itemId` the history item of that piece carries. Absent when the frame did not carry it.
+ */
+export interface AgentPieceIdentity {
+  /** The box log's sequence of the frame: the order of the conversation. */
+  sequence?: number
+  /** T3's id of the item the frame belongs to (one stretch of text, one tool, one subagent). */
+  itemId?: string
+  /** The `lifecycle.turnId` of the frame. */
+  turnId?: string
+}
+
+export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
   toolId?: string
   /** On a tool a subagent called: the `toolId` of the tool call that spawned the subagent. */
@@ -138,16 +151,44 @@ export interface AgentToolEvent {
   timestamp?: number
 }
 
+/**
+ * What the Copilot recorded from the box for a history item, read as it came. Absent on items
+ * written before the Copilot recorded them, or from a box that did not send them.
+ */
+export interface AgentTimelineItemIdentity {
+  /** The box log's sequence of the item: the same number its live frame carried. */
+  sequence?: number
+  /** Which box log the sequence counts in: a box that came up without the log starts again. */
+  epoch?: number
+  /** T3's id of the item: the `itemId` of its live frames. */
+  itemId?: string
+  /** On a subagent's own text or tool: the tool call that spawned the subagent. */
+  parentToolId?: string
+  /** Only on the item that closed a turn: the reason the box ended it with. */
+  reason?: string
+}
+
 export type AgentTimelineItem =
-  | {
+  | ({
       id: string
       kind: "user" | "agent"
       text: string
       at: string
       /** Only on the `agent` item that closed a turn, when the Copilot recorded its usage. */
       usage?: AgentTurnUsage
-    }
-  | { id: string; kind: "tool"; tool: AgentToolEvent; at: string }
+      /** On a `user` item: the id `send` returned for that message. */
+      clientMessageId?: string
+      /** On an `agent` item: the reasoning the agent wrote before this text. */
+      reasoning?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      kind: "tool"
+      tool: AgentToolEvent
+      at: string
+      /** On the tool call that spawned a subagent: the subagent's last state, as the box sent it. */
+      subagent?: Record<string, unknown>
+    } & AgentTimelineItemIdentity)
 
 export interface AgentTurnResult {
   task: AgentTask
@@ -155,6 +196,10 @@ export interface AgentTurnResult {
   reason: string
   /** What the turn consumed, from the box's `stepFinish`; absent when the turn reported none. */
   usage?: AgentTurnUsage
+  /** The `sequence` of the box's `stepFinish` that ended the turn, when it carried one. */
+  sequence?: number
+  /** The `lifecycle.turnId` of that `stepFinish`. */
+  turnId?: string
 }
 
 export interface AgentTaskSessionEventMap {
@@ -162,9 +207,10 @@ export interface AgentTaskSessionEventMap {
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
   turnStart: Record<string, never>
-  delta: { delta: string; kind: "text" | "thinking" }
+  /** On a subagent's own text, `parentToolId` is the tool call that spawned it. */
+  delta: { delta: string; kind: "text" | "thinking"; parentToolId?: string } & AgentPieceIdentity
   tool: AgentToolEvent
-  workspace: { payload: unknown; timestamp: number }
+  workspace: { payload: unknown; timestamp: number; sequence?: number }
   turnEnd: AgentTurnResult
   /**
    * The prompt reached the server: the box admitted the turn on the direct channel, or the
@@ -179,17 +225,29 @@ export interface AgentTaskSessionEventMap {
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
    */
-  steered: { text: string; messageId: string }
+  steered: {
+    text: string
+    messageId: string
+    /** The steered message's own turn id: the `id` of its history item. */
+    turnId?: string
+    sequence?: number
+    /** The id `send` returned for that message. */
+    clientMessageId?: string
+  }
   /** A subagent's status, progress or child thread changed. */
-  subagent: AgentSubagent
+  subagent: AgentSubagent & { sequence?: number }
   /**
    * Text of a subagent's own thread. It also reaches `delta` and `content`, as in 0.2.13; this
    * event tells it apart from the parent's.
    */
-  subagentDelta: { parentToolId: string; delta: string; kind: "text" | "thinking" }
+  subagentDelta: {
+    parentToolId: string
+    delta: string
+    kind: "text" | "thinking"
+  } & AgentPieceIdentity
   /** A tool a subagent called, in its own thread. It also comes as `tool`, as in 0.2.13. */
   subagentTool: AgentToolEvent & { parentToolId: string }
-  error: { code?: string; error: string }
+  error: { code?: string; error: string; sequence?: number }
   /**
    * The subscription window the chat's harness reported during a turn. It comes only on the
    * direct channel of a business agent chat, and only when the turn runs on the person's or the
@@ -326,15 +384,33 @@ function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput
   }
 }
 
+// Copied from the frame as the box sent it; nothing is derived when a field is absent.
+function pieceIdentityOf(
+  event: AgentTaskEvent,
+  payload: Record<string, unknown> | null,
+): AgentPieceIdentity {
+  const turnId = asObject(payload?.lifecycle)?.turnId
+  return {
+    ...sequenceOf(event),
+    ...(typeof payload?.itemId === "string" ? { itemId: payload.itemId } : {}),
+    ...(typeof turnId === "string" ? { turnId } : {}),
+  }
+}
+
+function sequenceOf(event: AgentTaskEvent): { sequence?: number } {
+  return typeof event.sequence === "number" ? { sequence: event.sequence } : {}
+}
+
 function toolEventOf(
+  event: AgentTaskEvent,
   payload: Record<string, unknown> | null,
   phase: "call" | "result",
-  timestamp: number,
 ): AgentToolEvent {
   return {
     tool: typeof payload?.name === "string" ? payload.name : "",
     phase,
-    timestamp,
+    timestamp: event.timestamp,
+    ...pieceIdentityOf(event, payload),
     ...(typeof payload?.toolId === "string" ? { toolId: payload.toolId } : {}),
     ...(phase === "call" && payload?.input !== undefined ? { input: payload.input } : {}),
     ...(phase === "result" ? { content: payload?.content ?? payload?.output } : {}),
@@ -349,6 +425,16 @@ function epochOf(value: unknown): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
+function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
+  return {
+    ...(typeof message.sequence === "number" ? { sequence: message.sequence } : {}),
+    ...(typeof message.epoch === "number" ? { epoch: message.epoch } : {}),
+    ...(typeof message.itemId === "string" ? { itemId: message.itemId } : {}),
+    ...(typeof message.parentToolId === "string" ? { parentToolId: message.parentToolId } : {}),
+    ...(typeof message.reason === "string" ? { reason: message.reason } : {}),
+  }
+}
+
 export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   if (message.type === "TOOL_USE") {
     try {
@@ -360,6 +446,9 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           tool: {
             tool: typeof payload.name === "string" ? payload.name : "",
             ...(typeof payload.toolId === "string" ? { toolId: payload.toolId } : {}),
+            ...(typeof payload.parentToolId === "string"
+              ? { parentToolId: payload.parentToolId }
+              : {}),
             ...(payload.input !== undefined ? { input: payload.input } : {}),
             ...(payload.content !== undefined
               ? { content: payload.content }
@@ -370,6 +459,8 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
               payload.output !== undefined || payload.content !== undefined ? "result" : "call",
           },
           at: message.createdAt,
+          ...timelineIdentityOf(message),
+          ...(asObject(message.subagent) ? { subagent: asObject(message.subagent)! } : {}),
         }
       }
     } catch {
@@ -383,6 +474,11 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     text: message.content,
     at: message.createdAt,
     ...(message.usage ? { usage: message.usage } : {}),
+    ...timelineIdentityOf(message),
+    ...(typeof message.clientMessageId === "string"
+      ? { clientMessageId: message.clientMessageId }
+      : {}),
+    ...(typeof message.reasoning === "string" ? { reasoning: message.reasoning } : {}),
   }
 }
 
@@ -1154,19 +1250,23 @@ class CoreAgentTaskSession implements AgentTaskSession {
       // texto e o que faz a resposta recuperada aparecer; sem isso ela chega e morre aqui.
       case "textDelta":
       case "textChunk":
-        this.consumeDelta(payload, "text")
+        this.consumeDelta(event, payload, "text")
         break
       case "thinking":
-        this.consumeDelta(payload, "thinking")
+        this.consumeDelta(event, payload, "thinking")
         break
       case "toolCall":
-        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "call", event.timestamp)
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(event, payload, "call")
         break
       case "toolResult":
-        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "result", event.timestamp)
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(event, payload, "result")
         break
       case "workspace":
-        this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
+        this.emit("workspace", {
+          payload: event.payload,
+          timestamp: event.timestamp,
+          ...sequenceOf(event),
+        })
         break
       case "stepStart":
         this.steerOpenedBy(asObject(payload?.lifecycle))
@@ -1176,13 +1276,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.emit("steered", {
           text: typeof payload?.text === "string" ? payload.text : "",
           messageId: typeof payload?.messageId === "string" ? payload.messageId : "",
+          ...(typeof payload?.turnId === "string" ? { turnId: payload.turnId } : {}),
+          ...sequenceOf(event),
+          ...(typeof lifecycle?.clientMessageId === "string"
+            ? { clientMessageId: lifecycle.clientMessageId }
+            : {}),
         })
         break
       case "messageQueued":
         this.steerQueuedBy(asObject(payload?.lifecycle))
         break
       case "subagentUpdate":
-        this.applySubagent(payload)
+        this.applySubagent(event, payload)
         break
       case "providerUsage": {
         const usage = providerUsageOf(payload)
@@ -1204,9 +1309,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
+        const end = {
+          ...sequenceOf(event),
+          ...(finished === undefined ? {} : { turnId: finished }),
+        }
         if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
           this.rememberFinishedTurn(lifecycle)
-          this.finishTurn("interrupted", usage)
+          this.finishTurn("interrupted", usage, end)
           break
         }
         if (reason === "stop" || reason === "endTurn") {
@@ -1221,7 +1330,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
               })
             }
           } else {
-            this.finishTurn(reason, usage)
+            this.finishTurn(reason, usage, end)
           }
         }
         break
@@ -1230,7 +1339,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const code = typeof payload?.code === "string" ? payload.code : undefined
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
-        this.emit("error", { ...(code ? { code } : {}), error: message })
+        this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
         // The box refused an answer to a T3 input request: T3 still waits on that request and the
         // turn goes on.
         if (!payload?.lifecycle && payload?.requestId !== undefined) break
@@ -1291,7 +1400,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.finishedTurnIds.length > 8) this.finishedTurnIds.shift()
   }
 
-  private consumeDelta(payload: Record<string, unknown> | null, kind: "text" | "thinking"): void {
+  private consumeDelta(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    kind: "text" | "thinking",
+  ): void {
     const lifecycle = asObject(payload?.lifecycle)
     const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
     if (turnId && this.finishedTurnIds.includes(turnId)) return
@@ -1306,15 +1419,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.emit("turnStart", {})
     }
     if (kind === "text") this._content += text
-    this.emit("delta", { delta: text, kind })
+    this.emit("delta", { delta: text, kind, ...pieceIdentityOf(event, payload) })
   }
 
   private emitTool(
+    event: AgentTaskEvent,
     payload: Record<string, unknown> | null,
     phase: "call" | "result",
-    timestamp: number,
   ): void {
-    this.emit("tool", toolEventOf(payload, phase, timestamp))
+    this.emit("tool", toolEventOf(event, payload, phase))
   }
 
   // A child thread's frames are the subagent's conversation: they open no turn and settle no
@@ -1328,15 +1441,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "thinking": {
         const delta = typeof payload.text === "string" ? payload.text : ""
         const kind = event.type === "thinking" ? "thinking" : "text"
+        const identity = pieceIdentityOf(event, payload)
         if (kind === "text") this._content += delta
-        this.emit("delta", { delta, kind })
-        this.emit("subagentDelta", { parentToolId, delta, kind })
+        this.emit("delta", { delta, kind, parentToolId, ...identity })
+        this.emit("subagentDelta", { parentToolId, delta, kind, ...identity })
         break
       }
       case "toolCall":
       case "toolResult": {
         const tool = {
-          ...toolEventOf(payload, event.type === "toolCall" ? "call" : "result", event.timestamp),
+          ...toolEventOf(event, payload, event.type === "toolCall" ? "call" : "result"),
           parentToolId,
         }
         this.emit("tool", tool)
@@ -1348,7 +1462,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private applySubagent(payload: Record<string, unknown> | null): void {
+  private applySubagent(event: AgentTaskEvent, payload: Record<string, unknown> | null): void {
     const subagentId = payload?.subagentId
     const toolId = payload?.toolId
     if (typeof subagentId !== "string" || typeof toolId !== "string") return
@@ -1372,10 +1486,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
         : {}),
     }
     this.subagentsById.set(subagentId, subagent)
-    this.emit("subagent", subagent)
+    this.emit("subagent", { ...subagent, ...sequenceOf(event) })
   }
 
-  private finishTurn(reason: string, usage?: AgentTurnUsage): void {
+  private finishTurn(
+    reason: string,
+    usage?: AgentTurnUsage,
+    end: { sequence?: number; turnId?: string } = {},
+  ): void {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
@@ -1394,6 +1512,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       content: this._content,
       reason,
       ...(usage ? { usage } : {}),
+      ...end,
     }
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)

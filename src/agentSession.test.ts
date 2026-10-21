@@ -1228,3 +1228,74 @@ describe("Agent turn usage", () => {
     await expect(result).resolves.toMatchObject({ reason: "endTurn", usage: recorded })
   })
 })
+
+describe("Agent history item identity", () => {
+  it("reads the box order, item and owner the Copilot recorded into each history item", async () => {
+    const tasks = createTasks({
+      listMessages: vi.fn(async () =>
+        page([
+          {
+            ...message("t", "AGENT", "Done"),
+            sequence: 9,
+            epoch: 2,
+            itemId: "item-a",
+            reasoning: "Thought first",
+            reason: "stop",
+          },
+          {
+            ...message(
+              "tc",
+              "AGENT",
+              '{"name":"Read","toolId":"t-1","parentToolId":"tool-9"}',
+              "TOOL_USE",
+            ),
+            sequence: 7,
+            epoch: 2,
+            itemId: "t-1",
+            parentToolId: "tool-9",
+            subagent: { subagentId: "sub-1", status: "completed" },
+          },
+          { ...message("u", "USER", "Hi"), sequence: 1, epoch: 2, clientMessageId: "cm-1" },
+          message("old", "USER", "Before"),
+        ]),
+      ),
+    })
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.history).toEqual([
+      { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
+      {
+        id: "u",
+        kind: "user",
+        text: "Hi",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 1,
+        epoch: 2,
+        clientMessageId: "cm-1",
+      },
+      {
+        id: "tc",
+        kind: "tool",
+        tool: { tool: "Read", toolId: "t-1", parentToolId: "tool-9", phase: "call" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 7,
+        epoch: 2,
+        itemId: "t-1",
+        parentToolId: "tool-9",
+        subagent: { subagentId: "sub-1", status: "completed" },
+      },
+      {
+        id: "t",
+        kind: "agent",
+        text: "Done",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 9,
+        epoch: 2,
+        itemId: "item-a",
+        reason: "stop",
+        reasoning: "Thought first",
+      },
+    ])
+  })
+})

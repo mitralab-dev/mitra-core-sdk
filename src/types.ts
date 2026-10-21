@@ -1286,6 +1286,22 @@ export interface AgentMessage {
   createdAt: string
   /** Present on the Agent message that closed a turn, when the Copilot recorded its usage. */
   usage?: AgentTurnUsage
+  /** The box log's sequence of the event that wrote the row; absent on older rows. */
+  sequence?: number
+  /** Which box log `sequence` counts in; absent on older rows. */
+  epoch?: number
+  /** T3's id of the item the row holds. */
+  itemId?: string
+  /** On a subagent's own text or tool: the tool call that spawned the subagent. */
+  parentToolId?: string
+  /** On the person's message: the `clientMessageId` it went out with. */
+  clientMessageId?: string
+  /** On an Agent text: the reasoning written before it. */
+  reasoning?: string
+  /** On a tool call that spawned a subagent: its last state, as the box sent it. */
+  subagent?: Record<string, unknown>
+  /** On the row that closed a turn: the reason the box ended it with. */
+  reason?: string
 }
 
 export interface AgentModel {

@@ -7,6 +7,13 @@ All notable changes to this project are documented in this file.
 - `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
   takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
   return is unaffected.
+- The events the session already emits carry, as optional fields, what the box frame named:
+  `sequence`, `itemId`, `turnId` (the frame's `lifecycle.turnId`) and `parentToolId` on a
+  subagent's text and tools. `steered` also carries the steered message's `turnId`, `sequence` and
+  `clientMessageId`; `turnEnd` carries the `sequence` and `turnId` of its `stepFinish`. History
+  items carry what the Copilot recorded: `sequence`, `epoch`, `itemId`, `parentToolId`,
+  `clientMessageId`, `reasoning`, `subagent` and `reason`. Nothing is derived: a frame or row
+  without a field leaves it out.
 
 ## 0.3.0
 
