@@ -643,6 +643,9 @@ function expectAppFields(app: JsonObject, context: string, errors: SdkCoreErrorF
   if (!isNullableString(app.icon)) invalidField(context, "icon", errors)
   if (!isNullableString(app.template)) invalidField(context, "template", errors)
   if (typeof app.allowSignup !== "boolean") invalidField(context, "allowSignup", errors)
+  for (const field of ["emailLoginEnabled", "passwordLoginEnabled"] as const) {
+    if (field in app && typeof app[field] !== "boolean") invalidField(context, field, errors)
+  }
   if (typeof app.externalAccessEnabled !== "boolean") {
     invalidField(context, "externalAccessEnabled", errors)
   }

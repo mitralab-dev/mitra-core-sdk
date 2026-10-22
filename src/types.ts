@@ -629,6 +629,13 @@ export interface AppUpdateInput {
   icon?: string
   /** Whether users may sign up through this app. Omission preserves the current value. */
   allowSignup?: boolean
+  /** Whether users may sign in with a code sent by email. Omission preserves the current value. */
+  emailLoginEnabled?: boolean
+  /**
+   * Whether users may sign in with a password. Omission preserves the current value. Code Studio
+   * rejects `true` while the app inherits the platform login.
+   */
+  passwordLoginEnabled?: boolean
 }
 
 export interface AppDomain {
@@ -652,6 +659,10 @@ export interface AppSummary {
   template: string | null
   planId: string
   allowSignup: boolean
+  /** Absent on a Code Studio that predates email login. */
+  emailLoginEnabled?: boolean
+  /** Absent on a Code Studio that predates password login. */
+  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -673,6 +684,10 @@ export interface AppDefinition {
   planId: string
   template: string | null
   allowSignup: boolean
+  /** Absent on a Code Studio that predates email login. */
+  emailLoginEnabled?: boolean
+  /** Absent on a Code Studio that predates password login. */
+  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
