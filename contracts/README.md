@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.2.14` is the `0.2.13` parity surface republished with `messenger.sendEmail()` and the
+  `emailLoginEnabled` and `passwordLoginEnabled` fields of `apps.update()`, which the parity cases do
+  not cover. Same parity cases; the version exists so a consumer pinning the package can pin a corpus
+  with the same number.
+
 - `0.2.13` is the `0.2.12` parity surface republished with the occupied context of the chat:
   `contextTokens` and `contextWindow` on `AgentTurnUsage`, which the parity cases do not cover.
   Same parity cases; the version exists so a consumer pinning the package can pin a corpus with
