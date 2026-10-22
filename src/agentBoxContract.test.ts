@@ -306,7 +306,37 @@ describe("Agent box queue and steer, as T3's composer", () => {
       4,
     )
     await vi.waitFor(() => expect(session.queue).toEqual([]))
-    expect(questions()).toEqual(["Also cats"])
+    expect(questions()).toEqual(["List 40 animals", "Also cats"])
+    session.close()
+  })
+
+  it("shows the question as the person wrote it, not the recovered context the box ran it with", async () => {
+    const { session, socket } = await runningTurn()
+    frame(
+      socket,
+      "stepFinish",
+      { reason: "stop", lifecycle: { turnId: "turn-1", terminal: true } },
+      2,
+    )
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const id = session.send("Again")!
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    frame(
+      socket,
+      "stepStart",
+      {
+        text: ["[Contexto recuperado]", "earlier messages", "", "Again"].join(
+          String.fromCharCode(10),
+        ),
+        lifecycle: { turnId: "turn-2", clientMessageId: id },
+      },
+      3,
+    )
+    await vi.waitFor(() =>
+      expect(
+        session.history.filter((item) => item.kind === "user").map((item) => item.text),
+      ).toEqual(["List 40 animals", "Again"]),
+    )
     session.close()
   })
 

@@ -779,6 +779,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private readonly subagentSequences = new Map<string, number>()
   private queueItems: AgentQueueItem[] = []
   private _backgroundTasks: readonly AgentBackgroundTask[] = []
+  /** The text of each message this session sent, by its `clientMessageId`. */
+  private readonly sentTexts = new Map<string, string>()
   // Messages of this session `accepted` was already emitted for. The frame that names a message
   // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
   // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
@@ -925,6 +927,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   editQueueItem(id: string, text: string): void {
     this.requireOpen()
+    if (this.sentTexts.has(id)) this.sentTexts.set(id, text)
     void this.sendInput({ type: "queued-run.edit", clientMessageId: id, text }).catch(
       (error: unknown) => {
         this.emitError("Failed to edit the queued Agent message", error)
@@ -1023,6 +1026,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     clientMessageId: string,
     waiter?: TurnWaiter,
   ): void {
+    this.sentTexts.set(clientMessageId, prompt)
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
@@ -1114,6 +1118,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     } else {
       this.strayedSteers.push(steered)
     }
+    this.sentTexts.set(steered.clientMessageId, prompt)
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -1872,9 +1877,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // The question enters the conversation where the box took it: its turn's `stepStart`, or the
   // `steer` that took it into the running turn. Until then it is in `queue`.
-  private liveQuestion(event: AgentTaskEvent, text: unknown, clientMessageId: unknown): void {
-    if (typeof text !== "string" || !text) return
+  private liveQuestion(event: AgentTaskEvent, boxText: unknown, clientMessageId: unknown): void {
     const id = typeof clientMessageId === "string" ? clientMessageId : undefined
+    // The question as the person wrote it, as the Copilot records it: the box has the text T3 ran,
+    // which after a box that died carries the recovered context ahead of it.
+    const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
+    if (typeof text !== "string" || !text) return
     const sequence = typeof event.sequence === "number" ? event.sequence : undefined
     this.livePiece(
       (item) =>
