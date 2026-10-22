@@ -1193,10 +1193,11 @@ export type AgentTaskInput =
       agentType?: string
       reasoningEffort?: string
       /**
-       * `steer` takes the message into the running turn; a box given none puts it in T3's queue.
-       * The session always sends `steer`. The Copilot does not take the field.
+       * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
+       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot does
+       * not take the field.
        */
-      mode?: "steer"
+      mode?: "queue" | "steer"
       /**
        * The id the box echoes on the frames that take the message (`stepStart`, `steer`,
        * `messageQueued`) and the history item of the question carries. The session sends the one
@@ -1222,6 +1223,8 @@ export type AgentTaskInput =
   | { type: "queued-run.cancel"; clientMessageId: string }
   /** Changes the text of a message in T3's queue; only the box channel takes it. */
   | { type: "queued-run.edit"; clientMessageId: string; text: string }
+  /** Moves a message from T3's queue into the running turn, as T3's own Steer on a queued message. */
+  | { type: "queued-message.promote-to-steer"; clientMessageId: string }
 
 export interface AgentTaskEvent {
   /** Event names are open and can grow without a client release. */

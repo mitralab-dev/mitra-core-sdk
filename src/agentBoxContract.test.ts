@@ -207,7 +207,7 @@ describe("Agent box steer marker", () => {
     session.on("turnEnd", turnEnds)
 
     frame(socket, "textDelta", { text: "Lions", lifecycle: { turnId: "turn-1" } })
-    const steer = session.sendAndWait("Also birds")
+    const steer = session.sendAndWait("Also birds", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
     frame(socket, "messageQueued", {
@@ -271,10 +271,79 @@ describe("Agent box steer marker", () => {
   })
 })
 
+describe("Agent box queue and steer, as T3's composer", () => {
+  it("queues a message sent during a turn by default, and it enters the history when its own turn starts", async () => {
+    const { session, first, socket } = await runningTurn()
+    const id = session.send("Also cats")!
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(socket.sent[1]).toMatchObject({ type: "message", mode: "queue", clientMessageId: id })
+    frame(
+      socket,
+      "messageQueued",
+      {
+        position: 1,
+        runId: "run-2",
+        text: "Also cats",
+        lifecycle: { turnId: "turn-2", clientMessageId: id },
+      },
+      2,
+    )
+    await vi.waitFor(() => expect(session.queue.map((item) => item.id)).toEqual([id]))
+    const questions = () =>
+      session.history.flatMap((item) => (item.kind === "user" ? [item.text] : []))
+    expect(questions()).not.toContain("Also cats")
+    frame(
+      socket,
+      "stepFinish",
+      { reason: "stop", lifecycle: { turnId: "turn-1", terminal: true } },
+      3,
+    )
+    await expect(first).resolves.toMatchObject({ reason: "stop" })
+    frame(
+      socket,
+      "stepStart",
+      { text: "Also cats", lifecycle: { turnId: "turn-2", clientMessageId: id } },
+      4,
+    )
+    await vi.waitFor(() => expect(session.queue).toEqual([]))
+    expect(questions()).toEqual(["Also cats"])
+    session.close()
+  })
+
+  it("steers a message on purpose, and moves a queued one into the running turn with T3's own promote", async () => {
+    const { session, socket } = await runningTurn()
+    session.send("Now", { mode: "steer" })
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
+    const queued = session.send("Later")!
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
+    session.steerQueueItem(queued)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(4))
+    expect(socket.sent[3]).toEqual({
+      type: "queued-message.promote-to-steer",
+      clientMessageId: queued,
+    })
+    session.close()
+  })
+
+  it("holds the provider's background work as T3's roster last stood", async () => {
+    const { session, socket } = await runningTurn()
+    const seen: unknown[] = []
+    session.on("backgroundTasks", ({ tasks }) => seen.push(tasks))
+    const roster = [{ taskId: "bg-1", kind: "command", description: "npm run build" }]
+    frame(socket, "backgroundTasks", { tasks: roster }, 2)
+    await vi.waitFor(() => expect(session.backgroundTasks).toEqual(roster))
+    frame(socket, "backgroundTasks", { tasks: [] }, 3)
+    await vi.waitFor(() => expect(session.backgroundTasks).toEqual([]))
+    expect(seen).toEqual([roster, []])
+    session.close()
+  })
+})
+
 describe("Agent box late steer", () => {
   it("answers a message sent while a late steer waits for its turn with its own turn", async () => {
     const { session, first, socket } = await runningTurn()
-    const late = session.sendAndWait("Also say MANGO")
+    const late = session.sendAndWait("Also say MANGO", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
     // The turn ends before the provider takes the steer: the box gives it a turn of its own.

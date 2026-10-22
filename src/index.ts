@@ -10,6 +10,7 @@ export type {
   AgentHistoryCursor,
   AgentPieceIdentity,
   AgentProviderUsage,
+  AgentBackgroundTask,
   AgentQueueItem,
   AgentSendAndWaitOptions,
   AgentSendOptions,

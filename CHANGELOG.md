@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0-beta.5
+
+- A message sent while a turn runs waits in T3's queue by default, as T3's composer does: it shows
+  in `queue` and enters `history` when its own turn starts. `send(prompt, { mode: "steer" })` takes
+  it into the running turn on purpose, and `steerQueueItem(id)` moves a queued message there with
+  T3's own `queued-message.promote-to-steer`. The message goes out with `mode: "queue"` or
+  `"steer"`; a box before this release ignores the field and lets T3 decide, as before.
+- `backgroundTasks` (and the event of the same name) is the work the provider keeps going in the
+  background as T3 shows it waiting: a background command, a Monitor, a subagent. It is state, not
+  history.
+
 ## 0.3.0-beta.4
 
 - `session.history` is the conversation as it happens: while a turn runs, the box's frames grow it

@@ -103,6 +103,11 @@ export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgent
 export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
+  /**
+   * With a turn running, as T3's composer: `queue` (the default) waits in T3's queue for a turn of
+   * its own, `steer` goes into the running turn. With no turn running the message starts one.
+   */
+  mode?: "queue" | "steer"
 }
 
 export interface AgentSendAndWaitOptions extends AgentSendOptions {
@@ -117,6 +122,16 @@ export type AgentTaskSessionStatus =
  * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
  * client's message, not only this session's.
  */
+/** One piece of work the provider keeps going in the background, as T3's roster names it. */
+export interface AgentBackgroundTask {
+  taskId: string
+  /** `command`, `monitor`, `subagent` or `background_task`, as T3 names it. */
+  kind: string
+  description?: string
+  /** The subagent's own thread, when it has one. */
+  childThreadId?: string
+}
+
 export interface AgentQueueItem extends AgentSendOptions {
   /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
@@ -288,6 +303,8 @@ export interface AgentTaskSessionEventMap {
   cancelled: Record<string, never>
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
+  /** The provider's background work changed: the roster as T3 shows it waiting. */
+  backgroundTasks: { tasks: readonly AgentBackgroundTask[] }
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
@@ -365,6 +382,16 @@ export interface AgentTaskSession {
   removeQueueItem(id: string): void
   /** Takes every message in `queue` out, one `queued-run.cancel` each. */
   clearQueue(): void
+  /**
+   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`); only the
+   * box channel takes it. It leaves `queue` and enters the history where the turn takes it.
+   */
+  steerQueueItem(id: string): void
+  /**
+   * The work the provider keeps going in the background as T3 shows it waiting (a background
+   * command, a Monitor, a subagent), as the box last reported it. State, not history.
+   */
+  readonly backgroundTasks: readonly AgentBackgroundTask[]
   /** Stops one subagent and leaves the turn running (T3's `subagent.stop`). */
   stopSubagent(subagentId: string): void
   on<K extends keyof AgentTaskSessionEventMap>(
@@ -443,16 +470,31 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-// The box puts a message with no mode in T3's queue when a turn runs; the session steers it into
-// that turn, as it always did.
+// As T3's composer: with a turn running a message waits in T3's queue unless the person steers it.
 function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: "steer",
+    mode: options.mode ?? "queue",
   }
+}
+
+function backgroundTasksOf(value: unknown): AgentBackgroundTask[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const task = asObject(entry)
+    if (typeof task?.taskId !== "string" || typeof task.kind !== "string") return []
+    return [
+      {
+        taskId: task.taskId,
+        kind: task.kind,
+        ...(typeof task.description === "string" ? { description: task.description } : {}),
+        ...(typeof task.childThreadId === "string" ? { childThreadId: task.childThreadId } : {}),
+      },
+    ]
+  })
 }
 
 // Copied from the frame as the box sent it; nothing is derived when a field is absent.
@@ -736,6 +778,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private readonly subagentsById = new Map<string, AgentSubagent>()
   private readonly subagentSequences = new Map<string, number>()
   private queueItems: AgentQueueItem[] = []
+  private _backgroundTasks: readonly AgentBackgroundTask[] = []
   // Messages of this session `accepted` was already emitted for. The frame that names a message
   // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
   // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
@@ -805,6 +848,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const sendOptions: AgentSendOptions = {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+      ...(options.mode ? { mode: options.mode } : {}),
     }
     if (this.isBusy()) {
       this.steer(prompt, sendOptions, waiter)
@@ -899,6 +943,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   clearQueue(): void {
     for (const item of this.queueItems) this.removeQueueItem(item.id)
+  }
+
+  steerQueueItem(id: string): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to steer the queued Agent message", error)
+      },
+    )
+  }
+
+  get backgroundTasks(): readonly AgentBackgroundTask[] {
+    return this._backgroundTasks
   }
 
   stopSubagent(subagentId: string): void {
@@ -1497,6 +1554,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
             ? { clientMessageId: lifecycle.clientMessageId }
             : {}),
         })
+        break
+      case "backgroundTasks":
+        this._backgroundTasks = backgroundTasksOf(payload?.tasks)
+        this.emit("backgroundTasks", { tasks: this._backgroundTasks })
         break
       case "messageQueued":
         if (payload?.cancelled === true) {

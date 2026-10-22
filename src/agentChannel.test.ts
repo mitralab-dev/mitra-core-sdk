@@ -194,7 +194,7 @@ describe("Agent direct channel", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -286,7 +286,7 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Long answer",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -332,7 +332,7 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Over quota",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     ])
@@ -905,7 +905,7 @@ describe("Agent direct channel over HTTP", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
+        mode: "queue",
         clientMessageId: expect.any(String),
       },
     })
@@ -1737,7 +1737,7 @@ describe("Agent direct channel steering", () => {
     await session.cancel()
     expect(session.status).toBe("cancelled")
 
-    const after = session.sendAndWait("POS-CX")
+    const after = session.sendAndWait("POS-CX", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     expect(socket.sent[1]).toEqual({ type: "interrupt" })
     // Sent as any message; the box holds it until the stopped turn ends and gives it a turn of
@@ -2591,7 +2591,11 @@ describe("Agent direct channel steering", () => {
     )
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    session.send("Stop and say BANANA", {
+      agentType: "CODEX",
+      reasoningEffort: "low",
+      mode: "steer",
+    })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
