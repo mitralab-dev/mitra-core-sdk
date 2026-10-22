@@ -341,9 +341,9 @@ describe("Agent box queue and steer, as T3's composer", () => {
     session.close()
   })
 
-  it("steers a message by default, and moves a queued one into the running turn with T3's own promote", async () => {
+  it("steers a message on purpose, sends one with no mode for T3 to decide by default, and moves a queued one into the running turn with T3's own promote", async () => {
     const { session, socket } = await runningTurn()
-    session.send("Now")
+    session.send("Now", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
     const queued = session.send("Later", { mode: "queue" })!
@@ -357,6 +357,9 @@ describe("Agent box queue and steer, as T3's composer", () => {
     session.resumeQueue()
     await vi.waitFor(() => expect(socket.sent).toHaveLength(5))
     expect(socket.sent[4]).toEqual({ type: "queue.resume" })
+    session.send("Whatever")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(6))
+    expect(socket.sent[5]).not.toHaveProperty("mode")
     session.close()
   })
 

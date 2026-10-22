@@ -508,6 +508,9 @@ describe("Agent conversation drawn from the session history alone", () => {
       { key: "user:second-id", text: "Also cats" },
       { key: "text:a2", text: "And cats" },
     ])
+    // The call and the result are each an item where it came, as the reload has them.
+    const phases = live.history.flatMap((item) => (item.kind === "tool" && item.tool.toolId === "ct-1" ? [item.tool.phase] : []))
+    expect(phases).toEqual(["call", "result"])
     live.close()
   })
 

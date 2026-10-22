@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0-beta.8
+
+- A message sent while a turn runs goes with no mode by default, as before: T3 decides, as its own
+  composer does, steering it into the running turn when the provider takes a steer and queueing it
+  otherwise. `mode: "steer"` and `mode: "queue"` are asked on purpose; T3 refuses a steer while the
+  turn is not running yet.
+- The live `history` holds a tool's call and its result as two items, each where it came, as the
+  stream sends them and the reload (and 0.2.13) has them. An app that shows a tool as one line joins
+  them by `toolId`, as T3's own screen does.
+
 ## 0.3.0-beta.7
 
 - A message sent while a turn runs goes into it by default (`mode: "steer"`), and a Stop ends it with

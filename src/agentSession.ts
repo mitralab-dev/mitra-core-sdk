@@ -104,9 +104,10 @@ export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
   /**
-   * With a turn running: `steer` (the default) goes into the running turn, which a Stop ends with
-   * it; `queue` waits in T3's queue for a turn of its own, held by a Stop until `resumeQueue`.
-   * With no turn running the message starts one.
+   * With a turn running: with none, T3 decides as its composer does (into the running turn when the
+   * provider takes a steer, in its queue otherwise); `steer` asks for the running turn, which T3
+   * refuses while the turn is not running yet; `queue` waits in T3's queue, held by a Stop until
+   * `resumeQueue`. With no turn running the message starts one.
    */
   mode?: "queue" | "steer"
 }
@@ -476,14 +477,14 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-// With a turn running a message goes into it unless the person queues it on purpose.
+// With no mode the box lets T3 decide, as it always did; queue and steer are asked on purpose.
 function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: options.mode ?? "steer",
+    ...(options.mode ? { mode: options.mode } : {}),
   }
 }
 
@@ -1947,22 +1948,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private liveTool(tool: AgentToolEvent, event: AgentTaskEvent): void {
     const toolId = tool.toolId
     if (toolId === undefined) return
+    // The call and the result are each an item where it came, as the stream sends them and the
+    // Copilot records them (two rows, as in 0.2.13): a result is not moved up onto its call.
     this.livePiece(
-      (item) => item.kind === "tool" && item.tool.toolId === toolId,
+      (item) => item.kind === "tool" && item.tool.toolId === toolId && item.tool.phase === tool.phase,
       () => ({
-        id: `live:tool:${toolId}`,
+        id: tool.phase === "result" ? `live:tool:${toolId}:result` : `live:tool:${toolId}`,
         kind: "tool",
         tool,
         at: liveAtOf(event),
         ...(tool.sequence === undefined ? {} : { sequence: tool.sequence }),
         ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
       }),
-      (item) => {
-        if (item.kind !== "tool") return item
-        // A call after its result (a replay) does not take the result back.
-        const phase = item.tool.phase === "result" ? "result" : tool.phase
-        return { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input, phase } }
-      },
+      (item) => (item.kind === "tool" ? { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input } } : item),
     )
   }
 

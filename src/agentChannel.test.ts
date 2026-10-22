@@ -194,7 +194,6 @@ describe("Agent direct channel", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -286,7 +285,6 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Long answer",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -332,7 +330,6 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Over quota",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -905,7 +902,6 @@ describe("Agent direct channel over HTTP", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     })
