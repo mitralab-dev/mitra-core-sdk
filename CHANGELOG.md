@@ -13,6 +13,13 @@ All notable changes to this project are documented in this file.
 - Recipient limits, the app's daily quota and the token check stay on Messenger. Their errors
   (`400` above Messenger's recipient cap, `429` with `Retry-After` above the quota, `403` for an
   app end-user token) come from the transport unchanged.
+- `apps.update()` takes `emailLoginEnabled` and `passwordLoginEnabled`, sent on Code Studio's
+  `PATCH /api/v1/apps/{id}` only when supplied, so omission keeps the current value. Code Studio
+  rejects `passwordLoginEnabled: true` while the app inherits the platform login, with a `400`
+  and `PASSWORD_LOGIN_REQUIRES_EXCLUSIVE_MODE`, which comes from the transport unchanged.
+- `AppDefinition` and `AppSummary` carry both fields when Code Studio returns them. The response
+  validator accepts their absence, as a Code Studio that predates them sends, and rejects a value
+  that is not a boolean.
 
 ## 0.2.13
 

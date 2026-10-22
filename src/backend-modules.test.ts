@@ -154,6 +154,8 @@ const appDefinition = {
   planId: "plan-1",
   template: "react-vite-shadcn",
   allowSignup: true,
+  emailLoginEnabled: true,
+  passwordLoginEnabled: false,
   externalAccessEnabled: false,
   currentVersion: appVersion,
   createdAt: "2026-01-01T00:00:00Z",
@@ -174,6 +176,8 @@ const appSummary = {
   template: appDefinition.template,
   planId: appDefinition.planId,
   allowSignup: appDefinition.allowSignup,
+  emailLoginEnabled: appDefinition.emailLoginEnabled,
+  passwordLoginEnabled: appDefinition.passwordLoginEnabled,
   externalAccessEnabled: appDefinition.externalAccessEnabled,
   currentVersion: appDefinition.currentVersion,
   createdAt: appDefinition.createdAt,
@@ -506,6 +510,44 @@ describe("apps and public Functions", () => {
       "status,desc",
     ])
   })
+
+  it("sends the login fields on update and leaves the omitted ones out of the body", async () => {
+    const transport = new QueueTransport([appDefinition, appDefinition])
+    const apps = createAppsModule(transport)
+
+    await expect(
+      apps.update("app-1", { emailLoginEnabled: true, passwordLoginEnabled: false }),
+    ).resolves.toEqual(appDefinition)
+    await apps.update("app-1", { emailLoginEnabled: false })
+
+    expect(transport.requests[0]?.options).toEqual({
+      method: "PATCH",
+      body: { emailLoginEnabled: true, passwordLoginEnabled: false },
+    })
+    expect(transport.requests[1]?.options.body).toStrictEqual({ emailLoginEnabled: false })
+  })
+
+  it("accepts apps without login fields from an older Code Studio", async () => {
+    const olderDetail: Record<string, unknown> = { ...appDefinition }
+    delete olderDetail.emailLoginEnabled
+    delete olderDetail.passwordLoginEnabled
+    const olderSummary: Record<string, unknown> = { ...appSummary }
+    delete olderSummary.emailLoginEnabled
+    delete olderSummary.passwordLoginEnabled
+    const apps = createAppsModule(new QueueTransport([olderDetail, springPage([olderSummary])]))
+
+    await expect(apps.get("app-1")).resolves.toEqual(olderDetail)
+    await expect(apps.list()).resolves.toMatchObject({ content: [olderSummary] })
+  })
+
+  it.each(["emailLoginEnabled", "passwordLoginEnabled"])(
+    "rejects an app whose %s is not a boolean",
+    async (field) => {
+      const apps = createAppsModule(new QueueTransport([{ ...appDefinition, [field]: null }]))
+
+      await expect(apps.get("app-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
+    },
+  )
 
   it("uses only the explicit anonymous public transport", async () => {
     const transport = new QueueTransport([
