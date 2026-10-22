@@ -272,9 +272,9 @@ describe("Agent box steer marker", () => {
 })
 
 describe("Agent box queue and steer, as T3's composer", () => {
-  it("queues a message sent during a turn by default, and it enters the history when its own turn starts", async () => {
+  it("queues a message on purpose, and it enters the history when its own turn starts", async () => {
     const { session, first, socket } = await runningTurn()
-    const id = session.send("Also cats")!
+    const id = session.send("Also cats", { mode: "queue" })!
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "queue", clientMessageId: id })
     frame(
@@ -333,19 +333,20 @@ describe("Agent box queue and steer, as T3's composer", () => {
       3,
     )
     await vi.waitFor(() =>
-      expect(
-        session.history.filter((item) => item.kind === "user").map((item) => item.text),
-      ).toEqual(["List 40 animals", "Again"]),
+      expect(session.history.flatMap((item) => (item.kind === "user" ? [item.text] : []))).toEqual([
+        "List 40 animals",
+        "Again",
+      ]),
     )
     session.close()
   })
 
-  it("steers a message on purpose, and moves a queued one into the running turn with T3's own promote", async () => {
+  it("steers a message by default, and moves a queued one into the running turn with T3's own promote", async () => {
     const { session, socket } = await runningTurn()
-    session.send("Now", { mode: "steer" })
+    session.send("Now")
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
-    const queued = session.send("Later")!
+    const queued = session.send("Later", { mode: "queue" })!
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     session.steerQueueItem(queued)
     await vi.waitFor(() => expect(socket.sent).toHaveLength(4))
@@ -353,6 +354,9 @@ describe("Agent box queue and steer, as T3's composer", () => {
       type: "queued-message.promote-to-steer",
       clientMessageId: queued,
     })
+    session.resumeQueue()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(5))
+    expect(socket.sent[4]).toEqual({ type: "queue.resume" })
     session.close()
   })
 

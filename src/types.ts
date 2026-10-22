@@ -1225,6 +1225,8 @@ export type AgentTaskInput =
   | { type: "queued-run.edit"; clientMessageId: string; text: string }
   /** Moves a message from T3's queue into the running turn, as T3's own Steer on a queued message. */
   | { type: "queued-message.promote-to-steer"; clientMessageId: string }
+  /** Lets T3's queue go on after a Stop held it, as T3's own `queue.resume`. */
+  | { type: "queue.resume" }
 
 export interface AgentTaskEvent {
   /** Event names are open and can grow without a client release. */

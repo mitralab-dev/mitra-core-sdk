@@ -104,8 +104,9 @@ export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
   /**
-   * With a turn running, as T3's composer: `queue` (the default) waits in T3's queue for a turn of
-   * its own, `steer` goes into the running turn. With no turn running the message starts one.
+   * With a turn running: `steer` (the default) goes into the running turn, which a Stop ends with
+   * it; `queue` waits in T3's queue for a turn of its own, held by a Stop until `resumeQueue`.
+   * With no turn running the message starts one.
    */
   mode?: "queue" | "steer"
 }
@@ -388,6 +389,11 @@ export interface AgentTaskSession {
    */
   steerQueueItem(id: string): void
   /**
+   * Lets the queue go on after a Stop held it (T3's `queue.resume`): T3's Stop ends the running
+   * turn and holds what waits, each item with `queueHeld`. Only the box channel takes it.
+   */
+  resumeQueue(): void
+  /**
    * The work the provider keeps going in the background as T3 shows it waiting (a background
    * command, a Monitor, a subagent), as the box last reported it. State, not history.
    */
@@ -470,14 +476,14 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-// As T3's composer: with a turn running a message waits in T3's queue unless the person steers it.
+// With a turn running a message goes into it unless the person queues it on purpose.
 function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: options.mode ?? "queue",
+    mode: options.mode ?? "steer",
   }
 }
 
@@ -955,6 +961,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.emitError("Failed to steer the queued Agent message", error)
       },
     )
+  }
+
+  resumeQueue(): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queue.resume" }).catch((error: unknown) => {
+      this.emitError("Failed to resume the Agent queue", error)
+    })
   }
 
   get backgroundTasks(): readonly AgentBackgroundTask[] {

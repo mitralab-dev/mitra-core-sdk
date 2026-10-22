@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0-beta.7
+
+- A message sent while a turn runs goes into it by default (`mode: "steer"`), and a Stop ends it with
+  the turn. T3's queue is used on purpose: `send(prompt, { mode: "queue" })` waits there for a turn of
+  its own, and a Stop holds it, as T3's Stop does, until `resumeQueue()` (T3's `queue.resume`).
+
 ## 0.3.0-beta.6
 
 - The question a turn opens enters `history` as the person wrote it, as the Copilot records it:
