@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0-beta.6
+
+- The question a turn opens enters `history` as the person wrote it, as the Copilot records it:
+  after a box that died, the box ran it with the recovered context ahead of it, and the live
+  question showed that context until the reload.
+
 ## 0.3.0-beta.5
 
 - A message sent while a turn runs waits in T3's queue by default, as T3's composer does: it shows
