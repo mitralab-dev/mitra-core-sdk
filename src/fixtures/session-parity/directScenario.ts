@@ -58,7 +58,7 @@ const HISTORY = [
     content: "Hi",
     createdAt: "2026-01-01T00:00:01Z",
     sequence: 1,
-    epoch: 0,
+    boxLog: 0,
     clientMessageId: "cm-old",
   },
 ]
@@ -168,7 +168,7 @@ export async function playDirectScenario(
     channel: async () => ({
       wsUrl: "wss://3773-box1.e2b.app/api/mitra/chat/ws?grant=g",
       lastSequence: 1,
-      epoch: 0,
+      boxLog: 0,
     }),
   }
   const eventSource = {

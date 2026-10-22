@@ -705,9 +705,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     let box = boxAddress(channel.wsUrl)
     let thread: string | undefined
     const otherLog =
-      historyCursor?.epoch !== undefined &&
-      channel.epoch !== undefined &&
-      historyCursor.epoch !== channel.epoch
+      historyCursor?.boxLog !== undefined &&
+      channel.boxLog !== undefined &&
+      historyCursor.boxLog !== channel.boxLog
     const historyFrom =
       historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
     // The cursor starts where the replay starts, so a drop in the middle of it asks again for

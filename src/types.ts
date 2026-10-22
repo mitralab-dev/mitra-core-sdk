@@ -1240,9 +1240,9 @@ export interface AgentTaskChannel {
   lastSequence: number
   /**
    * Which box log the chat is on now, counted by the Copilot: a box that comes up without the
-   * log starts a new one. The `epoch` of the history items. Absent from an older Copilot.
+   * log starts a new one. The `boxLog` of the history items. Absent from an older Copilot.
    */
-  epoch?: number
+  boxLog?: number
 }
 
 /** One call to the provider inside a turn, or one model's total when the source gives only that. */
@@ -1322,7 +1322,7 @@ export interface AgentMessage {
   /** The box log's sequence of the row's last chunk, only when the row came in more than one. */
   lastSequence?: number
   /** Which box log `sequence` counts in; absent on older rows. */
-  epoch?: number
+  boxLog?: number
   /** T3's id of the item the row holds. */
   itemId?: string
   /** On a subagent's own reasoning, text or tool: the tool call that spawned the subagent. */

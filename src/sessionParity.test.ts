@@ -9,7 +9,7 @@ import type { RecordedEvent } from "./fixtures/session-parity/scenario"
 // may differ: same events, in the same order, with the same fields and values.
 const ADDED_FIELDS = new Set([
   "sequence",
-  "epoch",
+  "boxLog",
   "itemId",
   "turnId",
   "parentToolId",

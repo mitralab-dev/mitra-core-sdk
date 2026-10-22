@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file.
 - History items carry `lastSequence` when the Copilot sends it: the box sequence of the last
   chunk of a piece that came in more than one, while `sequence` is its first chunk, the same as
   its live event. The F5 replay starts after the highest `lastSequence ?? sequence` of the newest
-  `epoch`, so the replay does not repeat the end of a piece the history already has.
+  `boxLog`, so the replay does not repeat the end of a piece the history already has.
 - `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
   takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
   return is unaffected. The id also goes in the `POST /inputs` body when the message goes to the
@@ -17,7 +17,7 @@ All notable changes to this project are documented in this file.
   subagent's text and tools. `delta` and `subagentDelta` also carry `itemDelta`, the frame's piece
   of its item without the separator 0.2.13 joined two text items with. `steered` also carries the steered message's `turnId`, `sequence` and
   `clientMessageId`; `turnEnd` carries the `sequence` and `turnId` of its `stepFinish`. History
-  items carry what the Copilot recorded: `sequence`, `epoch`, `itemId`, `parentToolId`,
+  items carry what the Copilot recorded: `sequence`, `boxLog`, `itemId`, `parentToolId`,
   `clientMessageId`, `subagent` and `reason`. `subagent` has the shape of the box's
   `subagentUpdate` (`AgentSubagentFrame`, partial); a tool item keeps `parentToolId` on `tool`
   only. The history is the stream as the Copilot recorded it, one row per piece: `loadHistory`
@@ -53,9 +53,9 @@ All notable changes to this project are documented in this file.
   `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel per queued message,
   on the box channel only. The methods are no longer deprecated; their signatures are unchanged.
 - `session({ taskId })` opened in the middle of a run asks the box for the replay from where the
-  loaded history ends (the highest `sequence` of its newest `epoch`), with the request the redial
+  loaded history ends (the highest `sequence` of its newest `boxLog`), with the request the redial
   already makes, before any live frame: what the Copilot has not recorded yet reaches the session
-  and nothing the history has comes twice. When the channel's `epoch` (new optional field of
+  and nothing the history has comes twice. When the channel's `boxLog` (new optional field of
   `AgentTaskChannel`) is another log than the history's newest, the replay starts at the box log's
   beginning. On the socket the same decision as the redial is made from the box's `hello`: a
   `lastSequence` short of the history's end is another log too. The channel cursor starts at the

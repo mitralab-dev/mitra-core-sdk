@@ -69,7 +69,7 @@ export interface AgentTaskEventSource {
  */
 export interface AgentHistoryCursor {
   sequence: number
-  epoch?: number
+  boxLog?: number
 }
 
 export type AgentSessionTransport = "auto" | "websocket" | "http"
@@ -186,7 +186,7 @@ export interface AgentTimelineItemIdentity {
   /** The box log's sequence of the item's last chunk, only when it came in more than one. */
   lastSequence?: number
   /** Which box log the sequence counts in: a box that came up without the log starts again. */
-  epoch?: number
+  boxLog?: number
   /** T3's id of the item: the `itemId` of its live frames. */
   itemId?: string
   /** Only on the item that closed a turn: the reason the box ended it with. */
@@ -504,7 +504,7 @@ function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
   return {
     ...(typeof message.sequence === "number" ? { sequence: message.sequence } : {}),
     ...(typeof message.lastSequence === "number" ? { lastSequence: message.lastSequence } : {}),
-    ...(typeof message.epoch === "number" ? { epoch: message.epoch } : {}),
+    ...(typeof message.boxLog === "number" ? { boxLog: message.boxLog } : {}),
     ...(typeof message.itemId === "string" ? { itemId: message.itemId } : {}),
     ...(typeof message.reason === "string" ? { reason: message.reason } : {}),
   }
@@ -517,11 +517,11 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
   if (!newest) return undefined
   let sequence = 0
   for (const item of history) {
-    if (item.epoch === newest.epoch && typeof item.sequence === "number") {
+    if (item.boxLog === newest.boxLog && typeof item.sequence === "number") {
       sequence = Math.max(sequence, item.lastSequence ?? item.sequence)
     }
   }
-  return { sequence, ...(newest.epoch === undefined ? {} : { epoch: newest.epoch }) }
+  return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
 }
 
 // A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a

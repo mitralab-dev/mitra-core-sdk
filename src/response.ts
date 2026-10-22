@@ -1303,7 +1303,7 @@ export function expectAgentTaskChannel(
     wsUrl: channel.wsUrl,
     lastSequence:
       isInteger(channel.lastSequence) && channel.lastSequence > 0 ? channel.lastSequence : 0,
-    ...(isInteger(channel.epoch) ? { epoch: channel.epoch } : {}),
+    ...(isInteger(channel.boxLog) ? { boxLog: channel.boxLog } : {}),
   }
 }
 

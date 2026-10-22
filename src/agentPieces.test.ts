@@ -83,7 +83,7 @@ afterEach(() => {
   BoxSocket.hello = undefined
 })
 
-function manager(history: AgentMessage[], lastSequence: number, epoch: number) {
+function manager(history: AgentMessage[], lastSequence: number, boxLog: number) {
   const page: Page<AgentMessage> = {
     // The Copilot answers newest first; the session puts it back in order.
     content: [...history].reverse(),
@@ -100,7 +100,7 @@ function manager(history: AgentMessage[], lastSequence: number, epoch: number) {
     channel: vi.fn(async () => ({
       wsUrl: "wss://3773-box1.e2b.app/api/mitra/chat/ws?grant=g",
       lastSequence,
-      epoch,
+      boxLog,
     })),
   }
   return createAgentTaskSessionManager({
@@ -315,7 +315,7 @@ function historyAt(
     type: "TEXT",
     content: "",
     createdAt: "2026-01-01T00:00:00Z",
-    epoch: 0,
+    boxLog: 0,
     ...fields,
   })
   for (const frame of frames.filter((candidate) => candidate.sequence <= cursor)) {
@@ -581,8 +581,8 @@ describe("Agent conversation across a box that died", () => {
       "text:b1",
     ])
     const recordedOld = [
-      userRow(watched.first, "Count birds", { sequence: 1, epoch: 0 }),
-      agentRow("a1", "Hello", { sequence: 3, epoch: 0 }),
+      userRow(watched.first, "Count birds", { sequence: 1, boxLog: 0 }),
+      agentRow("a1", "Hello", { sequence: 3, boxLog: 0 }),
       lost,
     ]
     const expected = watched.list.filter(
@@ -610,8 +610,8 @@ describe("Agent conversation across a box that died", () => {
     const after = manager(
       [
         ...recordedOld,
-        userRow(watched.second, "Also cats", { sequence: 1, epoch: 1 }),
-        agentRow("b1", "Cats", { sequence: 2, epoch: 1 }),
+        userRow(watched.second, "Also cats", { sequence: 1, boxLog: 1 }),
+        agentRow("b1", "Cats", { sequence: 2, boxLog: 1 }),
       ],
       3,
       1,
@@ -629,8 +629,8 @@ describe("Agent conversation across a box that died", () => {
     BoxSocket.hello = { threadId: "thread-1", lastSequence: 5 }
     const fresh = manager(
       [
-        userRow(first, "Count birds", { sequence: 1, epoch: 0 }),
-        agentRow("a1", "Hello", { sequence: 3, epoch: 0 }),
+        userRow(first, "Count birds", { sequence: 1, boxLog: 0 }),
+        agentRow("a1", "Hello", { sequence: 3, boxLog: 0 }),
       ],
       5,
       0,
@@ -669,7 +669,7 @@ describe("Agent conversation opened on a box log the history may not be on", () 
     createdAt: "2026-01-01T00:00:00Z",
     clientMessageId: "cm-1",
     sequence: 1,
-    epoch: 0,
+    boxLog: 0,
   }
   const hello = {
     id: "row-a1",
@@ -679,7 +679,7 @@ describe("Agent conversation opened on a box log the history may not be on", () 
     createdAt: "2026-01-01T00:00:00Z",
     itemId: "a1",
     sequence: 3,
-    epoch: 0,
+    boxLog: 0,
   }
   const turn = (turnId: string, pieces: string[], itemId: string): Frame[] =>
     [
@@ -708,7 +708,7 @@ describe("Agent conversation opened on a box log the history may not be on", () 
     ])
   })
 
-  it("reads the box from its beginning when its hello is short of the history, on the same epoch", async () => {
+  it("reads the box from its beginning when its hello is short of the history, on the same box log", async () => {
     BoxSocket.log = turn("turn-9", ["Cats"], "b1")
     BoxSocket.hello = { threadId: "thread-2", lastSequence: 2 }
     const fresh = manager([user, hello], 2, 0).session({ taskId: "task-1" })
