@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.0-beta.4
+
+- `session.history` is the conversation as it happens: while a turn runs, the box's frames grow it
+  with the same items the Copilot records. The question enters where the box took it (its turn's
+  `stepStart` or the `steer` that took it in), each stretch of text or reasoning grows on the item
+  of its `itemId`, each tool is one item by `toolId` (its result lands on it), and the call that
+  spawned a subagent carries its last state. A piece the loaded history already has grows in place,
+  and a frame it already holds (a replay after a reconnect or an F5) changes nothing. The reload at
+  the turn's end brings back the same pieces in the same order. An app draws `history`, `queue` and
+  `subagents` and keeps nothing of its own.
+
 ## 0.3.0-beta.3
 
 - History items carry `lastSequence` when the Copilot sends it: the box sequence of the last

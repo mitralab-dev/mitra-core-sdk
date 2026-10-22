@@ -617,6 +617,10 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   }
 }
 
+function liveAtOf(event: AgentTaskEvent): string {
+  return new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now()).toISOString()
+}
+
 function parentToolIdOf(value: unknown): { parentToolId?: string } {
   return typeof value === "string" ? { parentToolId: value } : {}
 }
@@ -1454,6 +1458,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         })
         break
       case "stepStart":
+        if (!this.isFinishedTurnFrame(lifecycle)) {
+          this.liveQuestion(event, payload?.text, lifecycle?.clientMessageId)
+        }
         // The box announcing a turn is what starts one, with its content clean: whether a message
         // steered or got a turn of its own is the box's call, never this session's timing. A
         // message sent right after a `turnEnd`, before the previous one's admission was heard,
@@ -1477,6 +1484,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.acceptNamed(lifecycle?.clientMessageId)
         break
       case "steer":
+        this.liveQuestion(event, payload?.text, lifecycle?.clientMessageId)
         this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(lifecycle)
         this.acceptNamed(lifecycle?.clientMessageId)
@@ -1767,6 +1775,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.emit("turnStart", {})
     }
     if (kind === "text") this._content += text
+    this.liveText(event, payload, kind)
     this.emit("delta", {
       delta: text,
       kind,
@@ -1780,7 +1789,99 @@ class CoreAgentTaskSession implements AgentTaskSession {
     payload: Record<string, unknown> | null,
     phase: "call" | "result",
   ): void {
-    this.emit("tool", toolEventOf(event, payload, phase))
+    const tool = toolEventOf(event, payload, phase)
+    this.liveTool(tool, event)
+    this.emit("tool", tool)
+  }
+
+  // The conversation as it happens: the box's frames grow `history` while a turn runs, one item
+  // per piece of T3, the same pieces the Copilot records and the reload at the turn's end brings
+  // back in the same order. A piece the loaded history already has keeps growing in place, and a
+  // frame it already holds (a replay after a reconnect or an F5) changes nothing.
+  private livePiece(
+    match: (item: AgentTimelineItem) => boolean,
+    create: () => AgentTimelineItem,
+    update: (item: AgentTimelineItem) => AgentTimelineItem,
+  ): void {
+    const index = this._history.findIndex(match)
+    const current = this._history[index]
+    if (current === undefined) this._history.push(create())
+    else this._history[index] = update(current)
+  }
+
+  // The question enters the conversation where the box took it: its turn's `stepStart`, or the
+  // `steer` that took it into the running turn. Until then it is in `queue`.
+  private liveQuestion(event: AgentTaskEvent, text: unknown, clientMessageId: unknown): void {
+    if (typeof text !== "string" || !text) return
+    const id = typeof clientMessageId === "string" ? clientMessageId : undefined
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    this.livePiece(
+      (item) =>
+        item.kind === "user" &&
+        ((id !== undefined && item.clientMessageId === id) ||
+          (sequence !== undefined && item.sequence === sequence && item.text === text)),
+      () => ({
+        id: `live:user:${id ?? sequence ?? this._history.length}`,
+        kind: "user",
+        text,
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(id === undefined ? {} : { clientMessageId: id }),
+      }),
+      (item) => item,
+    )
+  }
+
+  private liveText(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    kind: "text" | "thinking",
+    parentToolId?: string,
+  ): void {
+    const itemId = typeof payload?.itemId === "string" ? payload.itemId : undefined
+    if (itemId === undefined) return
+    const piece = itemDeltaOf(payload).itemDelta ?? (typeof payload?.text === "string" ? payload.text : "")
+    const itemKind = kind === "thinking" ? "reasoning" : "agent"
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    this.livePiece(
+      (item) => item.kind === itemKind && item.itemId === itemId,
+      () => ({
+        id: `live:${itemKind}:${itemId}`,
+        kind: itemKind,
+        text: piece,
+        at: liveAtOf(event),
+        itemId,
+        ...(sequence === undefined ? {} : { sequence }),
+        ...parentToolIdOf(parentToolId),
+      }),
+      (item) => {
+        const held = item.lastSequence ?? item.sequence
+        if (!("text" in item) || (sequence !== undefined && held !== undefined && sequence <= held)) return item
+        return { ...item, text: item.text + piece, ...(sequence === undefined ? {} : { lastSequence: sequence }) }
+      },
+    )
+  }
+
+  private liveTool(tool: AgentToolEvent, event: AgentTaskEvent): void {
+    const toolId = tool.toolId
+    if (toolId === undefined) return
+    this.livePiece(
+      (item) => item.kind === "tool" && item.tool.toolId === toolId,
+      () => ({
+        id: `live:tool:${toolId}`,
+        kind: "tool",
+        tool,
+        at: liveAtOf(event),
+        ...(tool.sequence === undefined ? {} : { sequence: tool.sequence }),
+        ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
+      }),
+      (item) => {
+        if (item.kind !== "tool") return item
+        // A call after its result (a replay) does not take the result back.
+        const phase = item.tool.phase === "result" ? "result" : tool.phase
+        return { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input, phase } }
+      },
+    )
   }
 
   // A child thread's frames are the subagent's conversation: they open no turn and settle no
@@ -1796,6 +1897,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const kind = event.type === "thinking" ? "thinking" : "text"
         const identity = { ...itemDeltaOf(payload), ...pieceIdentityOf(event, payload) }
         if (kind === "text") this._content += delta
+        this.liveText(event, payload, kind, parentToolId)
         this.emit("delta", { delta, kind, parentToolId, ...identity })
         this.emit("subagentDelta", { parentToolId, delta, kind, ...identity })
         break
@@ -1806,6 +1908,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
           ...toolEventOf(event, payload, event.type === "toolCall" ? "call" : "result"),
           parentToolId,
         }
+        this.liveTool(tool, event)
         this.emit("tool", tool)
         this.emit("subagentTool", tool)
         break
@@ -1841,6 +1944,22 @@ class CoreAgentTaskSession implements AgentTaskSession {
         : {}),
     }
     this.subagentsById.set(subagentId, subagent)
+    // The call that spawned it carries its last state, as the history records it.
+    const index = this._history.findIndex((item) => item.kind === "tool" && item.tool.toolId === toolId)
+    const spawn = this._history[index]
+    if (spawn?.kind === "tool") {
+      this._history[index] = {
+        ...spawn,
+        subagent: {
+          ...spawn.subagent,
+          toolId,
+          subagentId,
+          status,
+          ...(subagent.progress === undefined ? {} : { progress: subagent.progress }),
+          ...(subagent.childThreadId === undefined ? {} : { childThreadId: subagent.childThreadId }),
+        },
+      }
+    }
     this.emit("subagent", { ...subagent, ...sequenceOf(event) })
   }
 

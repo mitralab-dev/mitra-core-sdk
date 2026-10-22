@@ -461,6 +461,89 @@ describe("Agent conversation opened in the middle of a run", () => {
   })
 })
 
+// An app that keeps nothing: it draws `session.history` as it is at each event, one row per item,
+// with a tool's call and result (separate rows in the Copilot) on the row of its `toolId`.
+function historyList(session: AgentTaskSession): Piece[] {
+  const pieces: Piece[] = []
+  for (const item of session.history) {
+    if (item.kind === "user") pieces.push({ key: `user:${item.clientMessageId}`, text: item.text })
+    else if (item.kind === "agent" || item.kind === "reasoning") {
+      pieces.push({ key: pieceKey(item.kind === "agent" ? "text" : "reasoning", item.itemId, item.parentToolId), text: item.text })
+    } else if (item.kind === "tool") {
+      const key = `tool:${item.tool.toolId}`
+      const result = item.tool.phase === "result" ? item.tool.content : undefined
+      const drawn = pieces.find((piece) => piece.key === key)
+      if (drawn) drawn.result = result ?? drawn.result
+      else pieces.push({ key, text: "", result })
+    }
+  }
+  return pieces
+}
+
+describe("Agent conversation drawn from the session history alone", () => {
+  // Up to "And cats": the turn is still running, before the reload at its end.
+  const RUNNING_UNTIL = 11
+
+  it("holds the question where the box took it and every piece as it grows, while the turn runs", async () => {
+    const live = manager([], 0, 0).session({ create: true, agentType: "CLAUDE", agentId: "agent-1" })
+    const first = live.send("Count birds")!
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    const frames = conversation(first, "second-id")
+
+    socket.deliver(frames[0]!)
+    expect(historyList(live)).toEqual([{ key: `user:${first}`, text: "Count birds" }])
+    for (const frame of frames.slice(1, RUNNING_UNTIL)) socket.deliver(frame)
+    // A frame the history already holds, as a replay sends it again, changes nothing.
+    socket.deliver(logged(frames[3]!))
+
+    expect(historyList(live)).toEqual([
+      { key: `user:${first}`, text: "Count birds" },
+      { key: "reasoning:r1", text: "Birds first" },
+      { key: "text:a1", text: "Hello" },
+      { key: "tool:tool-1", text: "", result: undefined },
+      { key: "reasoning:tool-1/c0", text: "Look around" },
+      { key: "text:tool-1/s1", text: "Three birds" },
+      { key: "tool:ct-1", text: "", result: "ok" },
+      { key: "user:second-id", text: "Also cats" },
+      { key: "text:a2", text: "And cats" },
+    ])
+    live.close()
+  })
+
+  it("draws the same history when opened in the middle of the run (F5) as watched live", async () => {
+    const sent = [
+      { id: "first-id", text: "Count birds", after: 0 },
+      { id: "second-id", text: "Also cats", after: SENT_SECOND_AFTER },
+    ]
+    const frames = conversation("first-id", "second-id")
+    // [what the Copilot recorded, what the box had logged] when the page was reloaded.
+    const cuts: [number, number][] = [[1, 4], [2, 3], [3, 7], [4, 4], [6, 7], [7, 9], [9, 10], [10, 11], [11, 11]]
+    const expected: Piece[] = [
+      { key: "user:first-id", text: "Count birds" },
+      { key: "reasoning:r1", text: "Birds first" },
+      { key: "text:a1", text: "Hello" },
+      { key: "tool:tool-1", text: "", result: undefined },
+      { key: "reasoning:tool-1/c0", text: "Look around" },
+      { key: "text:tool-1/s1", text: "Three birds" },
+      { key: "tool:ct-1", text: "", result: "ok" },
+      { key: "user:second-id", text: "Also cats" },
+      { key: "text:a2", text: "And cats" },
+    ]
+    for (const [cursor, boxLogged] of [[RUNNING_UNTIL, RUNNING_UNTIL] as [number, number], ...cuts]) {
+      BoxSocket.instances = []
+      BoxSocket.log = frames.slice(0, boxLogged)
+      BoxSocket.hello = { threadId: "thread-1", lastSequence: boxLogged }
+      const fresh = manager(historyAt(frames, cursor, sent), boxLogged, 0).session({ taskId: "task-1" })
+      await vi.waitFor(() => expect(fresh.status).not.toBe("opening"))
+      const socket = BoxSocket.instances.at(-1)!
+      for (const frame of frames.slice(boxLogged, RUNNING_UNTIL)) socket.deliver(frame)
+      expect(historyList(fresh), `cut ${cursor}/${boxLogged}`).toEqual(expected)
+      fresh.close()
+    }
+  })
+})
+
 describe("Agent conversation across a box that died", () => {
   const userRow = (id: string, text: string, fields: Partial<AgentMessage> = {}) => ({
     id: `row-${id}`,
