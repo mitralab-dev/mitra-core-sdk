@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.0-beta.2
 
 - `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
   Messenger's `POST /api/v1/messages/send` as a `RAW` payload on the `EMAIL` channel and resolves
