@@ -1381,6 +1381,23 @@ export interface AgentModel {
   providerName?: string | null
 }
 
+/**
+ * A provider the next turn can run on, with the models the catalog offers on it and the last
+ * subscription reading of the person's login.
+ */
+export interface AgentReadyProvider {
+  provider: CopilotProvider
+  /** Name the person chose for a custom provider; null on a built-in one. */
+  providerName: string | null
+  /** The catalog's models of this provider, in the catalog's order. */
+  models: AgentModel[]
+  /**
+   * The same reading `usage(provider)` answers; null on an API key, before a turn reported a
+   * window, and on a custom provider, which has no subscription.
+   */
+  usage: CredentialUsage | null
+}
+
 export interface CredentialStatus {
   provider: CopilotProvider
   connected: boolean

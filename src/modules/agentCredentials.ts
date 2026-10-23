@@ -18,6 +18,7 @@ import type {
   AgentConnectionCustomProviderInput,
   AgentCredentialScope,
   AgentModel,
+  AgentReadyProvider,
   AuthenticationResult,
   CopilotProvider,
   CredentialStatus,
@@ -39,6 +40,13 @@ export interface AgentCredentialsModule {
   list(options?: AgentCredentialOptions): Promise<CredentialStatus[]>
   /** Lists models backed by a usable credential, optionally through a business agent connection. */
   listModels(agentId?: string, options?: AgentCredentialOptions): Promise<AgentModel[]>
+  /**
+   * The providers the next turn can run on, each with its models and its subscription reading: one
+   * entry per built-in provider and per custom provider of `listModels(agentId)`, in the catalog's
+   * order, with `usage(provider)` read for the built-in ones. With an `agentId` the models are
+   * the agent connection's, and the reading is still the person's own login.
+   */
+  providers(agentId?: string, options?: AgentCredentialOptions): Promise<AgentReadyProvider[]>
   /**
    * The last subscription window a chat on this credential reported, readable with no chat open.
    * Resolves to null until a turn on the provider's subscription login has reported one; an API
@@ -97,7 +105,27 @@ export function createAgentCredentialsModule(
   const providerSegment = (provider: string) => encodePathSegment(provider, "provider", errors)
   const scopeParams = (options?: AgentCredentialOptions) =>
     options?.scope ? { params: { scope: options.scope } } : {}
-  return {
+  const module: AgentCredentialsModule = {
+    async providers(agentId, options) {
+      const ready: AgentReadyProvider[] = []
+      for (const model of await module.listModels(agentId, options)) {
+        const providerName = model.providerName ?? null
+        const entry = ready.find(
+          (candidate) =>
+            candidate.provider === model.provider && candidate.providerName === providerName,
+        )
+        if (entry) entry.models.push(model)
+        else ready.push({ provider: model.provider, providerName, models: [model], usage: null })
+      }
+      await Promise.all(
+        ready
+          .filter((entry) => entry.providerName === null)
+          .map(async (entry) => {
+            entry.usage = await module.usage(entry.provider, options)
+          }),
+      )
+      return ready
+    },
     async list(options) {
       return expectObjectArray<CredentialStatus>(
         await transport.request<unknown>("/api/v1/credentials", {
@@ -231,4 +259,5 @@ export function createAgentCredentialsModule(
       )
     },
   }
+  return module
 }

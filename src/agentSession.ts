@@ -16,6 +16,7 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
   AgentTurnUsage,
+  CopilotProvider,
   CredentialUsage,
 } from "./types"
 
@@ -359,8 +360,19 @@ export interface AgentTaskSessionEventMap {
   raw: AgentTaskEvent
 }
 
-/** The same shape `agentCredentials.usage` answers with. */
-export type AgentProviderUsage = CredentialUsage
+/**
+ * The same shape `agentCredentials.usage` answers with, plus the provider whose login the reading
+ * is: the one to pass to `agentCredentials.usage`, absent for a harness this version does not know.
+ */
+export type AgentProviderUsage = CredentialUsage & { provider?: CopilotProvider }
+
+// Only a subscription login reports windows, and each harness has one: Claude's login is the
+// ANTHROPIC credential and the ChatGPT login Codex runs on is the OPENAI one (the included AI and
+// custom providers reach Codex by API key, which reports none).
+const SUBSCRIPTION_PROVIDER: Record<string, CopilotProvider | undefined> = {
+  claude: "ANTHROPIC",
+  codex: "OPENAI",
+}
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -467,7 +479,8 @@ function providerUsageOf(payload: Record<string, unknown> | null): AgentProvider
   if (!payload) return null
   try {
     const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
-    return { harness, observedAt, status, windows }
+    const provider = SUBSCRIPTION_PROVIDER[harness]
+    return { harness, observedAt, status, windows, ...(provider ? { provider } : {}) }
   } catch {
     return null
   }

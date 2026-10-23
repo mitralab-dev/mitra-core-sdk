@@ -2060,3 +2060,73 @@ describe("turn usage on Agent messages", () => {
     ])
   })
 })
+
+describe("the providers the next turn can run on", () => {
+  const model = (
+    provider: string,
+    agentType: string,
+    providerName?: string | null,
+  ): AgentModel => ({
+    model: `${provider}/${agentType}`,
+    name: agentType,
+    provider,
+    agentType,
+    reasoningOptions: [],
+    ...(providerName === undefined ? {} : { providerName }),
+  })
+  const claudeUsage = {
+    harness: "claude",
+    observedAt: "2026-10-23T00:00:00Z",
+    status: null,
+    windows: [{ kind: "FIVE_HOUR", usedPercent: 12, resetsAt: null, windowSeconds: 18_000 }],
+  }
+
+  class RouteTransport implements Transport {
+    readonly paths: string[] = []
+    constructor(private readonly routes: Record<string, unknown>) {}
+    async request<T>(path: string, options: TransportRequestOptions = {}): Promise<T> {
+      this.paths.push(`${path} ${JSON.stringify(options.params ?? {})}`)
+      const answer = this.routes[path]
+      if (answer instanceof Error) throw answer
+      return answer as T
+    }
+  }
+
+  it("groups the catalog by provider with each built-in provider's reading", async () => {
+    const notFound = Object.assign(new Error("none"), { code: "CREDENTIAL_USAGE_NOT_FOUND" })
+    const opus = model("ANTHROPIC", "OPUS")
+    const sonnet = model("ANTHROPIC", "SONNET", null)
+    const gpt = model("OPENAI", "GPT")
+    const groq = model("CUSTOM", "CUSTOM_AI", "Groq")
+    const other = model("CUSTOM", "CUSTOM_AI", "Other")
+    const transport = new RouteTransport({
+      "/api/v1/models": [opus, groq, gpt, sonnet, other],
+      "/api/v1/credentials/ANTHROPIC/usage": claudeUsage,
+      "/api/v1/credentials/OPENAI/usage": notFound,
+    })
+
+    await expect(
+      createAgentCredentialsModule(transport).providers("agent-1", { scope: "ACCOUNT" }),
+    ).resolves.toEqual([
+      { provider: "ANTHROPIC", providerName: null, models: [opus, sonnet], usage: claudeUsage },
+      { provider: "CUSTOM", providerName: "Groq", models: [groq], usage: null },
+      { provider: "OPENAI", providerName: null, models: [gpt], usage: null },
+      { provider: "CUSTOM", providerName: "Other", models: [other], usage: null },
+    ])
+    // A custom provider has no subscription: no reading is asked for it.
+    expect(transport.paths.sort()).toEqual([
+      '/api/v1/credentials/ANTHROPIC/usage {"scope":"ACCOUNT"}',
+      '/api/v1/credentials/OPENAI/usage {"scope":"ACCOUNT"}',
+      '/api/v1/models {"agentId":"agent-1","scope":"ACCOUNT"}',
+    ])
+  })
+
+  it("fails as the reading fails when the Copilot answers with an error other than no reading", async () => {
+    const transport = new RouteTransport({
+      "/api/v1/models": [model("ANTHROPIC", "OPUS")],
+      "/api/v1/credentials/ANTHROPIC/usage": new Error("unavailable"),
+    })
+
+    await expect(createAgentCredentialsModule(transport).providers()).rejects.toThrow("unavailable")
+  })
+})

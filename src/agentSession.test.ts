@@ -330,7 +330,22 @@ describe("Agent task session", () => {
     source.emit(event("stepFinish", { reason: "endTurn" }))
 
     await expect(result).resolves.toMatchObject({ content: "ok", reason: "endTurn" })
-    expect(readings).toEqual([reading])
+    expect(readings).toEqual([{ ...reading, provider: "ANTHROPIC" }])
+  })
+
+  it("names the provider of the login the reading is, and none for a harness it does not know", async () => {
+    const { session, tasks, source } = createSession()
+    const readings: { provider?: string }[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    session.send("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const reading = { observedAt: "2026-09-26T12:00:00.000Z", status: null, windows: [] }
+
+    source.emit(event("providerUsage", { ...reading, harness: "codex" }))
+    source.emit(event("providerUsage", { ...reading, harness: "opencode" }))
+
+    expect(readings.map((value) => value.provider)).toEqual(["OPENAI", undefined])
+    expect(readings[1]).not.toHaveProperty("provider")
   })
 
   it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {

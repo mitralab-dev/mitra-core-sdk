@@ -16,6 +16,11 @@ did changes.
 - `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
   hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
   it redials a box that dropped. A chat with no box never asks and stays false.
+- `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, grouped
+  from `listModels` (one entry per built-in provider and per custom provider), each with its
+  models and, for the built-in ones, the reading `usage(provider)` answers.
+- The session's `providerUsage` carries `provider`, the credential of the login the reading is
+  (`ANTHROPIC` for `claude`, `OPENAI` for `codex`), absent for a harness this version does not know.
 
 ## 0.3.0
 

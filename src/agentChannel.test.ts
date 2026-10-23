@@ -229,7 +229,7 @@ describe("Agent direct channel", () => {
     socket.receive("stepFinish", { reason: "endTurn", lifecycle: { turnId: "turn-1" } }, 3)
 
     await expect(result).resolves.toMatchObject({ reason: "endTurn" })
-    expect(readings).toEqual([reading])
+    expect(readings).toEqual([{ ...reading, provider: "ANTHROPIC" }])
   })
 
   it("counts the message as sent only when the box starts the admitted turn", async () => {
