@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   AgentTaskTurnError,
+  agentTimeline,
   createAgentTaskSessionManager,
   withAgentTaskSessions,
 } from "./agentSession"
@@ -9,6 +10,7 @@ import type {
   AgentTaskEventObserver,
   AgentTaskEventSource,
   AgentTaskSession,
+  AgentTimelineItem,
 } from "./agentSession"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentMessage, AgentTask, AgentTaskEvent, Page } from "./types"
@@ -1759,5 +1761,85 @@ describe("Agent context window", () => {
     )
     await second
     expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
+  })
+})
+
+describe("Agent timeline for the screen", () => {
+  const user: AgentTimelineItem = { id: "u", kind: "user", text: "go", at: "t", sequence: 1 }
+  const call = (id: string, toolId: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "tool",
+    at: "t",
+    tool: { tool: "Task", toolId, phase: "call", ...(parentToolId ? { parentToolId } : {}) },
+  })
+  const result = (id: string, toolId: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "tool",
+    at: "t",
+    tool: {
+      tool: "Task",
+      toolId,
+      phase: "result",
+      content: "ok",
+      ...(parentToolId ? { parentToolId } : {}),
+    },
+  })
+  const text = (id: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "agent",
+    text: id,
+    at: "t",
+    ...(parentToolId ? { parentToolId } : {}),
+  })
+
+  it("joins a call and its result and puts a subagent's pieces under the call that spawned it", () => {
+    const history = [
+      user,
+      call("spawn", "t-1"),
+      text("sub-text", "t-1"),
+      call("sub-call", "t-2", "t-1"),
+      text("main-text"),
+      result("sub-result", "t-2", "t-1"),
+      result("spawn-result", "t-1"),
+      text("after"),
+    ]
+
+    const view = agentTimeline(history)
+
+    expect(view.map((entry) => entry.item.id)).toEqual(["u", "spawn", "main-text", "after"])
+    const spawn = view[1]
+    expect(spawn?.result?.id).toBe("spawn-result")
+    expect(spawn?.children.map((entry) => entry.item.id)).toEqual(["sub-text", "sub-call"])
+    expect(spawn?.children[1]?.result?.id).toBe("sub-result")
+    // The history itself is left as it came.
+    expect(history.map((item) => item.id)).toEqual([
+      "u",
+      "spawn",
+      "sub-text",
+      "sub-call",
+      "main-text",
+      "sub-result",
+      "spawn-result",
+      "after",
+    ])
+  })
+
+  it("keeps a result with no call and a piece with no spawning call where they are", () => {
+    const view = agentTimeline([result("late", "t-9"), text("orphan", "t-8"), user])
+
+    expect(view.map((entry) => [entry.item.id, entry.children.length])).toEqual([
+      ["late", 0],
+      ["orphan", 0],
+      ["u", 0],
+    ])
+  })
+
+  it("is the session's history, pending message included", async () => {
+    const { session } = createSession()
+    session.send("hello")
+
+    expect(session.timeline()).toEqual([
+      { item: expect.objectContaining({ kind: "user", pending: true }), children: [] },
+    ])
   })
 })

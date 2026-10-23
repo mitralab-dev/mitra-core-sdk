@@ -28,6 +28,9 @@ did changes.
 - `session.context`: `{ contextTokens, contextWindow? }` from the last turn that reported it (the
   live `turnEnd`, or the newest `history` item whose usage has it), null before any. The box sends
   it when a turn ends, so it does not move while a turn runs.
+- `agentTimeline(history)` and `session.timeline()`: the conversation as T3's screen draws it, with a
+  tool's call and result in one entry (by `toolId`) and a subagent's pieces under the call that
+  spawned it (by `parentToolId`). A pure function over `history`, which stays as it is.
 
 ## 0.3.0
 

@@ -267,6 +267,16 @@ export type AgentTimelineItem =
       subagent?: Partial<AgentSubagentFrame>
     } & AgentTimelineItemIdentity)
 
+/** One line of the conversation as T3's screen draws it, built from `history` by `agentTimeline`. */
+export interface AgentTimelineEntry {
+  /** The piece as `history` has it: on a tool, its call, or its result when the call is not there. */
+  item: AgentTimelineItem
+  /** On a tool call: its result, joined by `toolId`. */
+  result?: Extract<AgentTimelineItem, { kind: "tool" }>
+  /** On the tool call that spawned a subagent: the subagent's pieces (`parentToolId`), in order. */
+  children: AgentTimelineEntry[]
+}
+
 export interface AgentTurnResult {
   task: AgentTask
   content: string
@@ -396,6 +406,8 @@ export interface AgentTaskSession {
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
+  /** `agentTimeline(history)`: the conversation as T3's screen draws it. `history` stays as it is. */
+  timeline(): AgentTimelineEntry[]
   /**
    * True while the session waits for the Copilot to hand over the chat's box: the channel request,
    * which the Copilot holds while a cold box boots (tens of seconds), and a redial after the box
@@ -733,6 +745,44 @@ function contextOf(usage: AgentTurnUsage): AgentContextUsage | null {
   }
 }
 
+function parentOf(item: AgentTimelineItem): string | undefined {
+  return item.kind === "tool" ? item.tool.parentToolId : item.parentToolId
+}
+
+/**
+ * The conversation as T3's screen draws it, from the items of `history`, which it does not change:
+ * a tool's call and result are one entry, joined by `toolId`, and a subagent's pieces sit under
+ * the tool call that spawned it, by `parentToolId`. The order is the history's. A result whose call
+ * is not in `history`, and a piece whose spawning call is not (a page not loaded), stand alone
+ * where they are.
+ */
+export function agentTimeline(history: readonly AgentTimelineItem[]): AgentTimelineEntry[] {
+  const calls = new Map<string, AgentTimelineEntry>()
+  for (const item of history) {
+    const toolId = item.kind === "tool" ? item.tool.toolId : undefined
+    if (item.kind === "tool" && item.tool.phase === "call" && toolId && !calls.has(toolId)) {
+      calls.set(toolId, { item, children: [] })
+    }
+  }
+  const entries: AgentTimelineEntry[] = []
+  for (const item of history) {
+    const call = item.kind === "tool" ? calls.get(item.tool.toolId ?? "") : undefined
+    if (item.kind === "tool" && item.tool.phase === "result" && call) {
+      call.result ??= item
+      continue
+    }
+    entries.push(call?.item === item ? call : { item, children: [] })
+  }
+  const top: AgentTimelineEntry[] = []
+  for (const entry of entries) {
+    const parentToolId = parentOf(entry.item)
+    const spawn = parentToolId === undefined ? undefined : calls.get(parentToolId)
+    if (spawn && spawn !== entry) spawn.children.push(entry)
+    else top.push(entry)
+  }
+  return top
+}
+
 function liveAtOf(event: AgentTaskEvent): string {
   return new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now()).toISOString()
 }
@@ -936,6 +986,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   get connecting(): boolean {
     return this._connecting
+  }
+
+  timeline(): AgentTimelineEntry[] {
+    return agentTimeline(this.history)
   }
 
   get context(): AgentContextUsage | null {
