@@ -2923,6 +2923,88 @@ describe("Agent box coming up", () => {
     expect(changes).toEqual([true, false])
   })
 
+  it("shows every message sent while a cold box boots, one item each once the box takes them", async () => {
+    let boot!: () => void
+    const booted = new Promise<void>((resolve) => {
+      boot = resolve
+    })
+    const tasks = createTasks(async () => {
+      await booted
+      return { wsUrl: BOX_URL, lastSequence: 0 }
+    })
+    const { session } = open(tasks)
+    const users = () =>
+      session.history.flatMap((item) =>
+        item.kind === "user" ? [[item.text, item.pending === true]] : [],
+      )
+
+    const first = session.send("First")
+    const second = session.send("Second")
+    const third = session.send("Third", { mode: "queue" })
+    expect(users()).toEqual([
+      ["First", true],
+      ["Second", true],
+      ["Third", true],
+    ])
+    boot()
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(3))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { text: "First", lifecycle: { turnId: "t1", clientMessageId: first } },
+      2,
+    )
+    expect(users()).toEqual([
+      ["First", false],
+      ["Second", true],
+      ["Third", true],
+    ])
+    socket.receive(
+      "steer",
+      { text: "Second", lifecycle: { turnId: "t1", clientMessageId: second } },
+      3,
+    )
+    socket.receive(
+      "messageQueued",
+      { clientMessageId: third, position: 1, text: "Third", lifecycle: { clientMessageId: third } },
+      4,
+    )
+
+    expect(users()).toEqual([
+      ["First", false],
+      ["Second", false],
+    ])
+    expect(session.queue.map((item) => item.id)).toEqual([third])
+  })
+
+  it("takes a message sent while the box boots out when its send fails", async () => {
+    let boot!: () => void
+    const booted = new Promise<void>((resolve) => {
+      boot = resolve
+    })
+    const tasks = createTasks(async () => {
+      await booted
+      return { wsUrl: BOX_URL, lastSequence: 0 }
+    })
+    const { session } = open(tasks)
+    const first = session.send("First")
+    const second = session.send("Second")
+    boot()
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(2))
+    FakeWebSocket.last().receive(
+      "stepStart",
+      { text: "First", lifecycle: { turnId: "t1", clientMessageId: first } },
+      2,
+    )
+
+    FakeWebSocket.last().receive("error", { message: "No", clientMessageId: second })
+
+    await vi.waitFor(() =>
+      expect(session.history.filter((item) => item.kind === "user")).toHaveLength(1),
+    )
+    expect(session.history[0]).toMatchObject({ clientMessageId: first })
+  })
+
   it("takes the pending message out when the box refuses it", async () => {
     const tasks = createTasks(offer())
     const { session } = open(tasks)

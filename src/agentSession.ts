@@ -1279,15 +1279,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     waiter?: TurnWaiter,
   ): void {
     this.sentTexts.set(clientMessageId, prompt)
-    this.pendingQuestions.push({
-      id: `live:user:${clientMessageId}`,
-      kind: "user",
-      text: prompt,
-      at: new Date().toISOString(),
-      clientMessageId,
-      pending: true,
-    })
-    this.emit("messagePending", { clientMessageId, text: prompt })
+    this.addPending(clientMessageId, prompt)
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
@@ -1381,6 +1373,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.strayedSteers.push(steered)
     }
     this.sentTexts.set(steered.clientMessageId, prompt)
+    // Behind a message the box has not taken yet (a cold box booting), the box has not this one
+    // either: it shows the same way, until the box takes it, queues it or the send fails.
+    if (this.pendingQuestions.length > 0) this.addPending(steered.clientMessageId, prompt)
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -1455,6 +1450,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private forgetSteer(steered: SteeredMessage): void {
+    this.dropPending(steered.clientMessageId)
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
   }
@@ -2194,10 +2190,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.pendingQuestions = this.pendingQuestions.filter((item) => item.id !== `live:user:${id}`)
   }
 
-  // The turn of the opening message ended with no frame that confirmed the message: the turn
-  // answered it, so it is no longer waiting, and the history has it where the server recorded it.
-  private dropOpeningPending(): void {
+  // The turn ended with no frame that confirmed its opening message, or a steer it took: the turn
+  // answered them, so they are no longer waiting, and the history has them where the server
+  // recorded them.
+  private dropAnsweredPending(): void {
     if (this.openingMessageId !== undefined) this.dropPending(this.openingMessageId)
+    for (const steered of this.steers) if (steered.taken) this.dropPending(steered.clientMessageId)
+  }
+
+  private addPending(clientMessageId: string, text: string): void {
+    this.pendingQuestions.push({
+      id: `live:user:${clientMessageId}`,
+      kind: "user",
+      text,
+      at: new Date().toISOString(),
+      clientMessageId,
+      pending: true,
+    })
+    this.emit("messagePending", { clientMessageId, text })
   }
 
   // A server that never carries a lifecycle sends no `stepStart` naming the message either: its
@@ -2423,7 +2433,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(usage ? { usage } : {}),
       ...end,
     }
-    this.dropOpeningPending()
+    this.dropAnsweredPending()
     if (usage?.contextTokens !== undefined) this.liveContext = contextOf(usage)
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
@@ -2433,7 +2443,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failTurn(error: AgentTaskTurnError): void {
-    this.dropOpeningPending()
+    this.dropAnsweredPending()
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
     this.recoveryGeneration += 1
