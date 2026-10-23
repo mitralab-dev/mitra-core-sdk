@@ -61,9 +61,11 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   recovery, which reads the newest 100 rows, keeps what `history` held behind them when the page
   shares a row with it, and otherwise starts over from the page, for `loadOlder` to read the rest
   again; a `loadOlder` still reading when the history is replaced drops what it read.
-- `session.context`: `{ contextTokens, contextWindow? }` from the last turn that reported it (the
-  live `turnEnd`, or the newest `history` item whose usage has it), null before any. The box sends
-  it when a turn ends, so it does not move while a turn runs.
+- `session.context`: `{ contextTokens, contextWindow? }` as the box last reported it (its live
+  `contextUsage` reading while a turn runs, the live `turnEnd`, or the newest `history` item whose
+  usage has it), null before any. The `contextChange` event says the live reading moved; the box
+  sends one after each model request of the turn whose reading changed. A box without the live
+  reading moves it only when a turn ends.
 - `agentTimeline(history)` and `session.timeline()`: the conversation as T3's screen draws it, with a
   tool's call and result in one entry (by `toolId`) and a subagent's pieces under the call that
   spawned it (by `parentToolId`). A pure function over `history`, which stays as it is.

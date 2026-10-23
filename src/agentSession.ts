@@ -332,6 +332,8 @@ export interface AgentTaskSessionEventMap {
    * fails (`error`).
    */
   messagePending: { clientMessageId: string; text: string }
+  /** The box read the chat's context window while a turn runs: `context` is this reading now. */
+  contextChange: { context: AgentContextUsage }
   /** `connecting` changed: the session started or stopped waiting for the chat's box. */
   connecting: { connecting: boolean }
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
@@ -390,11 +392,11 @@ const SUBSCRIPTION_PROVIDER: Record<string, CopilotProvider | undefined> = {
   codex: "OPENAI",
 }
 
-/** How full the chat's context window was at the end of a turn, as the box reported it. */
+/** How full the chat's context window is, as the box last reported it. */
 export interface AgentContextUsage {
-  /** The `contextTokens` of that turn's usage. */
+  /** The `contextTokens` of the box's reading. */
   contextTokens: number
-  /** The `contextWindow` of that turn's usage, when the box knew it. */
+  /** The `contextWindow` of the box's reading, when the box knew it. */
   contextWindow?: number
 }
 
@@ -422,9 +424,10 @@ export interface AgentTaskSession {
    */
   readonly connecting: boolean
   /**
-   * The chat's context window at the end of the last turn that reported it: the live `turnEnd`, or
-   * the newest `history` item whose usage has it. Null before any. The box reports it only when a
-   * turn ends, so it does not move while a turn runs; `turnEnd` and `historyLoaded` say it changed.
+   * The chat's context window as the box last reported it: its live reading while a turn runs
+   * (`contextChange`), the live `turnEnd`, or the newest `history` item whose usage has it. Null
+   * before any. A box older than the live reading moves it only when a turn ends; `contextChange`,
+   * `turnEnd` and `historyLoaded` say it changed.
    */
   readonly context: AgentContextUsage | null
   /**
@@ -745,6 +748,18 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
       : {}),
     ...(message.pending === true && message.sender === "USER" ? { pending: true as const } : {}),
     ...parentToolIdOf(message.parentToolId),
+  }
+}
+
+function liveContextOf(payload: Record<string, unknown> | null): AgentContextUsage | null {
+  const tokens = payload?.contextTokens
+  if (typeof tokens !== "number" || !Number.isInteger(tokens) || tokens < 0) return null
+  const window = payload?.contextWindow
+  return {
+    contextTokens: tokens,
+    ...(typeof window === "number" && Number.isInteger(window) && window > 0
+      ? { contextWindow: window }
+      : {}),
   }
 }
 
@@ -1944,6 +1959,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "subagentUpdate":
         this.applySubagent(event, payload)
         break
+      case "contextUsage": {
+        const context = liveContextOf(payload)
+        if (!context) break
+        this.liveContext = context
+        this.emit("contextChange", { context })
+        break
+      }
       case "providerUsage": {
         const usage = providerUsageOf(payload)
         if (usage) this.emit("providerUsage", usage)

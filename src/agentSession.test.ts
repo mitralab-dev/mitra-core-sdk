@@ -2117,6 +2117,46 @@ describe("Agent context window", () => {
     await second
     expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
   })
+
+  it("follows the box's live contextUsage while a turn runs, and the turnEnd after it", async () => {
+    const tasks = createTasks()
+    tasks.listMessages.mockResolvedValue(
+      page([
+        { ...closing("a", "first"), usage: { inputTokens: 1, outputTokens: 1, contextTokens: 9 } },
+      ]),
+    )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const changes: unknown[] = []
+    session.on("contextChange", (change) => changes.push(change))
+
+    const turn = session.sendAndWait("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("contextUsage", { contextTokens: 18_766, contextWindow: 1_000_000 }))
+    expect(session.status).toBe("streaming")
+    expect(session.context).toEqual({ contextTokens: 18_766, contextWindow: 1_000_000 })
+    // A window the box does not know is left out, as on the turn's usage.
+    source.emit(event("contextUsage", { contextTokens: 20_109, contextWindow: 0 }))
+    expect(session.context).toEqual({ contextTokens: 20_109 })
+    // A reading this client cannot read changes nothing.
+    source.emit(event("contextUsage", { contextTokens: "20k" }))
+    expect(session.context).toEqual({ contextTokens: 20_109 })
+    expect(changes).toEqual([
+      { context: { contextTokens: 18_766, contextWindow: 1_000_000 } },
+      { context: { contextTokens: 20_109 } },
+    ])
+
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: { inputTokens: 1, outputTokens: 1, contextTokens: 20_200, contextWindow: 1_000_000 },
+      }),
+    )
+    await turn
+    expect(session.context).toEqual({ contextTokens: 20_200, contextWindow: 1_000_000 })
+  })
 })
 
 describe("Agent timeline for the screen", () => {
