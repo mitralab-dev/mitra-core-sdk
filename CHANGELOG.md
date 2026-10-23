@@ -12,7 +12,9 @@ did changes.
   message the moment it is sent (with a cold box, while the box boots). It leaves for the item the
   box confirms (`stepStart` naming it, or naming none), for `queue` when T3 queues it, or on a
   failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
-  it never shows twice.
+  it never shows twice. Visible change from 0.3.0: an app that draws its own optimistic message
+  next to `history` shows it twice until the box takes it; it drops its own, or draws
+  `history.filter((item) => !item.pending)`, which is what 0.3.0 gave.
 - `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
   hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
   it redials a box that dropped. A chat with no box never asks and stays false.
