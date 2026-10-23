@@ -1181,7 +1181,13 @@ export interface AgentTask {
   agentId: string | null
   userId: string | null
   title: string | null
+  /**
+   * The model the chat runs on now: the `agentType` of its entry in `agentCredentials.listModels`
+   * (a constant name, or the catalog id of a custom provider's model), whose `provider` and
+   * `providerName` name the provider. The Copilot moves it with each turn that switched model.
+   */
   agentType: string
+  /** The effort the chat runs with now, moved like `agentType`. */
   reasoningEffort: string | null
   /** Absent on a Copilot that predates credential scopes; null on a task without one. */
   scope?: AgentCredentialScope | null
