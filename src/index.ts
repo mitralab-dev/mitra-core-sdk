@@ -11,6 +11,7 @@ export type {
   AgentPieceIdentity,
   AgentProviderUsage,
   AgentBackgroundTask,
+  AgentContextUsage,
   AgentQueueItem,
   AgentSendAndWaitOptions,
   AgentSendOptions,

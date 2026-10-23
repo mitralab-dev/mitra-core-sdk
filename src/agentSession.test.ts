@@ -1722,3 +1722,42 @@ describe("Agent older history", () => {
     expect(texts(session)).toEqual(["text 1", "text 2", "text 3", "text 4", "text 5"])
   })
 })
+
+describe("Agent context window", () => {
+  it("reads the newest history usage, then the live turnEnd, and keeps it through a turn without one", async () => {
+    const tasks = createTasks()
+    tasks.listMessages.mockResolvedValue(
+      page([
+        { ...closing("b", "second"), usage: { inputTokens: 1, outputTokens: 1 } },
+        { ...closing("a", "first"), usage: { inputTokens: 1, outputTokens: 1, contextTokens: 9 } },
+      ]),
+    )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    expect(session.context).toBeNull()
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    // The newest turn reported no context: the one before it still says how full the window is.
+    expect(session.context).toEqual({ contextTokens: 9 })
+
+    const first = session.sendAndWait("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: { inputTokens: 1, outputTokens: 1, contextTokens: 50_000, contextWindow: 200_000 },
+      }),
+    )
+    await first
+    expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
+
+    const second = session.sendAndWait("again")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    source.emit(
+      event("stepFinish", { reason: "endTurn", usage: { inputTokens: 1, outputTokens: 1 } }),
+    )
+    await second
+    expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
+  })
+})

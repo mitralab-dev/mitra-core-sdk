@@ -25,6 +25,9 @@ did changes.
   the size `loadHistory` used, put before it in the box's order with nothing repeated or skipped
   when rows were recorded since (the page's total says where the older rows start). A reload of the
   newest page, as a turn recovery does, keeps the older pages.
+- `session.context`: `{ contextTokens, contextWindow? }` from the last turn that reported it (the
+  live `turnEnd`, or the newest `history` item whose usage has it), null before any. The box sends
+  it when a turn ends, so it does not move while a turn runs.
 
 ## 0.3.0
 

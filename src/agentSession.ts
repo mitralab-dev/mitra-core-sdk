@@ -374,6 +374,14 @@ const SUBSCRIPTION_PROVIDER: Record<string, CopilotProvider | undefined> = {
   codex: "OPENAI",
 }
 
+/** How full the chat's context window was at the end of a turn, as the box reported it. */
+export interface AgentContextUsage {
+  /** The `contextTokens` of that turn's usage. */
+  contextTokens: number
+  /** The `contextWindow` of that turn's usage, when the box knew it. */
+  contextWindow?: number
+}
+
 export interface AgentTaskSession {
   readonly taskId: string | null
   readonly task: AgentTask | null
@@ -395,6 +403,12 @@ export interface AgentTaskSession {
    * with no box, which never asks for it.
    */
   readonly connecting: boolean
+  /**
+   * The chat's context window at the end of the last turn that reported it: the live `turnEnd`, or
+   * the newest `history` item whose usage has it. Null before any. The box reports it only when a
+   * turn ends, so it does not move while a turn runs; `turnEnd` and `historyLoaded` say it changed.
+   */
+  readonly context: AgentContextUsage | null
   /**
    * Sends the message at once and returns the id it goes out with: the `clientMessageId` the box
    * echoes when it takes the message (in `steered`, in `queue` and in the history item of the
@@ -711,6 +725,14 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   }
 }
 
+function contextOf(usage: AgentTurnUsage): AgentContextUsage | null {
+  if (usage.contextTokens === undefined) return null
+  return {
+    contextTokens: usage.contextTokens,
+    ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+  }
+}
+
 function liveAtOf(event: AgentTaskEvent): string {
   return new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now()).toISOString()
 }
@@ -841,6 +863,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // as T3 shows its optimistic message: apart, so a history reload neither drops nor repeats them.
   private pendingQuestions: AgentTimelineItem[] = []
   private _connecting = false
+  // The live `turnEnd`'s reading, until a history read brings the closing rows that hold it.
+  private liveContext: AgentContextUsage | null = null
   // The pages behind the newest one, read by `loadOlder`, oldest first: a reload of the newest page
   // (an open, a recovery) replaces only what it covers.
   private olderItems: AgentTimelineItem[] = []
@@ -912,6 +936,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   get connecting(): boolean {
     return this._connecting
+  }
+
+  get context(): AgentContextUsage | null {
+    if (this.liveContext) return this.liveContext
+    for (let index = this._history.length - 1; index >= 0; index -= 1) {
+      const item = this._history[index]
+      const usage = item?.kind === "agent" ? item.usage : undefined
+      if (usage?.contextTokens !== undefined) return contextOf(usage)
+    }
+    return null
   }
 
   send(prompt: string, options: AgentSendOptions = {}): string | undefined {
@@ -1002,6 +1036,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     })
     this.historyPageSize = options.limit ?? this.historyPageSize
     this.olderItems = []
+    this.liveContext = null
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
@@ -1534,6 +1569,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const newest = [...page.content].reverse().map(toAgentTimelineItem)
     const covered = new Set(newest.map((item) => item.id))
     this._history = [...this.olderItems.filter((item) => !covered.has(item.id)), ...newest]
+    this.liveContext = null
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
@@ -2327,6 +2363,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...end,
     }
     this.dropOpeningPending()
+    if (usage?.contextTokens !== undefined) this.liveContext = contextOf(usage)
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
     this.activeWaiter = undefined
