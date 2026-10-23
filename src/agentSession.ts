@@ -2199,11 +2199,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   // The turn ended with no frame that confirmed its opening message, or a steer it took: the turn
-  // answered them, so they are no longer waiting, and the history has them where the server
-  // recorded them.
+  // answered them, so they are no longer waiting. The opening message is where the server recorded
+  // it. A steer no frame placed (a stream with no lifecycle) stays as a question the turn took,
+  // where the turn ended, rather than leaving the screen.
   private dropAnsweredPending(): void {
     if (this.openingMessageId !== undefined) this.dropPending(this.openingMessageId)
-    for (const steered of this.steers) if (steered.taken) this.dropPending(steered.clientMessageId)
+    for (const steered of this.steers) {
+      if (steered.taken) this.confirmPending(steered.clientMessageId, Date.now())
+    }
   }
 
   private addPending(clientMessageId: string, text: string): void {
@@ -2223,9 +2226,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // with a lifecycle may be the tail of a turn before it, so it confirms nothing here.
   private confirmUnnamedOpening(event: AgentTaskEvent): void {
     if (asObject(event.payload)?.lifecycle !== undefined) return
-    const id = this.openingMessageId
+    if (this.openingMessageId !== undefined) {
+      this.confirmPending(this.openingMessageId, event.timestamp)
+    }
+  }
+
+  // The pending message becomes the question in `history`, where the session is now.
+  private confirmPending(id: string, at: number): void {
     const pending = this.pendingQuestions.find((item) => item.id === `live:user:${id}`)
-    if (id === undefined || pending?.kind !== "user") return
+    if (pending?.kind !== "user") return
     this.dropPending(id)
     this.livePiece(
       (item) => item.kind === "user" && item.clientMessageId === id,
@@ -2233,7 +2242,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         id: pending.id,
         kind: "user",
         text: pending.text,
-        at: liveAtOf(event),
+        at: new Date(at).toISOString(),
         clientMessageId: id,
       }),
       (item) => item,
@@ -2462,6 +2471,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failLiveChannel(observed: unknown, waiterError: Error): void {
+    // Every message in flight is rejected with it, so none is still on its way.
+    this.pendingQuestions = []
     this.recoveryGeneration += 1
     this.emitError("Agent live channel failed", observed)
     this.activeWaiter?.reject(waiterError)

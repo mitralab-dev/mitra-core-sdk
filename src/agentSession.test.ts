@@ -1558,6 +1558,31 @@ describe("Agent message pending until the box takes it", () => {
     expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
   })
 
+  it("keeps a message sent behind a pending one on a stream with no lifecycle after the turn", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("first")
+    session.send("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    expect(users(session).map((item) => [item.text, item.pending === true])).toEqual([
+      ["first", true],
+      ["second", true],
+    ])
+    source.emit(event("textDelta", { text: "answer" }))
+    source.emit(event("stepFinish", { reason: "stop" }))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(users(session).map((item) => item.text)).toEqual(["first", "second"])
+  })
+
+  it("takes the pending message out when the live channel fails for good", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    tasks.listMessages.mockRejectedValue(new Error("copilot down"))
+    source.disconnect(new Error("network"))
+    await vi.waitFor(() => expect(session.status).toBe("error"))
+    expect(users(session).map((item) => [item.text, item.pending === true])).toEqual([])
+  })
+
   it("takes the message out when the box cancels it before it ever showed in the queue", async () => {
     const { session, tasks, source } = createSession()
     const id = session.send("hello") ?? ""
