@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "current": "0.3.0-beta.2",
+  "current": "0.3.0",
   "versions": [
     {
       "version": "0.1.0",
