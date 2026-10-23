@@ -18,6 +18,7 @@ import type {
   AgentTurnUsage,
   CopilotProvider,
   CredentialUsage,
+  Page,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -915,9 +916,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private _connecting = false
   // The live `turnEnd`'s reading, until a history read brings the closing rows that hold it.
   private liveContext: AgentContextUsage | null = null
-  // The pages behind the newest one, read by `loadOlder`, oldest first: a reload of the newest page
-  // (an open, a recovery) replaces only what it covers.
-  private olderItems: AgentTimelineItem[] = []
   private historyPageSize = 50
   // Rows the Copilot has behind the oldest one read, and its row count at the last read. Rows only
   // ever enter at the newest end, so the count behind holds while new rows push the offsets.
@@ -1089,7 +1087,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       kinds: "all",
     })
     this.historyPageSize = options.limit ?? this.historyPageSize
-    this.olderItems = []
     this.liveContext = null
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
@@ -1151,10 +1148,25 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .map(toAgentTimelineItem)
       .filter((item) => !held.has(item.id))
     if (older.length === 0) return []
-    this.olderItems = [...older, ...this.olderItems]
     this._history = [...older, ...this._history]
     this.emit("historyLoaded", { history: this.history })
     return older
+  }
+
+  // A recovery reads the newest rows while the turn keeps writing them. The rows the history had
+  // stay behind that page when it reaches them; when more rows came in than the page holds, a gap
+  // would lie between the two, so the history starts over from the page and the rows behind it
+  // are read again by `loadOlder`. Either way, what is behind is what the history does not hold.
+  private keepNewestPage(page: Page<AgentMessage>): void {
+    const newest = [...page.content].reverse().map(toAgentTimelineItem)
+    const covered = new Set(newest.map((item) => item.id))
+    const gap = page.page.totalElements - this.historyTotal > newest.length
+    const held = gap
+      ? []
+      : this._history.filter((item) => !item.id.startsWith("live:") && !covered.has(item.id))
+    this._history = [...held, ...newest]
+    this.historyTotal = page.page.totalElements
+    this.olderRemaining = Math.max(0, this.historyTotal - this._history.length)
   }
 
   editQueueItem(id: string, text: string): void {
@@ -1619,10 +1631,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this.historyTotal = page.page.totalElements
-    const newest = [...page.content].reverse().map(toAgentTimelineItem)
-    const covered = new Set(newest.map((item) => item.id))
-    this._history = [...this.olderItems.filter((item) => !covered.has(item.id)), ...newest]
+    this.keepNewestPage(page)
     this.liveContext = null
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's

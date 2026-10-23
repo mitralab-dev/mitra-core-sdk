@@ -1705,6 +1705,55 @@ describe("Agent older history", () => {
     expect(texts(session)).toEqual(["text 3", "text 4", "text 5", "text 6"])
   })
 
+  // A recovery reads the newest 100 rows while the turn kept writing them.
+  async function recovered(rows: AgentMessage[], limit: number | undefined, written: number) {
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory(limit === undefined ? {} : { limit })
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const first = rows.length + 1
+    for (let n = first; n < first + written - 1; n += 1) rows.push(row(n))
+    rows.push({ ...closing(`m${first + written - 1}`, "last"), sequence: first + written - 1 })
+    source.disconnect(new Error("network"))
+    await result
+    return session
+  }
+
+  const numbers = (session: AgentTaskSession) =>
+    session.history.map((item) => Number(item.id.replace("m", "")))
+
+  it("keeps the rows of the page it had when the recovery's rows reach them", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 2, 100)
+
+    while (session.hasOlder) await session.loadOlder()
+
+    expect(numbers(session)).toEqual(Array.from({ length: 110 }, (_, n) => n + 1))
+  })
+
+  it("counts what is behind from the recovery's page when it covers more than the history had", async () => {
+    const rows = Array.from({ length: 200 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, undefined, 1)
+
+    await expect(session.loadOlder()).resolves.toHaveLength(50)
+    expect(numbers(session)).toEqual(Array.from({ length: 150 }, (_, n) => n + 52))
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 201 }, (_, n) => n + 1))
+  })
+
+  it("starts over from the recovery's page when a gap leaves the history it had behind", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 2, 150)
+
+    expect(numbers(session)).toEqual(Array.from({ length: 100 }, (_, n) => n + 61))
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 160 }, (_, n) => n + 1))
+  })
+
   it("keeps the older pages when a recovery reloads the newest rows", async () => {
     const rows = Array.from({ length: 4 }, (_, n) => row(n + 1))
     const tasks = pagedTasks(rows)
