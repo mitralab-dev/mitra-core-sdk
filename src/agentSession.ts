@@ -1923,7 +1923,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   ): void {
     const itemId = typeof payload?.itemId === "string" ? payload.itemId : undefined
     if (itemId === undefined) return
-    const piece = itemDeltaOf(payload).itemDelta ?? (typeof payload?.text === "string" ? payload.text : "")
+    const piece =
+      itemDeltaOf(payload).itemDelta ?? (typeof payload?.text === "string" ? payload.text : "")
     const itemKind = kind === "thinking" ? "reasoning" : "agent"
     const sequence = typeof event.sequence === "number" ? event.sequence : undefined
     this.livePiece(
@@ -1939,8 +1940,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
       }),
       (item) => {
         const held = item.lastSequence ?? item.sequence
-        if (!("text" in item) || (sequence !== undefined && held !== undefined && sequence <= held)) return item
-        return { ...item, text: item.text + piece, ...(sequence === undefined ? {} : { lastSequence: sequence }) }
+        if (!("text" in item) || (sequence !== undefined && held !== undefined && sequence <= held))
+          return item
+        return {
+          ...item,
+          text: item.text + piece,
+          ...(sequence === undefined ? {} : { lastSequence: sequence }),
+        }
       },
     )
   }
@@ -1951,7 +1957,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // The call and the result are each an item where it came, as the stream sends them and the
     // Copilot records them (two rows, as in 0.2.13): a result is not moved up onto its call.
     this.livePiece(
-      (item) => item.kind === "tool" && item.tool.toolId === toolId && item.tool.phase === tool.phase,
+      (item) =>
+        item.kind === "tool" && item.tool.toolId === toolId && item.tool.phase === tool.phase,
       () => ({
         id: tool.phase === "result" ? `live:tool:${toolId}:result` : `live:tool:${toolId}`,
         kind: "tool",
@@ -1960,7 +1967,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         ...(tool.sequence === undefined ? {} : { sequence: tool.sequence }),
         ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
       }),
-      (item) => (item.kind === "tool" ? { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input } } : item),
+      (item) =>
+        item.kind === "tool"
+          ? { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input } }
+          : item,
     )
   }
 
@@ -2025,7 +2035,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
     this.subagentsById.set(subagentId, subagent)
     // The call that spawned it carries its last state, as the history records it.
-    const index = this._history.findIndex((item) => item.kind === "tool" && item.tool.toolId === toolId)
+    const index = this._history.findIndex(
+      (item) => item.kind === "tool" && item.tool.toolId === toolId,
+    )
     const spawn = this._history[index]
     if (spawn?.kind === "tool") {
       this._history[index] = {
@@ -2036,7 +2048,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
           subagentId,
           status,
           ...(subagent.progress === undefined ? {} : { progress: subagent.progress }),
-          ...(subagent.childThreadId === undefined ? {} : { childThreadId: subagent.childThreadId }),
+          ...(subagent.childThreadId === undefined
+            ? {}
+            : { childThreadId: subagent.childThreadId }),
         },
       }
     }

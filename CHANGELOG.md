@@ -22,11 +22,11 @@ this release the new functions (queue, steer, background tasks) find nothing to 
   nothing of its own.
 - A message sent while a turn runs no longer waits in a local queue of the SDK: it goes to the box
   at once, with no mode by default. T3 decides, as its own composer does, steering it into the
-  running turn when the provider takes a steer and queueing it otherwise. `send(prompt, { mode:
-  "steer" })` takes it into the running turn on purpose (T3 refuses a steer while the turn is not
-  running yet) and `send(prompt, { mode: "queue" })` waits in T3's queue for a turn of its own. This
-  replaces the `mode: "steer"` that 0.3.0-beta.1 put on every message of the direct channel. A box
-  before this release ignores the field and lets T3 decide.
+  running turn when the provider takes a steer and queueing it otherwise.
+  `send(prompt, { mode: "steer" })` takes it into the running turn on purpose (T3 refuses a steer
+  while the turn is not running yet) and `send(prompt, { mode: "queue" })` waits in T3's queue for
+  a turn of its own. This replaces the `mode: "steer"` that 0.3.0-beta.1 put on every message of
+  the direct channel. A box before this release ignores the field and lets T3 decide.
 - `queue` and `queueChange` mirror T3's queue of the chat from the box's `messageQueued` frames (the
   ones with a `position`), with `position`, `queueHeld`, `sequence` and `turnId` as optional
   fields. A message leaves when a turn takes it (`stepStart` or `steer` naming its

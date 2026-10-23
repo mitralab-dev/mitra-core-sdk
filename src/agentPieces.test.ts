@@ -468,7 +468,10 @@ function historyList(session: AgentTaskSession): Piece[] {
   for (const item of session.history) {
     if (item.kind === "user") pieces.push({ key: `user:${item.clientMessageId}`, text: item.text })
     else if (item.kind === "agent" || item.kind === "reasoning") {
-      pieces.push({ key: pieceKey(item.kind === "agent" ? "text" : "reasoning", item.itemId, item.parentToolId), text: item.text })
+      pieces.push({
+        key: pieceKey(item.kind === "agent" ? "text" : "reasoning", item.itemId, item.parentToolId),
+        text: item.text,
+      })
     } else if (item.kind === "tool") {
       const key = `tool:${item.tool.toolId}`
       const result = item.tool.phase === "result" ? item.tool.content : undefined
@@ -485,7 +488,11 @@ describe("Agent conversation drawn from the session history alone", () => {
   const RUNNING_UNTIL = 11
 
   it("holds the question where the box took it and every piece as it grows, while the turn runs", async () => {
-    const live = manager([], 0, 0).session({ create: true, agentType: "CLAUDE", agentId: "agent-1" })
+    const live = manager([], 0, 0).session({
+      create: true,
+      agentType: "CLAUDE",
+      agentId: "agent-1",
+    })
     const first = live.send("Count birds")!
     await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
     const socket = BoxSocket.instances.at(-1)!
@@ -509,7 +516,9 @@ describe("Agent conversation drawn from the session history alone", () => {
       { key: "text:a2", text: "And cats" },
     ])
     // The call and the result are each an item where it came, as the reload has them.
-    const phases = live.history.flatMap((item) => (item.kind === "tool" && item.tool.toolId === "ct-1" ? [item.tool.phase] : []))
+    const phases = live.history.flatMap((item) =>
+      item.kind === "tool" && item.tool.toolId === "ct-1" ? [item.tool.phase] : [],
+    )
     expect(phases).toEqual(["call", "result"])
     live.close()
   })
@@ -521,7 +530,17 @@ describe("Agent conversation drawn from the session history alone", () => {
     ]
     const frames = conversation("first-id", "second-id")
     // [what the Copilot recorded, what the box had logged] when the page was reloaded.
-    const cuts: [number, number][] = [[1, 4], [2, 3], [3, 7], [4, 4], [6, 7], [7, 9], [9, 10], [10, 11], [11, 11]]
+    const cuts: [number, number][] = [
+      [1, 4],
+      [2, 3],
+      [3, 7],
+      [4, 4],
+      [6, 7],
+      [7, 9],
+      [9, 10],
+      [10, 11],
+      [11, 11],
+    ]
     const expected: Piece[] = [
       { key: "user:first-id", text: "Count birds" },
       { key: "reasoning:r1", text: "Birds first" },
@@ -533,11 +552,16 @@ describe("Agent conversation drawn from the session history alone", () => {
       { key: "user:second-id", text: "Also cats" },
       { key: "text:a2", text: "And cats" },
     ]
-    for (const [cursor, boxLogged] of [[RUNNING_UNTIL, RUNNING_UNTIL] as [number, number], ...cuts]) {
+    for (const [cursor, boxLogged] of [
+      [RUNNING_UNTIL, RUNNING_UNTIL] as [number, number],
+      ...cuts,
+    ]) {
       BoxSocket.instances = []
       BoxSocket.log = frames.slice(0, boxLogged)
       BoxSocket.hello = { threadId: "thread-1", lastSequence: boxLogged }
-      const fresh = manager(historyAt(frames, cursor, sent), boxLogged, 0).session({ taskId: "task-1" })
+      const fresh = manager(historyAt(frames, cursor, sent), boxLogged, 0).session({
+        taskId: "task-1",
+      })
       await vi.waitFor(() => expect(fresh.status).not.toBe("opening"))
       const socket = BoxSocket.instances.at(-1)!
       for (const frame of frames.slice(boxLogged, RUNNING_UNTIL)) socket.deliver(frame)
