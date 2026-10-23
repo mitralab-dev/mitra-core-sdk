@@ -2,87 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.3.0-beta.8
+## 0.3.0
 
-- A message sent while a turn runs goes with no mode by default, as before: T3 decides, as its own
-  composer does, steering it into the running turn when the provider takes a steer and queueing it
-  otherwise. `mode: "steer"` and `mode: "queue"` are asked on purpose; T3 refuses a steer while the
-  turn is not running yet.
-- The live `history` holds a tool's call and its result as two items, each where it came, as the
-  stream sends them and the reload (and 0.2.13) has them. An app that shows a tool as one line joins
-  them by `toolId`, as T3's own screen does.
-
-## 0.3.0-beta.7
-
-- A message sent while a turn runs goes into it by default (`mode: "steer"`), and a Stop ends it with
-  the turn. T3's queue is used on purpose: `send(prompt, { mode: "queue" })` waits there for a turn of
-  its own, and a Stop holds it, as T3's Stop does, until `resumeQueue()` (T3's `queue.resume`).
-
-## 0.3.0-beta.6
-
-- The question a turn opens enters `history` as the person wrote it, as the Copilot records it:
-  after a box that died, the box ran it with the recovered context ahead of it, and the live
-  question showed that context until the reload.
-
-## 0.3.0-beta.5
-
-- A message sent while a turn runs waits in T3's queue by default, as T3's composer does: it shows
-  in `queue` and enters `history` when its own turn starts. `send(prompt, { mode: "steer" })` takes
-  it into the running turn on purpose, and `steerQueueItem(id)` moves a queued message there with
-  T3's own `queued-message.promote-to-steer`. The message goes out with `mode: "queue"` or
-  `"steer"`; a box before this release ignores the field and lets T3 decide, as before.
-- `backgroundTasks` (and the event of the same name) is the work the provider keeps going in the
-  background as T3 shows it waiting: a background command, a Monitor, a subagent. It is state, not
-  history.
-
-## 0.3.0-beta.4
+This release consolidates the work published to npm as `0.3.0-beta.1` and `0.3.0-beta.2` (below)
+with what came after them. The history keeps the format of 0.2.13; against a box that predates
+this release the new functions (queue, steer, background tasks) find nothing to show.
 
 - `session.history` is the conversation as it happens: while a turn runs, the box's frames grow it
-  with the same items the Copilot records. The question enters where the box took it (its turn's
-  `stepStart` or the `steer` that took it in), each stretch of text or reasoning grows on the item
-  of its `itemId`, each tool is one item by `toolId` (its result lands on it), and the call that
-  spawned a subagent carries its last state. A piece the loaded history already has grows in place,
-  and a frame it already holds (a replay after a reconnect or an F5) changes nothing. The reload at
-  the turn's end brings back the same pieces in the same order. An app draws `history`, `queue` and
-  `subagents` and keeps nothing of its own.
-
-## 0.3.0-beta.3
-
-- History items carry `lastSequence` when the Copilot sends it: the box sequence of the last
-  chunk of a piece that came in more than one, while `sequence` is its first chunk, the same as
-  its live event. The F5 replay starts after the highest `lastSequence ?? sequence` of the newest
-  `boxLog`, so the replay does not repeat the end of a piece the history already has.
-- `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
-  takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
-  return is unaffected. The id also goes in the `POST /inputs` body when the message goes to the
-  Copilot, which keeps it and hands it to the box: `send` returns the id on every path.
-- The events the session already emits carry, as optional fields, what the box frame named:
-  `sequence`, `itemId`, `turnId` (the frame's `lifecycle.turnId`) and `parentToolId` on a
-  subagent's text and tools. `delta` and `subagentDelta` also carry `itemDelta`, the frame's piece
-  of its item without the separator 0.2.13 joined two text items with. `steered` also carries the steered message's `turnId`, `sequence` and
-  `clientMessageId`; `turnEnd` carries the `sequence` and `turnId` of its `stepFinish`. History
-  items carry what the Copilot recorded: `sequence`, `boxLog`, `itemId`, `parentToolId`,
-  `clientMessageId`, `subagent` and `reason`. `subagent` has the shape of the box's
-  `subagentUpdate` (`AgentSubagentFrame`, partial); a tool item keeps `parentToolId` on `tool`
-  only. The history is the stream as the Copilot recorded it, one row per piece: `loadHistory`
-  asks for every row with `kinds=all` (new `AgentMessageListOptions.kinds`, which `listMessages`
-  sends as a query parameter), and each row becomes its own item. A `REASONING` row is an item of
-  the new kind `reasoning`; a `SUBAGENT_TEXT` row is an `agent` item with `parentToolId`; a
-  subagent's tools are `tool` items; `APPROVAL` and `USER_INPUT_REQUEST` rows are items of the new
-  kinds `approval` and `userInputRequest`, with the payload of the box frame as it came (the same
-  that reaches the session live as `raw`). A lost turn is recovered with `kinds=all` too, so
-  `history` keeps every piece, and reads its answer only from the chat's own `TEXT`, `ERROR` and
-  `TOOL_USE` rows. With `kinds=all` a question still waiting in the queue is not in the
-  history: it shows in `queue` until its turn starts. `turnStart` opened by the box's `stepStart`
-  carries the `text` and `clientMessageId` of the message whose turn it is, with `sequence`,
-  `itemId` and `turnId`: the question reaches the app there also when the history does not have it
-  yet. A message sent once the box took the opening one, before that admission reached the
-  sending code, goes out as a message of its own, as it does with the frames spaced out. Without the parameter the Copilot answers the rows 0.2.13
-  read. Nothing is derived or attached: a frame or row without a field leaves it out.
-- A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
-  box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
-  leaves `status` and `content` alone and, on the direct channel, does not mark the chat as in a
-  turn: it used to be dropped.
+  with the same items the Copilot records, in the box's order. The question enters where the box
+  took it (its turn's `stepStart` or the `steer` that took it in), as the person wrote it, as the
+  Copilot records it: after a box that died, the box ran it with the recovered context ahead of it,
+  and the live question no longer shows that context. Each stretch of text or reasoning grows on
+  the item of its `itemId`. A tool's call and its result are two items, each where it came, as the
+  stream sends them and the reload (and 0.2.13) has them; an app that shows a tool as one line
+  joins them by `toolId`, as T3's own screen does. The call that spawned a subagent carries its
+  last state. A piece the loaded history already has grows in place, and a frame it already holds
+  (a replay after a reconnect or an F5) changes nothing. The reload at the turn's end brings back
+  the same pieces in the same order. An app draws `history`, `queue` and `subagents` and keeps
+  nothing of its own.
+- A message sent while a turn runs no longer waits in a local queue of the SDK: it goes to the box
+  at once, with no mode by default. T3 decides, as its own composer does, steering it into the
+  running turn when the provider takes a steer and queueing it otherwise. `send(prompt, { mode:
+  "steer" })` takes it into the running turn on purpose (T3 refuses a steer while the turn is not
+  running yet) and `send(prompt, { mode: "queue" })` waits in T3's queue for a turn of its own. This
+  replaces the `mode: "steer"` that 0.3.0-beta.1 put on every message of the direct channel. A box
+  before this release ignores the field and lets T3 decide.
 - `queue` and `queueChange` mirror T3's queue of the chat from the box's `messageQueued` frames (the
   ones with a `position`), with `position`, `queueHeld`, `sequence` and `turnId` as optional
   fields. A message leaves when a turn takes it (`stepStart` or `steer` naming its
@@ -90,35 +34,92 @@ All notable changes to this project are documented in this file.
   and `cancelled: true`, no terminal) or when it ends before running; that end rejects only its
   own `sendAndWait` and ends no turn, as in T3: when it is the message that opened this session's
   turn, the session follows its next queued message once the box starts it, or goes back to
-  `idle` with no `turnEnd` when none is left. A refusal of a queue command (an `error` with `command`)
-  is only emitted as `error` and fails no turn. On the direct channel, a queued message's frames
-  and a terminal naming another turn than the followed one never change the turn a redial
-  resumes or the one closed as interrupted when the box goes away. `removeQueueItem` sends `queued-run.cancel`,
-  `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel per queued message,
-  on the box channel only. The methods are no longer deprecated; their signatures are unchanged.
+  `idle` with no `turnEnd` when none is left. A refusal of a queue command (an `error` with
+  `command`) is only emitted as `error` and fails no turn. On the direct channel, a queued
+  message's frames and a terminal naming another turn than the followed one never change the turn
+  a redial resumes or the one closed as interrupted when the box goes away. The queue methods are
+  no longer deprecated and their signatures are unchanged: `removeQueueItem` sends
+  `queued-run.cancel`, `editQueueItem` sends `queued-run.edit` and `clearQueue` sends one cancel
+  per queued message, on the box channel only. `steerQueueItem(id)` moves a queued message into
+  the running turn with T3's `queued-message.promote-to-steer`. A Stop holds the queue, as T3's
+  Stop does, until `resumeQueue()` (T3's `queue.resume`).
+- `backgroundTasks` (and the event of the same name) is the work the provider keeps going in the
+  background as T3 shows it waiting: a background command, a Monitor, a subagent. It is state, not
+  history.
+- `send` returns the `clientMessageId` the message goes out with, the id the box echoes when it
+  takes the message; `undefined` for a blank prompt, which is not sent. A caller that ignores the
+  return is unaffected. The id also goes in the `POST /inputs` body when the message goes to the
+  Copilot, which keeps it and hands it to the box: `send` returns the id on every path.
+- The history is the stream as the Copilot recorded it, one row per piece: `loadHistory` asks for
+  every row with `kinds=all` (new `AgentMessageListOptions.kinds`, which `listMessages` sends as a
+  query parameter), and each row becomes its own item. A `REASONING` row is an item of the new
+  kind `reasoning`; a `SUBAGENT_TEXT` row is an `agent` item with `parentToolId`; a subagent's
+  tools are `tool` items; `APPROVAL` and `USER_INPUT_REQUEST` rows are items of the new kinds
+  `approval` and `userInputRequest`, with the payload of the box frame as it came (the same that
+  reaches the session live as `raw`). History items carry what the Copilot recorded: `sequence`,
+  `lastSequence`, `boxLog`, `itemId`, `parentToolId`, `clientMessageId`, `subagent` and `reason`.
+  `subagent` has the shape of the box's `subagentUpdate` (`AgentSubagentFrame`, partial); a tool
+  item keeps `parentToolId` on `tool` only. A lost turn is recovered with `kinds=all` too, and
+  reads its answer only from the chat's own `TEXT`, `ERROR` and `TOOL_USE` rows. A question still
+  waiting in the queue is not in the history: it shows in `queue` until its turn starts. Without
+  the parameter the Copilot answers the rows 0.2.13 read. Nothing is derived or attached: a frame
+  or row without a field leaves it out.
+- The events the session already emits carry, as optional fields, what the box frame named:
+  `sequence`, `itemId`, `turnId` (the frame's `lifecycle.turnId`) and `parentToolId` on a
+  subagent's text and tools. `delta` and `subagentDelta` also carry `itemDelta`, the frame's piece
+  of its item without the separator 0.2.13 joined two text items with. `steered` also carries the
+  steered message's `turnId`, `sequence` and `clientMessageId`; `turnEnd` carries the `sequence`
+  and `turnId` of its `stepFinish`. `turnStart` opened by the box's `stepStart` carries the `text`
+  and `clientMessageId` of the message whose turn it is, with `sequence`, `itemId` and `turnId`:
+  the question reaches the app there also when the history does not have it yet.
 - `session({ taskId })` opened in the middle of a run asks the box for the replay from where the
-  loaded history ends (the highest `sequence` of its newest `boxLog`), with the request the redial
-  already makes, before any live frame: what the Copilot has not recorded yet reaches the session
-  and nothing the history has comes twice. When the channel's `boxLog` (new optional field of
-  `AgentTaskChannel`) is another log than the history's newest, the replay starts at the box log's
-  beginning. On the socket the same decision as the redial is made from the box's `hello`: a
-  `lastSequence` short of the history's end is another log too. The channel cursor starts at the
-  replay point, so a drop in the middle of the replay asks again for what did not arrive. A
-  history without `sequence` asks for no replay, as before. A turn the replay opens
+  loaded history ends (the highest `lastSequence ?? sequence` of its newest `boxLog`), with the
+  request the redial already makes, before any live frame: what the Copilot has not recorded yet
+  reaches the session and nothing the history has comes twice. When the channel's `boxLog` (new
+  optional field of `AgentTaskChannel`) is another log than the history's newest, the replay
+  starts at the box log's beginning. On the socket the same decision as the redial is made from
+  the box's `hello`: a `lastSequence` short of the history's end is another log too. The channel
+  cursor starts at the replay point, so a drop in the middle of the replay asks again for what did
+  not arrive. A history without `sequence` asks for no replay, as before. A turn the replay opens
   keeps the session `streaming` after the open. The event source gets the cursor as a fifth,
   optional `open` argument, which a concrete SDK may ignore.
 - The queue and subagent state the box sends again after a replay, each a copy of the line that
   said it last with that line's `sequence`, is taken as state: a copy of what the session already
   holds emits no `queueChange` or `subagent` again, and on a fresh open it fills `queue` and
   `subagents`.
+- A `toolResult` that comes after its turn ended (a background subagent settling later, sent by the
+  box under the turn that called it) is emitted as that tool's `tool` result. It opens no turn,
+  leaves `status` and `content` alone and, on the direct channel, does not mark the chat as in a
+  turn: it used to be dropped.
 - A `stepStart` naming a turn while no turn runs starts that turn with its content clean, and
   `accepted` is emitted at the frame that names the message (`stepStart`, `steer` or
   `messageQueued`). A message sent right after a `turnEnd`, before the previous admission was
   heard, no longer takes the text of the turn that ended, and a turn whose frames arrive in one
   tick gives the same events as one whose frames arrive spaced out. A turn the agent opens by
-  itself no longer carries the previous turn's text in `turnEnd.content`.
+  itself no longer carries the previous turn's text in `turnEnd.content`. A message sent once the
+  box took the opening one, before that admission reached the sending code, goes out as a message
+  of its own.
 
-## 0.3.0
+## 0.3.0-beta.2
+
+- `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
+  Messenger's `POST /api/v1/messages/send` as a `RAW` payload on the `EMAIL` channel and resolves
+  with the `messageId` of the accepted message. There is no `from`: Messenger sends with the
+  sender of the app in the token, so only the app's backend sends (a token exchanged from an api
+  key or the Server Function token). `to`, `cc` and `bcc` are lists with one address per entry;
+  absent optional fields are left out of the body.
+- Recipient limits, the app's daily quota and the token check stay on Messenger. Their errors
+  (`400` above Messenger's recipient cap, `429` with `Retry-After` above the quota, `403` for an
+  app end-user token) come from the transport unchanged.
+- `apps.update()` takes `emailLoginEnabled` and `passwordLoginEnabled`, sent on Code Studio's
+  `PATCH /api/v1/apps/{id}` only when supplied, so omission keeps the current value. Code Studio
+  rejects `passwordLoginEnabled: true` while the app inherits the platform login, with a `400`
+  and `PASSWORD_LOGIN_REQUIRES_EXCLUSIVE_MODE`, which comes from the transport unchanged.
+- `AppDefinition` and `AppSummary` carry both fields when Code Studio returns them. The response
+  validator accepts their absence, as a Code Studio that predates them sends, and rejects a value
+  that is not a boolean.
+
+## 0.3.0-beta.1
 
 Rollout gate: this version goes into the app SDKs (`@mitralab.io/platform-sdk` and the Functions
 SDK) only once the environment has no old agent box left, that is, no box still running on the

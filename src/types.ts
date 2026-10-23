@@ -638,6 +638,13 @@ export interface AppUpdateInput {
   icon?: string
   /** Whether users may sign up through this app. Omission preserves the current value. */
   allowSignup?: boolean
+  /** Whether users may sign in with a code sent by email. Omission preserves the current value. */
+  emailLoginEnabled?: boolean
+  /**
+   * Whether users may sign in with a password. Omission preserves the current value. Code Studio
+   * rejects `true` while the app inherits the platform login.
+   */
+  passwordLoginEnabled?: boolean
 }
 
 export interface AppDomain {
@@ -661,6 +668,10 @@ export interface AppSummary {
   template: string | null
   planId: string
   allowSignup: boolean
+  /** Absent on a Code Studio that predates email login. */
+  emailLoginEnabled?: boolean
+  /** Absent on a Code Studio that predates password login. */
+  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -682,6 +693,10 @@ export interface AppDefinition {
   planId: string
   template: string | null
   allowSignup: boolean
+  /** Absent on a Code Studio that predates email login. */
+  emailLoginEnabled?: boolean
+  /** Absent on a Code Studio that predates password login. */
+  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -1476,8 +1491,28 @@ export interface AgentConnection {
 }
 
 export interface MessageAccepted {
-  /** Identifier assigned by Messenger to the accepted notification. */
+  /** Identifier assigned by Messenger to the accepted message. */
   messageId: string
+}
+
+/**
+ * Email sent with the app's sender. There is no `from` because Messenger picks the sender from
+ * the app in the token, and only the app's backend sends: a token exchanged from an api key or
+ * the Server Function token. An app end-user token is refused with `403`. Recipient and content
+ * rules, such as Messenger's cap on recipients across `to`, `cc` and `bcc`, are enforced there.
+ */
+export interface SendEmailInput {
+  /** One address per entry. */
+  to: string[]
+  /** One address per entry. */
+  cc?: string[]
+  /** One address per entry. */
+  bcc?: string[]
+  replyTo?: string
+  subject: string
+  html: string
+  /** Plain-text alternative for clients that do not render HTML. */
+  text?: string
 }
 
 export interface AppContext {

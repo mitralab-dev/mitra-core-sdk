@@ -248,6 +248,7 @@ export type {
   QueryResult,
   SchemaScope,
   SchemaTables,
+  SendEmailInput,
   TableColumn,
   TableDefinition,
   TableForeignKey,

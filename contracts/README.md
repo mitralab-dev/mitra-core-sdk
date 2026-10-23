@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.0-beta.2` is the `0.3.0-beta.1` parity surface republished with `messenger.sendEmail()` and the
+  `emailLoginEnabled` and `passwordLoginEnabled` fields of `apps.update()`, which the parity cases do
+  not cover. Same parity cases; the version exists so a consumer pinning the package can pin a corpus
+  with the same number.
+
 - `0.3.0-beta.1` is the `0.3.0` parity surface published as a beta: the agent session that holds
   no messages. Same parity cases; the version exists so a consumer pinning the package can pin a
   corpus with the same number. `0.3.0-beta.0` shipped the same code without its own corpus and has
