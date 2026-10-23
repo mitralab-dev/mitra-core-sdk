@@ -2923,6 +2923,27 @@ describe("Agent box coming up", () => {
     expect(changes).toEqual([true, false])
   })
 
+  it("takes the pending message out when the box refuses it", async () => {
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const errors: unknown[] = []
+    session.on("error", (error) => errors.push(error))
+
+    const id = session.send("Over quota")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    expect(session.history).toEqual([
+      expect.objectContaining({ clientMessageId: id, pending: true }),
+    ])
+    FakeWebSocket.last().receive("error", {
+      code: "PLAN_LIMIT",
+      message: "Plan limit reached",
+      clientMessageId: id,
+    })
+
+    await vi.waitFor(() => expect(session.history).toEqual([]))
+    expect(errors).toEqual([expect.objectContaining({ code: "PLAN_LIMIT" })])
+  })
+
   it("is connecting again while it redials a box that dropped mid-turn", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer(BOX_URL, 3))

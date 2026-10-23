@@ -1546,6 +1546,7 @@ describe("Agent message pending until the box takes it", () => {
     )
 
     await session.loadHistory()
+    expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
     source.emit({
       ...event("stepStart", {
         text: "hello",
@@ -1555,6 +1556,23 @@ describe("Agent message pending until the box takes it", () => {
     })
 
     expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
+  })
+
+  it("takes the message out when the box cancels it before it ever showed in the queue", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(
+      event("messageQueued", {
+        clientMessageId: id,
+        position: null,
+        cancelled: true,
+        lifecycle: { clientMessageId: id },
+      }),
+    )
+
+    expect(users(session)).toEqual([])
   })
 
   it("takes the message out of the conversation when the send fails", async () => {

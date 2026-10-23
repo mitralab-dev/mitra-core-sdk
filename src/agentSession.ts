@@ -1304,11 +1304,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         return false
       })
-      .then((admitted) => {
-        // Refused by the box, or never sent: as T3 does, it leaves the conversation.
-        if (!admitted) this.dropPending(clientMessageId)
-        return admitted
-      })
       .finally(() => {
         handedOver()
         // A later message may be dispatching already: the box took this one before it ended here.
