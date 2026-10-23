@@ -2475,7 +2475,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failLiveChannel(observed: unknown, waiterError: Error): void {
-    // Every message in flight is rejected with it, so none is still on its way.
+    // The session stops following the chat, so nothing it shows as on its way would ever settle.
+    // A message the Copilot already took may still run once the box is back; a reload has it.
     this.pendingQuestions = []
     this.recoveryGeneration += 1
     this.emitError("Agent live channel failed", observed)

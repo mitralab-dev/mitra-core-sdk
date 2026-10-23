@@ -16,7 +16,9 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   another is still pending (several in a row while a cold box boots) is pending too, in order, and
   leaves by the same rules, a `steer` naming it included; on a stream with no lifecycle it becomes a
   confirmed question at the end of the turn that took it. A live channel that fails for good takes
-  every pending message out with its error. It leaves for the item the
+  every pending message out with its error, since the session stops following the chat; one the
+  Copilot already accepted may still run once the box is back, and a reload brings it with its
+  answer. It leaves for the item the
   box confirms (`stepStart` naming it, or naming none), for `queue` when T3 queues it, or on a
   failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
   it never shows twice. Visible change from 0.3.0: an app that draws its own optimistic message
