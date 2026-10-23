@@ -1854,6 +1854,74 @@ describe("Agent older history", () => {
     expect(numbers(session)).toEqual(Array.from({ length: 160 }, (_, n) => n + 1))
   })
 
+  // The older pages wait on `release` while the test moves the history under them.
+  function blockedOlder(rows: AgentMessage[]) {
+    const tasks = pagedTasks(rows)
+    const inner = tasks.listMessages.getMockImplementation()!
+    const gate: { block: Promise<void> | null; release: () => void } = {
+      block: null,
+      release: () => undefined,
+    }
+    tasks.listMessages.mockImplementation(async (id, options = {}) => {
+      if (options.page !== undefined && gate.block) await gate.block
+      return inner(id, options)
+    })
+    const hold = () => {
+      gate.block = new Promise<void>((resolve) => {
+        gate.release = () => {
+          gate.block = null
+          resolve()
+        }
+      })
+    }
+    return { tasks, hold, release: () => gate.release() }
+  }
+
+  it("reads behind the new history when called again while a read of the old one is still out", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const { tasks, hold, release } = blockedOlder(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    hold()
+    const stale = session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    for (let n = 11; n < 160; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m160", "last"), sequence: 160 })
+    source.disconnect(new Error("network"))
+    await result
+    const loaded = vi.fn()
+    session.on("historyLoaded", loaded)
+
+    const next = session.loadOlder()
+    release()
+
+    await expect(stale).resolves.toEqual([])
+    await expect(next).resolves.toHaveLength(2)
+    expect(loaded).toHaveBeenCalledOnce()
+    expect(numbers(session)).toEqual(Array.from({ length: 102 }, (_, n) => n + 59))
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("lets nothing of a read still out enter once loadHistory replaced the history", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const { tasks, hold, release } = blockedOlder(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    hold()
+    const older = session.loadOlder()
+
+    await session.loadHistory({ limit: 2 })
+    release()
+
+    await expect(older).resolves.toEqual([])
+    expect(numbers(session)).toEqual([9, 10])
+    expect(session.hasOlder).toBe(true)
+  })
+
   it("has nothing older after a recovery when the history held every row", async () => {
     const rows = Array.from({ length: 150 }, (_, n) => row(n + 1))
     const session = await recovered(rows, 150, 60)

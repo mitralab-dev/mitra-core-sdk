@@ -924,6 +924,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Moves whenever the history is replaced, so a `loadOlder` still reading drops what it read.
   private historyGeneration = 0
   private olderPromise: Promise<readonly AgentTimelineItem[]> | null = null
+  private olderGeneration = 0
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
 
@@ -1104,10 +1105,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   loadOlder(): Promise<readonly AgentTimelineItem[]> {
-    if (!this.olderPromise) {
-      this.olderPromise = this.readOlder().finally(() => {
-        this.olderPromise = null
+    // A read of a history since replaced resolves with nothing: a new call reads behind this one.
+    if (!this.olderPromise || this.olderGeneration !== this.historyGeneration) {
+      const promise = this.readOlder().finally(() => {
+        if (this.olderPromise === promise) this.olderPromise = null
       })
+      this.olderPromise = promise
+      this.olderGeneration = this.historyGeneration
     }
     return this.olderPromise
   }
