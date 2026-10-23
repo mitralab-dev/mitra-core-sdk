@@ -1501,7 +1501,7 @@ describe("Agent message pending until the box takes it", () => {
   }
 
   function users(session: AgentTaskSession) {
-    return session.history.filter((item) => item.kind === "user")
+    return session.history.flatMap((item) => (item.kind === "user" ? [item] : []))
   }
 
   it("shows the message at send and keeps one item once the box echoes it", async () => {
@@ -1775,6 +1775,66 @@ describe("Agent older history", () => {
     expect(numbers(session)).toEqual(Array.from({ length: 150 }, (_, n) => n + 52))
     while (session.hasOlder) await session.loadOlder()
     expect(numbers(session)).toEqual(Array.from({ length: 201 }, (_, n) => n + 1))
+  })
+
+  it("leaves no hole when loadOlder moved the total before the recovery", async () => {
+    const rows = Array.from({ length: 200 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory()
+    for (let n = 201; n <= 230; n += 1) rows.push(row(n))
+    await session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    for (let n = 231; n < 330; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m330", "last"), sequence: 330 })
+    source.disconnect(new Error("network"))
+    await result
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 330 }, (_, n) => n + 1))
+  })
+
+  it("drops what a loadOlder in flight read when a recovery starts the history over", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    let release!: () => void
+    let block: Promise<void> | null = null
+    const base = pagedTasks(rows)
+    const inner = base.listMessages.getMockImplementation()!
+    base.listMessages.mockImplementation(async (id, options = {}) => {
+      if (options.page !== undefined && block) await block
+      return inner(id, options)
+    })
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks: base, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    block = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const older = session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(base.sendInput).toHaveBeenCalledOnce())
+    for (let n = 11; n < 160; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m160", "last"), sequence: 160 })
+    source.disconnect(new Error("network"))
+    await result
+    block = null
+    release()
+    await older
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 160 }, (_, n) => n + 1))
+  })
+
+  it("has nothing older after a recovery when the history held every row", async () => {
+    const rows = Array.from({ length: 150 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 150, 60)
+
+    expect(session.hasOlder).toBe(false)
+    expect(numbers(session)).toEqual(Array.from({ length: 210 }, (_, n) => n + 1))
   })
 
   it("starts over from the recovery's page when a gap leaves the history it had behind", async () => {

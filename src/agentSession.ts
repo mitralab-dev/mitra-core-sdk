@@ -921,6 +921,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // ever enter at the newest end, so the count behind holds while new rows push the offsets.
   private olderRemaining = 0
   private historyTotal = 0
+  // Moves whenever the history is replaced, so a `loadOlder` still reading drops what it read.
+  private historyGeneration = 0
   private olderPromise: Promise<readonly AgentTimelineItem[]> | null = null
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
@@ -1087,6 +1089,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       kinds: "all",
     })
     this.historyPageSize = options.limit ?? 50
+    this.historyGeneration += 1
     this.liveContext = null
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
@@ -1115,33 +1118,38 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // the offset they moved it to.
   private async readOlder(): Promise<readonly AgentTimelineItem[]> {
     const size = this.historyPageSize
+    const generation = this.historyGeneration
+    let total = this.historyTotal
+    let remaining = this.olderRemaining
     // Newest first, as the pages come: the rows right behind `history`, up to one page of them.
     const rows: AgentMessage[] = []
-    while (this._taskId && this.olderRemaining > 0 && rows.length < size && !this.isClosed()) {
-      const number = Math.floor((this.historyTotal - this.olderRemaining) / size)
+    while (this._taskId && remaining > 0 && rows.length < size && !this.isClosed()) {
+      const number = Math.floor((total - remaining) / size)
       const page = await this.dependencies.tasks.listMessages(this._taskId, {
         page: number,
         size,
         sort: "createdAt,desc",
         kinds: "all",
       })
-      const moved = page.page.totalElements !== this.historyTotal
-      this.historyTotal = page.page.totalElements
-      const first = this.historyTotal - this.olderRemaining - number * size
+      // A recovery or a `loadHistory` replaced the history meanwhile: what was read is behind
+      // another history, and the new one says on its own what is behind it.
+      if (generation !== this.historyGeneration) return []
+      const moved = page.page.totalElements !== total
+      total = page.page.totalElements
+      const first = total - remaining - number * size
       if (first >= page.content.length) {
         // Rows recorded meanwhile pushed the ones behind past this page; a page that comes short
         // with no new rows is the Copilot holding fewer rows than it counted.
         if (moved) continue
-        this.olderRemaining = 0
+        remaining = 0
         break
       }
-      const taken = page.content.slice(
-        first,
-        first + Math.min(this.olderRemaining, size - rows.length),
-      )
+      const taken = page.content.slice(first, first + Math.min(remaining, size - rows.length))
       rows.push(...taken)
-      this.olderRemaining -= taken.length
+      remaining -= taken.length
     }
+    this.historyTotal = total
+    this.olderRemaining = remaining
     const held = new Set(this._history.map((item) => item.id))
     const older = rows
       .reverse()
@@ -1154,16 +1162,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   // A recovery reads the newest rows while the turn keeps writing them. The rows the history had
-  // stay behind that page when it reaches them; when more rows came in than the page holds, a gap
-  // would lie between the two, so the history starts over from the page and the rows behind it
-  // are read again by `loadOlder`. Either way, what is behind is what the history does not hold.
+  // stay behind that page when it shares a row with them; with none in common there may be rows
+  // between the two, so the history starts over from the page and `loadOlder` reads again what is
+  // behind it. Either way, what is behind is what the history does not hold.
   private keepNewestPage(page: Page<AgentMessage>): void {
     const newest = [...page.content].reverse().map(toAgentTimelineItem)
     const covered = new Set(newest.map((item) => item.id))
-    const gap = page.page.totalElements - this.historyTotal > newest.length
-    const held = gap
-      ? []
-      : this._history.filter((item) => !item.id.startsWith("live:") && !covered.has(item.id))
+    const loaded = this._history.filter((item) => !item.id.startsWith("live:"))
+    const touches = loaded.some((item) => covered.has(item.id))
+    const held = touches ? loaded.filter((item) => !covered.has(item.id)) : []
+    this.historyGeneration += 1
     this._history = [...held, ...newest]
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, this.historyTotal - this._history.length)

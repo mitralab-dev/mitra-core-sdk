@@ -33,8 +33,9 @@ first text came, which 0.3.0 did not add. Everything else is additive.
 - `session.loadOlder()` and `session.hasOlder`: the page behind the oldest item `history` holds, in
   the size `loadHistory` used, put before it in the box's order with nothing repeated or skipped
   when rows were recorded since (the page's total says where the older rows start). A turn
-  recovery, which reads the newest 100 rows, keeps what `history` held behind them when they reach
-  it, and starts over from them when more rows came in than the page holds, leaving no gap.
+  recovery, which reads the newest 100 rows, keeps what `history` held behind them when the page
+  shares a row with it, and otherwise starts over from the page, for `loadOlder` to read the rest
+  again; a `loadOlder` still reading when the history is replaced drops what it read.
 - `session.context`: `{ contextTokens, contextWindow? }` from the last turn that reported it (the
   live `turnEnd`, or the newest `history` item whose usage has it), null before any. The box sends
   it when a turn ends, so it does not move while a turn runs.
