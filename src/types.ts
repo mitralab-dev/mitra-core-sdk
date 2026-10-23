@@ -1215,8 +1215,8 @@ export type AgentTaskInput =
       reasoningEffort?: string
       /**
        * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
-       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot does
-       * not take the field.
+       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot hands
+       * it to a box it reaches live; one before mitra-copilot#535 ignores it.
        */
       mode?: "queue" | "steer"
       /**

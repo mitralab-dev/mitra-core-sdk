@@ -1700,19 +1700,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
-    // echoes it as on the direct channel.
+    // The Copilot keeps the `clientMessageId` and hands it to the box, which echoes it as on the
+    // direct channel, and hands the `mode` on as the channel would send it.
     const id = clientMessageId === undefined ? {} : { clientMessageId }
+    const mode = input.type === "message" && input.mode ? { mode: input.mode } : {}
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content, ...id }
+          ? { type: "message", content: input.content, ...mode, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...mode,
               ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.

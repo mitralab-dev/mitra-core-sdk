@@ -1843,3 +1843,22 @@ describe("Agent timeline for the screen", () => {
     ])
   })
 })
+
+describe("Agent message mode over the Copilot", () => {
+  it("hands the mode to the Copilot with or without a turn running, and none when not asked", async () => {
+    const { session, tasks, source } = createSession()
+    const first = session.send("first", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("stepStart", { lifecycle: { turnId: "t", clientMessageId: first } }))
+
+    session.send("into it", { mode: "steer", agentType: "CODEX" })
+    session.send("let T3 decide")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "message", content: "first", mode: "queue", clientMessageId: first },
+      { type: "message", content: "into it", mode: "steer", clientMessageId: expect.any(String) },
+      { type: "message", content: "let T3 decide", clientMessageId: expect.any(String) },
+    ])
+  })
+})
