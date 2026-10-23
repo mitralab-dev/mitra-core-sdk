@@ -1,0 +1,165 @@
+[
+  {
+    "event": "historyLoaded",
+    "payload": {
+      "history": [
+        {
+          "id": "m-1",
+          "kind": "user",
+          "text": "Hi",
+          "at": "2026-01-01T00:00:01Z"
+        }
+      ]
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "streaming"
+    }
+  },
+  {
+    "event": "turnStart",
+    "payload": {}
+  },
+  {
+    "event": "accepted",
+    "payload": {}
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Let me look.\n\n",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "command_execution",
+      "phase": "call",
+      "timestamp": 1760600000050,
+      "toolId": "tool-1",
+      "input": {
+        "command": "ls"
+      }
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "command_execution",
+      "phase": "result",
+      "timestamp": 1760600000060,
+      "toolId": "tool-1",
+      "content": "a.txt\nb.txt"
+    }
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Two files.",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "turnEnd",
+    "payload": {
+      "task": {
+        "id": "task-1",
+        "appId": "app-1",
+        "agentId": "agent-1",
+        "userId": "user-1",
+        "title": "Task",
+        "agentType": "CLAUDE",
+        "reasoningEffort": null,
+        "scope": null,
+        "archived": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      "content": "Let me look.\n\nTwo files.",
+      "reason": "stop",
+      "usage": {
+        "inputTokens": 1000,
+        "outputTokens": 80,
+        "cacheReadTokens": 200,
+        "durationMs": 2500,
+        "model": "fake-model",
+        "provider": "claudeAgent"
+      }
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "streaming"
+    }
+  },
+  {
+    "event": "turnStart",
+    "payload": {}
+  },
+  {
+    "event": "accepted",
+    "payload": {}
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Once upon a time",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": ", the end.",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "turnEnd",
+    "payload": {
+      "task": {
+        "id": "task-1",
+        "appId": "app-1",
+        "agentId": "agent-1",
+        "userId": "user-1",
+        "title": "Task",
+        "agentType": "CLAUDE",
+        "reasoningEffort": null,
+        "scope": null,
+        "archived": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      "content": "Once upon a time, the end.",
+      "reason": "stop"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "closed"
+    }
+  }
+]

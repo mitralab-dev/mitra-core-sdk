@@ -165,6 +165,7 @@ describe("Agent task session", () => {
       content: "Analyze",
       agentType: "CODEX",
       reasoningEffort: "high",
+      clientMessageId: expect.any(String),
     })
 
     source.emit(event("textDelta", { text: "Hello " }))
@@ -234,7 +235,11 @@ describe("Agent task session", () => {
     session.send("hi")
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hi",
+      clientMessageId: expect.any(String),
+    })
     expect(session.status).toBe("closed")
     expect(source.taskIds).toEqual([])
   })
@@ -251,7 +256,11 @@ describe("Agent task session", () => {
     resolveCreate(TASK)
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
 
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hi" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hi",
+      clientMessageId: expect.any(String),
+    })
     expect(source.taskIds).toEqual([])
   })
 
@@ -333,6 +342,7 @@ describe("Agent task session", () => {
     expect(tasks.sendInput).toHaveBeenLastCalledWith("task-1", {
       type: "message",
       content: "second",
+      clientMessageId: expect.any(String),
     })
     expect(session.queue).toEqual([])
 
@@ -396,11 +406,11 @@ describe("Agent task session", () => {
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
-      { type: "message", content: "first" },
+      { type: "message", content: "first", clientMessageId: expect.any(String) },
     ])
   })
 
-  it("keeps the queue API as an empty no-op and sends every message at once", async () => {
+  it("holds no queue of its own and sends every message at once", async () => {
     vi.useFakeTimers()
     try {
       const { session, source, tasks } = createSession()
@@ -415,13 +425,14 @@ describe("Agent task session", () => {
       for (let index = 0; index < 20; index += 1) session.send(`steer-${index}`)
       await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(21))
       expect(tasks.sendInput.mock.calls.slice(1).map(([, input]) => input)).toEqual(
-        Array.from({ length: 20 }, (_, index) => ({ type: "message", content: `steer-${index}` })),
+        Array.from({ length: 20 }, (_, index) => ({
+          type: "message",
+          content: `steer-${index}`,
+          clientMessageId: expect.any(String),
+        })),
       )
       expect(errors).toEqual([])
-      expect(session.queue).toEqual([])
-      session.editQueueItem("q-1", "edited")
-      session.removeQueueItem("q-1")
-      session.clearQueue()
+      // The session holds no queue of its own: only T3's, which the box reports.
       expect(session.queue).toEqual([])
       expect(queueChanges).not.toHaveBeenCalled()
       // Only the box has subagents: without its channel nothing goes out.
@@ -587,6 +598,38 @@ describe("Agent task session", () => {
     expect(tools).toEqual(["call", "result"])
   })
 
+  it("does not end a turn the box named with a box terminal that names no turn", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const turn = { lifecycle: { turnId: "turn-2" } }
+
+    const result = session.sendAndWait("SB-NEXT")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    source.emit(event("stepStart", turn), 0)
+    // What a box writes when asked to replay past its log, for a turn of a box that is gone.
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        turnId: null,
+        lifecycle: {
+          activityId: null,
+          turnId: null,
+          turnSequence: null,
+          terminal: true,
+          sessionIdle: true,
+          interruptTerminal: true,
+        },
+      }),
+      0,
+    )
+    expect(session.status).toBe("streaming")
+    source.emit(event("textDelta", { text: "SB-NEXT-OK", ...turn }), 0)
+    source.emit(event("stepFinish", { reason: "stop", ...turn }), 0)
+
+    await expect(result).resolves.toMatchObject({ content: "SB-NEXT-OK", reason: "stop" })
+  })
+
   it("closes a stopped turn without usage on its live terminal, with only partial rows in the history", async () => {
     const oldMessage = message("old", "AGENT", "old answer")
     const comment = message("comment", "AGENT", "Running the command.")
@@ -681,6 +724,54 @@ describe("Agent task session", () => {
       content: "complete persisted answer",
       reason: "endTurn",
     })
+  })
+
+  // With every row asked for, the newest rows can be reasoning or a subagent's: the answer is
+  // still read from the chat's own text.
+  it("reads the recovered answer from the chat's text, past newer reasoning and subagent rows", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const finalMessage = message("final", "AGENT", "complete persisted answer")
+    const thought = message("thought", "AGENT", "thinking it over", "REASONING")
+    const subagent = { ...message("sub", "AGENT", "subagent text", "SUBAGENT_TEXT") }
+    const subagentTool = {
+      ...message("subtool", "AGENT", '{"name":"Read"}', "TOOL_USE"),
+      parentToolId: "tool-1",
+    }
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(
+        page([
+          message("ask", "AGENT", '{"requestId":"req-1"}', "APPROVAL"),
+          thought,
+          { ...subagent, parentToolId: "tool-1" },
+          subagentTool,
+          finalMessage,
+          oldMessage,
+        ]),
+      )
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(event("stepFinish", { reason: "endTurn" }), 1)
+
+    await expect(result).resolves.toMatchObject({
+      content: "complete persisted answer",
+      reason: "endTurn",
+    })
+    // The history the recovery loaded keeps every piece, not only the answer's rows.
+    expect(session.history.map((item) => item.kind)).toEqual([
+      "agent",
+      "agent",
+      "tool",
+      "agent",
+      "reasoning",
+      "approval",
+    ])
   })
 
   it("rejects without hanging when the recovered channel disconnects again", async () => {
@@ -1004,6 +1095,7 @@ describe("Agent task session", () => {
     ])
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
+      kinds: "all",
     })
 
     const combined = withAgentTaskSessions(tasks, manager)
@@ -1029,6 +1121,7 @@ describe("Agent task session", () => {
 
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
+      kinds: "all",
     })
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
@@ -1194,5 +1287,192 @@ describe("Agent turn usage", () => {
     )
 
     await expect(result).resolves.toMatchObject({ reason: "endTurn", usage: recorded })
+  })
+})
+
+describe("Agent history item identity", () => {
+  it("asks for every row and maps each one to its own item, as the Copilot recorded it", async () => {
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("t", "AGENT", "Done"),
+          sequence: 9,
+          // The text came in chunks 9 to 11: `sequence` is where it starts, `lastSequence` its end.
+          lastSequence: 11,
+          boxLog: 2,
+          itemId: "item-a",
+          reason: "stop",
+        },
+        {
+          ...message("r", "AGENT", "Thought first", "REASONING"),
+          sequence: 8,
+          boxLog: 2,
+          itemId: "r-1",
+        },
+        {
+          ...message(
+            "tc",
+            "AGENT",
+            '{"name":"Read","toolId":"t-1","parentToolId":"tool-9"}',
+            "TOOL_USE",
+          ),
+          sequence: 7,
+          boxLog: 2,
+          itemId: "t-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("st", "AGENT", "Found it", "SUBAGENT_TEXT"),
+          sequence: 6,
+          boxLog: 2,
+          itemId: "s-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("sr", "AGENT", "Where to look", "REASONING"),
+          sequence: 5,
+          boxLog: 2,
+          itemId: "sr-1",
+          parentToolId: "tool-9",
+        },
+        {
+          ...message("sp", "AGENT", '{"name":"Task","toolId":"tool-9"}', "TOOL_USE"),
+          sequence: 4,
+          boxLog: 2,
+          itemId: "tool-9",
+          subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
+        },
+        {
+          ...message("q", "AGENT", '{"id":"in-1","requestId":"req-2"}', "USER_INPUT_REQUEST"),
+          sequence: 3,
+          boxLog: 2,
+          itemId: "in-1",
+        },
+        {
+          ...message("ap", "AGENT", '{"requestId":"req-1","detail":"Run it?"}', "APPROVAL"),
+          sequence: 2,
+          boxLog: 2,
+          itemId: "ap-1",
+        },
+        // A payload that does not parse stays readable as text.
+        message("bad", "AGENT", "not json", "APPROVAL"),
+        { ...message("u", "USER", "Hi"), sequence: 1, boxLog: 2, clientMessageId: "cm-1" },
+        message("old", "USER", "Before"),
+      ]),
+    )
+    const tasks = createTasks({ listMessages })
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(listMessages).toHaveBeenCalledWith("task-1", { sort: "createdAt,desc", kinds: "all" })
+    expect(session.history).toEqual([
+      { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
+      {
+        id: "u",
+        kind: "user",
+        text: "Hi",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 1,
+        boxLog: 2,
+        clientMessageId: "cm-1",
+      },
+      { id: "bad", kind: "agent", text: "not json", at: "2026-01-01T00:00:03Z" },
+      {
+        id: "ap",
+        kind: "approval",
+        payload: { requestId: "req-1", detail: "Run it?" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 2,
+        boxLog: 2,
+        itemId: "ap-1",
+      },
+      {
+        id: "q",
+        kind: "userInputRequest",
+        payload: { id: "in-1", requestId: "req-2" },
+        at: "2026-01-01T00:00:01Z",
+        sequence: 3,
+        boxLog: 2,
+        itemId: "in-1",
+      },
+      {
+        id: "sp",
+        kind: "tool",
+        tool: { tool: "Task", toolId: "tool-9", phase: "call" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 4,
+        boxLog: 2,
+        itemId: "tool-9",
+        // The shape of the box's `subagentUpdate`, as the Copilot kept it.
+        subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
+      },
+      {
+        id: "sr",
+        kind: "reasoning",
+        text: "Where to look",
+        at: "2026-01-01T00:00:02Z",
+        sequence: 5,
+        boxLog: 2,
+        itemId: "sr-1",
+        parentToolId: "tool-9",
+      },
+      {
+        id: "st",
+        kind: "agent",
+        text: "Found it",
+        at: "2026-01-01T00:00:02Z",
+        sequence: 6,
+        boxLog: 2,
+        itemId: "s-1",
+        parentToolId: "tool-9",
+      },
+      {
+        id: "tc",
+        kind: "tool",
+        tool: { tool: "Read", toolId: "t-1", parentToolId: "tool-9", phase: "call" },
+        at: "2026-01-01T00:00:02Z",
+        sequence: 7,
+        boxLog: 2,
+        itemId: "t-1",
+      },
+      {
+        id: "r",
+        kind: "reasoning",
+        text: "Thought first",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 8,
+        boxLog: 2,
+        itemId: "r-1",
+      },
+      {
+        id: "t",
+        kind: "agent",
+        text: "Done",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 9,
+        lastSequence: 11,
+        boxLog: 2,
+        itemId: "item-a",
+        reason: "stop",
+      },
+    ])
+  })
+})
+
+describe("Agent queue without the box channel", () => {
+  it("sends no queue command and says so when the box channel is not connected", async () => {
+    const { session } = createSession()
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    session.send("first")
+    await vi.waitFor(() => expect(session.taskId).toBe("task-1"))
+    session.removeQueueItem("q-1")
+    session.editQueueItem("q-1", "edited")
+    await vi.waitFor(() =>
+      expect(errors).toEqual([
+        "Failed to remove the queued Agent message: The Agent queued-run.cancel was not sent: the box channel is not connected right now.",
+        "Failed to edit the queued Agent message: The Agent queued-run.edit was not sent: the box channel is not connected right now.",
+      ]),
+    )
   })
 })

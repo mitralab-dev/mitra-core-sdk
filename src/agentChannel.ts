@@ -1,4 +1,5 @@
 import type {
+  AgentHistoryCursor,
   AgentSessionTransport,
   AgentTaskEventConnection,
   AgentTaskEventObserver,
@@ -112,8 +113,18 @@ interface LiveSocket {
   send(frame: string): boolean
 }
 
+/** What the box says first on every socket: the T3 thread it serves and where its log is. */
+interface BoxHello {
+  readonly threadId: string
+  readonly lastSequence: number
+}
+
+/** The replay decided by the first frame of the socket, the hello when the box sends one. */
+type ReplayAfterHello = (hello: BoxHello | undefined) => number | undefined
+
 interface DialOptions {
   readonly replayFrom?: number
+  readonly replayAfterHello?: ReplayAfterHello
   readonly signal?: AbortSignal
   onFrame(event: AgentTaskEvent): void
   /** An unrequested close or a silent socket, after the handshake. Handshake failures reject. */
@@ -133,7 +144,7 @@ interface Wire {
 }
 
 interface ReopenHandlers extends Pick<DialOptions, "onFrame" | "onLost"> {
-  replayFrom(channel: AgentTaskChannel): number | undefined
+  replayFrom(channel: AgentTaskChannel): number | ReplayAfterHello | undefined
 }
 
 type ReopenOutcome =
@@ -175,11 +186,14 @@ export function newClientMessageId(): string {
 // lifecycle, and a refusal names the message it refuses in its payload; one naming another
 // message (another tab on the same chat) answers none of ours. A box that names no message
 // answers the oldest, which is the one it is deciding. An error that names a turn is the turn
-// failing, and one that names a `requestId` is the box refusing an answer to a T3 input request:
-// neither answers a message.
+// failing, one that names a `requestId` is the box refusing an answer to a T3 input request, and
+// one that names a `command` is the box refusing a queue command: none answers a message.
 function admissionFor(link: DirectLink, event: AgentTaskEvent): PendingAdmission | undefined {
   const payload = asObject(event.payload)
-  if (event.type === "error" && (payload?.lifecycle || payload?.requestId !== undefined)) {
+  if (
+    event.type === "error" &&
+    (payload?.lifecycle || payload?.requestId !== undefined || payload?.command !== undefined)
+  ) {
     return undefined
   }
   const id =
@@ -248,6 +262,15 @@ export function isChannelHostAllowed(candidate: string, apiUrl?: string): boolea
 function boxAddress(wsUrl: string): string {
   const url = new URL(wsUrl)
   return `${url.origin}${url.pathname}`
+}
+
+function helloOf(event: AgentTaskEvent): BoxHello | undefined {
+  if (event.type !== "hello") return undefined
+  const payload = asObject(event.payload)
+  const threadId = payload?.threadId
+  const lastSequence = payload?.lastSequence
+  if (typeof threadId !== "string" || typeof lastSequence !== "number") return undefined
+  return { threadId, lastSequence }
 }
 
 /** A box HTTP route next to the socket path, keeping the grant (and ticket) in the query. */
@@ -364,13 +387,14 @@ function asDelta(event: AgentTaskEvent): AgentTaskEvent {
   return { ...event, type: kind === "thinking" ? "thinking" : "textDelta" }
 }
 
+// A `toolResult` is left out: a background subagent's result comes under the turn that called it,
+// after that turn ended, and opens no turn.
 const TURN_FRAME_TYPES: ReadonlySet<string> = new Set([
   "stepStart",
   "steer",
   "textDelta",
   "thinking",
   "toolCall",
-  "toolResult",
 ])
 
 const TURN_END_REASONS: ReadonlySet<unknown> = new Set(["stop", "endTurn", "interrupted"])
@@ -386,6 +410,17 @@ function turnAfter(event: AgentTaskEvent, inTurn: boolean): boolean {
     return asObject(payload?.lifecycle)?.interruptTerminal !== true
   }
   return inTurn
+}
+
+// Whether a frame speaks for the turn the redial would resume. A queued message's frames name its
+// own turn, cancelled or not, and a terminal naming another turn than the followed one ends a
+// message that never ran: neither moves the followed turn, or a drop after them would not redial
+// a turn still running and a box that died would close the wrong turn.
+function followsTurn(link: DirectLink, event: AgentTaskEvent): boolean {
+  if (event.type === "messageQueued") return false
+  if (event.type !== "stepFinish" && event.type !== "error") return true
+  const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
+  return typeof turnId !== "string" || link.turnId === undefined || turnId === link.turnId
 }
 
 /** The terminal of a turn whose box went away, as the box writes an interrupted one. */
@@ -500,6 +535,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection> {
     if (!this.enabled()) return this.fallback.open(taskId, observer, signal, transport)
     const mode = this.modeFor(transport)
@@ -512,7 +548,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       return this.fallback.open(taskId, observer, signal, transport)
     }
     try {
-      return await this.openDirect(taskId, mode, answer, observer, signal)
+      return await this.openDirect(taskId, mode, answer, observer, signal, historyCursor)
     } catch (error) {
       // A box that cannot be reached (a proxy blocking its host, a handshake refused, a network
       // that never answers) is a channel this client cannot follow, not a broken chat: the
@@ -650,9 +686,12 @@ export class AgentDirectChannel implements AgentTaskEventSource {
    * only when the redial gives up, when the Copilot no longer offers the box, or when there is
    * no turn to resume: dialing an idle box again would wake it for nobody.
    *
-   * Opening never asks for an older replay. What an idle chat missed is history, which the
-   * session loads by REST; replaying from an older cursor would put old turns on screen as live
-   * text. The HTTP stream opens from the sequence the Copilot reported, which is the same thing.
+   * Opening asks for the replay from where the session's history ends, with the same request the
+   * redial makes: what the history has, the replay does not repeat, and what the Copilot has not
+   * recorded yet (the turn running now, or one it is still behind on) comes in the replay before
+   * any live frame. When the Copilot says the box log is another one than the history's newest,
+   * nothing of it is in the history and the replay starts at its beginning. A history with no
+   * box sequence asks for nothing, and the open starts at the sequence the Copilot reported.
    */
   private async openDirect(
     taskId: string,
@@ -660,15 +699,27 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     channel: AgentTaskChannel,
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection> {
     const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
     let box = boxAddress(channel.wsUrl)
-    let cursor = channel.lastSequence
+    let thread: string | undefined
+    const otherLog =
+      historyCursor?.boxLog !== undefined &&
+      channel.boxLog !== undefined &&
+      historyCursor.boxLog !== channel.boxLog
+    const historyFrom =
+      historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
+    // The cursor starts where the replay starts, so a drop in the middle of it asks again for
+    // what did not arrive, and not from where the box log was when the Copilot answered.
+    let cursor = historyFrom ?? channel.lastSequence
     const abort = new AbortController()
     const onAbort = () => abort.abort(signal?.reason)
     signal?.addEventListener("abort", onAbort, { once: true })
 
     const onFrame = (event: AgentTaskEvent) => {
+      const hello = helloOf(event)
+      if (hello) thread = hello.threadId
       if (typeof event.sequence === "number" && event.sequence > cursor) cursor = event.sequence
       // A subagent's own thread: its `stepStart` and `stepFinish` are not the chat's turn, and
       // must neither admit a message nor end the turn the redial would resume.
@@ -676,9 +727,11 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         observer.onEvent(event)
         return
       }
-      const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
-      if (typeof turnId === "string") link.turnId = turnId
-      link.inTurn = turnAfter(event, link.inTurn)
+      if (followsTurn(link, event)) {
+        const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
+        if (typeof turnId === "string" && event.type !== "toolResult") link.turnId = turnId
+        link.inTurn = turnAfter(event, link.inTurn)
+      }
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
       else if (event.type === "error") admissionFor(link, event)?.settle(false)
@@ -702,18 +755,35 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         onFrame,
         onLost,
         replayFrom: (next) => {
-          const nextBox = boxAddress(next.wsUrl)
-          // A box back with an empty log is a new box behind the same address. Only an empty one:
-          // a channel the Copilot answers from a cache can carry an older, smaller sequence.
-          const zeroed = next.lastSequence === 0 && cursor > 0
-          if (nextBox === box && !zeroed) return cursor
-          // The box the turn ran on is gone and nothing will ever end that turn. Closed here as interrupted, so the next message
-          // opens a turn of its own instead of steering into a dead one. The box may send the same
-          // terminal; the session ignores a second one for a turn it already ended.
-          if (link.inTurn) onFrame(lostTurnFrame(link.turnId))
-          box = nextBox
-          cursor = next.lastSequence
-          return undefined
+          const decide = (hello: BoxHello | undefined) => {
+            const nextBox = boxAddress(next.wsUrl)
+            // A box back with an empty log is a new box behind the same address. Only an empty
+            // one: a channel the Copilot answers from a cache can carry an older, smaller sequence.
+            const zeroed = next.lastSequence === 0 && cursor > 0
+            // Behind the dev proxy every box of a chat has the same address, and a new box may
+            // have logged the next message already, so only its hello tells it apart: another
+            // thread, or a log short of the cursor. Asked for the old cursor, that box ends the
+            // turn running now with a terminal that names no turn (dev, 2026-10-20).
+            const otherBox =
+              hello !== undefined && (hello.threadId !== thread || hello.lastSequence < cursor)
+            if (nextBox === box && !zeroed && !otherBox) return cursor
+            // The box the turn ran on is gone and nothing will ever end that turn. Closed here as interrupted, so the next message
+            // opens a turn of its own instead of steering into a dead one. The box may send the same
+            // terminal; the session ignores a second one for a turn it already ended.
+            if (link.inTurn) onFrame(lostTurnFrame(link.turnId))
+            box = nextBox
+            // Nothing in a new box's log was seen here, and it may hold the start of the next
+            // message's turn already. HTTP keeps the cursor the Copilot reported.
+            if (mode === "websocket") {
+              cursor = 0
+              return 0
+            }
+            cursor = next.lastSequence
+            return undefined
+          }
+          // The socket brings the hello before any frame of the log, and the box holds the
+          // rest until the replay is asked for. HTTP picks its cursor before the stream opens.
+          return mode === "websocket" && thread !== undefined ? decide : decide(undefined)
         },
       }).then((outcome) => {
         // A message still waiting when the channel is gone for good fails out loud: the caller
@@ -726,11 +796,25 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       })
     }
 
+    // The same decision the redial makes: the socket's hello says whether the box log is the one
+    // the history ends in. A log short of the history's end is another one, nothing of it is in
+    // the history, and it is read from its beginning. HTTP decides before its stream opens.
+    const afterHello: ReplayAfterHello = (hello) => {
+      if (hello !== undefined && hello.lastSequence < cursor) cursor = 0
+      return cursor
+    }
+    const replay =
+      historyFrom === undefined
+        ? {}
+        : mode === "websocket"
+          ? { replayAfterHello: afterHello }
+          : { replayFrom: historyFrom }
     try {
       link.wire = await this.connect(taskId, mode, channel, {
         signal: abort.signal,
         onFrame,
         onLost,
+        ...replay,
       })
     } catch (error) {
       signal?.removeEventListener("abort", onAbort)
@@ -833,7 +917,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         onFrame: handlers.onFrame,
         onLost: handlers.onLost,
         signal,
-        ...(replayFrom === undefined ? {} : { replayFrom }),
+        ...(typeof replayFrom === "function" ? { replayAfterHello: replayFrom } : {}),
+        ...(typeof replayFrom === "number" ? { replayFrom } : {}),
       })
       return { kind: "wire", wire }
     } catch (error) {
@@ -1009,6 +1094,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const Socket = this.webSocket()
     if (!Socket) return Promise.reject(new TypeError("WebSocket is not available."))
     const { signal, replayFrom } = options
+    let replayAfterHello = options.replayAfterHello
     return new Promise((resolve, reject) => {
       const socket = new Socket(url)
       let opened = false
@@ -1088,8 +1174,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         settled = true
         clearTimeout(timer)
         touch()
-        // Back from a drop in the middle of a turn: the box keeps its log by `sequence` and
-        // repeats what this session did not see on that box, never from zero.
+        // Opened from a history, or back from a drop in the middle of a turn: the box keeps its
+        // log by `sequence` and repeats what this session did not see on that box.
         if (replayFrom !== undefined) {
           try {
             socket.send(JSON.stringify({ type: "replay", fromSequence: replayFrom }))
@@ -1106,7 +1192,13 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         // Any frame proves the channel is alive, ping included: touch before parsing.
         touch()
         const event = parseEvent(message.data)
-        if (event) options.onFrame(asDelta(event))
+        if (!event) return
+        if (replayAfterHello) {
+          const fromSequence = replayAfterHello(helloOf(event))
+          replayAfterHello = undefined
+          if (fromSequence !== undefined) send(JSON.stringify({ type: "replay", fromSequence }))
+        }
+        options.onFrame(asDelta(event))
       }
       handlers.onclose = (event) => {
         clearTimeout(timer)

@@ -1,7 +1,7 @@
 {
   "_source": "template/agent-box-sidecar (mitra-sandbox), test/fixtures.test.ts",
   "endpoint": "POST {deliveryUrl}/{taskId}/channel-events",
-  "note": "One request per closed turn, the whole turn, resent until 2xx; the copilot records it once under the last of `turnIds`. `sequence` orders the rows of the thread's log; `timestamp` is epoch ms of when the box logged the frame. The answer is {consumedThrough: <sequence of the terminal>}.",
+  "note": "The turn's events as they are logged, in short batches in the log's order (the text of an answer whole in one batch, when what follows it is logged), resent from `consumedThrough` until 2xx; the copilot keeps each event once by its `sequence`, records the turn under the first of `turnIds`, and closes it with the batch that has `final: true`. A turn the provider opened on its own goes with `turnIds: []` and `providerWake: true` and `wakeId` on each event. `sequence` orders the rows of the thread's log; `timestamp` is epoch ms of when the box logged the frame. The answer is {consumedThrough: <the highest sequence the copilot holds>}.",
   "requests": [
     {
       "path": "/api/v1/tasks/task-1/channel-events",
@@ -10,6 +10,7 @@
       },
       "body": {
         "generation": 2,
+        "threadId": "thread:project:<projectId>:<uuid>",
         "turnIds": ["turn-1"],
         "events": [
           {
@@ -25,8 +26,8 @@
                 "clientMessageId": "cm-1"
               }
             },
-            "sequence": 1,
-            "timestamp": 1760600000050
+            "sequence": 2,
+            "timestamp": 1760600000030
           },
           {
             "type": "textChunk",
@@ -40,10 +41,12 @@
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "a1",
+              "itemDelta": "Let me look.\n\n"
             },
-            "sequence": 2,
-            "timestamp": 1760600000060
+            "sequence": 3,
+            "timestamp": 1760600000040
           },
           {
             "type": "toolCall",
@@ -61,10 +64,11 @@
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "tool-1"
             },
-            "sequence": 3,
-            "timestamp": 1760600000070
+            "sequence": 4,
+            "timestamp": 1760600000050
           },
           {
             "type": "toolResult",
@@ -81,10 +85,11 @@
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "tool-1"
             },
-            "sequence": 4,
-            "timestamp": 1760600000080
+            "sequence": 5,
+            "timestamp": 1760600000060
           },
           {
             "type": "textChunk",
@@ -98,10 +103,12 @@
                 "terminal": false,
                 "sessionIdle": false,
                 "interruptTerminal": false
-              }
+              },
+              "itemId": "a2",
+              "itemDelta": "Two files."
             },
-            "sequence": 5,
-            "timestamp": 1760600000090
+            "sequence": 6,
+            "timestamp": 1760600000070
           },
           {
             "type": "stepFinish",
@@ -125,10 +132,11 @@
                 "interruptTerminal": false
               }
             },
-            "sequence": 6,
-            "timestamp": 1760600000100
+            "sequence": 7,
+            "timestamp": 1760600000080
           }
-        ]
+        ],
+        "final": true
       }
     }
   ]

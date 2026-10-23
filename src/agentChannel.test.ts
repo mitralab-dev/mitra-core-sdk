@@ -194,7 +194,6 @@ describe("Agent direct channel", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -286,7 +285,6 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Long answer",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -332,7 +330,6 @@ describe("Agent direct channel", () => {
       {
         type: "message",
         content: "Over quota",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     ])
@@ -537,6 +534,35 @@ describe("Agent direct channel", () => {
     session.close()
   })
 
+  it("still sends a message whose sendAndWait timed out before the channel opened", async () => {
+    vi.useFakeTimers()
+    let offerChannel!: (channel: AgentTaskChannel) => void
+    const tasks = createTasks(
+      () =>
+        new Promise<AgentTaskChannel>((resolve) => {
+          offerChannel = resolve
+        }),
+    )
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("Busy box", { timeoutMs: 8_000 })
+    const rejected = expect(result).rejects.toThrow("timed out after 8000 ms")
+    await vi.waitFor(() => expect(tasks.channel).toHaveBeenCalledOnce())
+    await vi.advanceTimersByTimeAsync(8_000)
+    await rejected
+
+    // Timing out only stopped the waiting: the message goes out once the channel is there.
+    offerChannel({ wsUrl: BOX_URL, lastSequence: 0 })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect(FakeWebSocket.last().sent).toEqual([
+        expect.objectContaining({ type: "message", content: "Busy box" }),
+      ]),
+    )
+    expect(session.status).toBe("streaming")
+    session.close()
+  })
+
   it("fails the send when the box never answers for the message", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer())
@@ -710,7 +736,11 @@ describe("Agent direct channel", () => {
       payload: { reason: "unavailable", error: "Not Found" },
     })
     expect(fallback.transports).toEqual([undefined])
-    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", { type: "message", content: "hello" })
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "hello",
+      clientMessageId: expect.any(String),
+    })
   })
 
   it("dials with the injected implementation on a runtime without a global WebSocket", async () => {
@@ -872,7 +902,6 @@ describe("Agent direct channel over HTTP", () => {
         type: "message",
         content: "Analyze",
         reasoningEffort: "high",
-        mode: "steer",
         clientMessageId: expect.any(String),
       },
     })
@@ -1192,7 +1221,7 @@ describe("Agent direct channel over HTTP", () => {
 describe("Agent direct channel lifecycle", () => {
   const OTHER_BOX_URL = "wss://49999-box2.e2b.app/api/mitra/chat/ws?grant=other"
 
-  it("forgets the replay cursor when the Copilot points the chat to another box", async () => {
+  it("replays another box the Copilot points the chat to from the start of its log", async () => {
     vi.useFakeTimers()
     const channel = vi
       .fn<NonNullable<AgentTasksModule["channel"]>>()
@@ -1210,15 +1239,16 @@ describe("Agent direct channel lifecycle", () => {
 
     const otherBox = FakeWebSocket.last()
     expect(otherBox.url).toBe(OTHER_BOX_URL)
-    expect(otherBox.sent).toEqual([])
+    expect(otherBox.sent).toEqual([{ type: "replay", fromSequence: 0 }])
 
-    // The turn on the first box is closed with it; a turn on the new box counts from its log.
+    // The turn on the first box is closed with it; the new box counts from its own log.
     session.send("again")
-    await vi.waitFor(() => expect(otherBox.sent).toHaveLength(1))
+    await vi.waitFor(() => expect(otherBox.sent).toHaveLength(2))
+    otherBox.receive("stepStart", { lifecycle: { turnId: "turn-2" } }, 11)
     otherBox.drop()
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
-    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 10 }])
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 11 }])
     session.close()
   })
 
@@ -1247,10 +1277,10 @@ describe("Agent direct channel lifecycle", () => {
     await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000 w001" })
     expect(session.status).toBe("idle")
     const fresh = FakeWebSocket.last()
-    expect(fresh.sent).toEqual([])
+    expect(fresh.sent).toEqual([{ type: "replay", fromSequence: 0 }])
 
     const next = session.sendAndWait("Say hi")
-    await vi.waitFor(() => expect(fresh.sent).toHaveLength(1))
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(2))
     // The new box ends the dead turn too: it must not end the turn running now.
     fresh.receive(
       "stepFinish",
@@ -1263,7 +1293,7 @@ describe("Agent direct channel lifecycle", () => {
       {
         lifecycle: {
           turnId: "turn-2",
-          clientMessageId: (fresh.sent[0] as { clientMessageId: string }).clientMessageId,
+          clientMessageId: (fresh.sent[1] as { clientMessageId: string }).clientMessageId,
         },
       },
       2,
@@ -1273,6 +1303,101 @@ describe("Agent direct channel lifecycle", () => {
     await expect(next).resolves.toMatchObject({ content: "hi", reason: "stop" })
     expect(turnEnds).toEqual(["interrupted", "stop"])
     expect(errors).toEqual([])
+    session.close()
+  })
+
+  // A queued message's frames name its own turn: they must not move the turn the redial resumes.
+  it("redials and closes the running turn, not the cancelled queued message, when the box drops", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 3 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const running = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const opening = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: opening } }, 1)
+    const later = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    const queued = { lifecycle: { turnId: "turn-2", clientMessageId: id }, clientMessageId: id }
+    socket.receive("messageQueued", { position: 1, text: "Later", ...queued }, 2)
+    session.removeQueueItem(id)
+    socket.receive("messageQueued", { position: null, cancelled: true, ...queued }, 3)
+    await expect(later).rejects.toThrow("The queued Agent message was cancelled.")
+    expect(session.status).toBe("streaming")
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    // The box the turn ran on went away: the turn it closes is the running one, not the cancelled
+    // message's.
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 0 }])
+    await expect(running).resolves.toMatchObject({ reason: "interrupted", turnId: "turn-1" })
+    session.close()
+  })
+
+  it("keeps redialing the running turn after a queued message ended with a terminal of its own", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    const later = session.sendAndWait("Later")
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    socket.receive(
+      "messageQueued",
+      { position: 1, lifecycle: { turnId: "turn-2", clientMessageId: id } },
+      2,
+    )
+    socket.receive(
+      "error",
+      { message: "Dropped", lifecycle: { turnId: "turn-2", terminal: true, sessionIdle: true } },
+      3,
+    )
+    await expect(later).rejects.toThrow("Dropped")
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 3 }])
+    session.close()
+  })
+
+  it("closes the running turn as interrupted when its box dies with a message queued", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: OTHER_BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const ends: unknown[] = []
+    session.on("turnEnd", ({ reason, turnId }) => ends.push({ reason, turnId }))
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    void session.sendAndWait("Later").catch(() => undefined)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    const id = (socket.sent[1] as { clientMessageId: string }).clientMessageId
+    socket.receive(
+      "messageQueued",
+      { position: 1, lifecycle: { turnId: "turn-2", clientMessageId: id } },
+      2,
+    )
+
+    socket.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted", turnId: "turn-1" })
+    expect(ends).toEqual([{ reason: "interrupted", turnId: "turn-1" }])
     session.close()
   })
 
@@ -1292,7 +1417,70 @@ describe("Agent direct channel lifecycle", () => {
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
 
     await expect(dead).resolves.toMatchObject({ reason: "interrupted" })
-    expect(FakeWebSocket.last().sent).toEqual([])
+    expect(FakeWebSocket.last().sent).toEqual([{ type: "replay", fromSequence: 0 }])
+    session.close()
+  })
+
+  it("closes the turn when the hello names another thread behind the same address, and reads the next turn whole from the new box", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce({ wsUrl: BOX_URL, lastSequence: 0 })
+      .mockResolvedValue({ wsUrl: FRESH_BOX_URL, lastSequence: 4 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+
+    const dead = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = FakeWebSocket.last()
+    first.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    first.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 1)
+    first.receive("textDelta", { text: "w000", lifecycle: { turnId: "turn-1" } }, 5)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // Same address and a log that is not empty: only the hello says the box is another one,
+    // and the replay is not asked before it.
+    const fresh = FakeWebSocket.last()
+    expect(fresh.sent).toEqual([])
+    fresh.receive("hello", { threadId: "thread-2", lastSequence: 4 })
+    await expect(dead).resolves.toMatchObject({ reason: "interrupted", content: "w000" })
+    expect(fresh.sent).toEqual([{ type: "replay", fromSequence: 0 }])
+
+    // The new box already logged the start of the next turn; the replay brings it, then live.
+    const next = session.sendAndWait("SB-NEXT")
+    await vi.waitFor(() => expect(fresh.sent).toHaveLength(2))
+    const turn = { lifecycle: { turnId: "turn-2" } }
+    fresh.receive("stepStart", turn, 1)
+    fresh.receive("textChunk", { text: "SB-", ...turn }, 2)
+    fresh.receive("textChunk", { text: "NEXT", ...turn }, 3)
+    fresh.receive("textDelta", { text: "-OK", ...turn }, 5)
+    fresh.receive("stepFinish", { reason: "stop", ...turn }, 6)
+
+    await expect(next).resolves.toMatchObject({ content: "SB-NEXT-OK", reason: "stop" })
+    session.close()
+  })
+
+  it("asks the same thread for the replay once its hello arrives", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+
+    void session.sendAndWait("List 40 animals").catch(() => undefined)
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const first = FakeWebSocket.last()
+    first.receive("hello", { threadId: "thread-1", lastSequence: 3 })
+    first.receive("stepStart", { lifecycle: { turnId: "turn-1" } }, 4)
+    first.drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    const redialed = FakeWebSocket.last()
+    expect(redialed.sent).toEqual([])
+    redialed.receive("hello", { threadId: "thread-1", lastSequence: 4 })
+    expect(redialed.sent).toEqual([{ type: "replay", fromSequence: 4 }])
+    expect(session.status).toBe("streaming")
     session.close()
   })
 
@@ -1545,7 +1733,7 @@ describe("Agent direct channel steering", () => {
     await session.cancel()
     expect(session.status).toBe("cancelled")
 
-    const after = session.sendAndWait("POS-CX")
+    const after = session.sendAndWait("POS-CX", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(3))
     expect(socket.sent[1]).toEqual({ type: "interrupt" })
     // Sent as any message; the box holds it until the stopped turn ends and gives it a turn of
@@ -2399,7 +2587,11 @@ describe("Agent direct channel steering", () => {
     )
     await vi.waitFor(() => expect(session.status).toBe("streaming"))
 
-    session.send("Stop and say BANANA", { agentType: "CODEX", reasoningEffort: "low" })
+    session.send("Stop and say BANANA", {
+      agentType: "CODEX",
+      reasoningEffort: "low",
+      mode: "steer",
+    })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toEqual({
       type: "message",
@@ -2434,6 +2626,7 @@ describe("Agent direct channel steering", () => {
     expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
       type: "message",
       content: "Stop and say BANANA",
+      clientMessageId: expect.any(String),
     })
     session.close()
   })
@@ -2460,13 +2653,15 @@ describe("Agent direct channel steering", () => {
     await vi.waitFor(() => expect(session.status).toBe("idle"))
     socket.drop()
 
-    session.send("Now say MANGO", { agentType: "CODEX", reasoningEffort: "low" })
+    const id = session.send("Now say MANGO", { agentType: "CODEX", reasoningEffort: "low" })
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    // The Copilot keeps the id and hands it to the box: `send` returns it on this path too.
     expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
       type: "message",
       content: "Now say MANGO",
       agentType: "CODEX",
       reasoningEffort: "low",
+      clientMessageId: id,
     })
     session.close()
   })
@@ -2611,6 +2806,7 @@ describe("Agent direct channel steering", () => {
       expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
         type: "message",
         content: "Stop and say BANANA",
+        clientMessageId: expect.any(String),
       }),
     )
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))
@@ -2684,6 +2880,7 @@ describe("Agent direct channel steering", () => {
       expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
         type: "message",
         content: "Stop and say BANANA",
+        clientMessageId: expect.any(String),
       }),
     )
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledTimes(2))

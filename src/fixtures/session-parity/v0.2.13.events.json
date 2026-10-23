@@ -1,0 +1,234 @@
+[
+  {
+    "event": "historyLoaded",
+    "payload": {
+      "history": [
+        {
+          "id": "m-0",
+          "kind": "user",
+          "text": "A row from before the box order",
+          "at": "2026-01-01T00:00:00Z"
+        },
+        {
+          "id": "m-1",
+          "kind": "user",
+          "text": "Count two birds",
+          "at": "2026-01-01T00:00:01Z"
+        },
+        {
+          "id": "m-2",
+          "kind": "tool",
+          "tool": {
+            "tool": "Task",
+            "toolId": "tool-old",
+            "input": {
+              "n": 2
+            },
+            "phase": "call"
+          },
+          "at": "2026-01-01T00:00:02Z"
+        },
+        {
+          "id": "m-3",
+          "kind": "tool",
+          "tool": {
+            "tool": "Read",
+            "toolId": "ct-old",
+            "content": "ok",
+            "phase": "result"
+          },
+          "at": "2026-01-01T00:00:03Z"
+        },
+        {
+          "id": "m-4",
+          "kind": "agent",
+          "text": "Two birds.",
+          "at": "2026-01-01T00:00:04Z",
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5,
+            "requestMessageId": "m-1"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "streaming"
+    }
+  },
+  {
+    "event": "turnStart",
+    "payload": {}
+  },
+  {
+    "event": "accepted",
+    "payload": {}
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Hel",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Which birds",
+      "kind": "thinking"
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "Task",
+      "phase": "call",
+      "timestamp": 1003,
+      "toolId": "tool-1",
+      "input": {
+        "n": 3
+      }
+    }
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Three birds",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "Read",
+      "phase": "call",
+      "timestamp": 1006,
+      "toolId": "ct-1",
+      "input": {}
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "Read",
+      "phase": "result",
+      "timestamp": 1007,
+      "toolId": "ct-1",
+      "content": "ok"
+    }
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "lo",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "turnEnd",
+    "payload": {
+      "task": {
+        "id": "task-1",
+        "appId": "app-1",
+        "agentId": null,
+        "userId": "user-1",
+        "title": "Task",
+        "agentType": "CLAUDE",
+        "reasoningEffort": null,
+        "scope": null,
+        "archived": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      "content": "HelThree birdslo",
+      "reason": "stop",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 5
+      }
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "tool",
+    "payload": {
+      "tool": "Task",
+      "phase": "result",
+      "timestamp": 1010,
+      "toolId": "tool-1",
+      "content": "Three birds found"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "streaming"
+    }
+  },
+  {
+    "event": "turnStart",
+    "payload": {}
+  },
+  {
+    "event": "delta",
+    "payload": {
+      "delta": "Subagent done",
+      "kind": "text"
+    }
+  },
+  {
+    "event": "turnEnd",
+    "payload": {
+      "task": {
+        "id": "task-1",
+        "appId": "app-1",
+        "agentId": null,
+        "userId": "user-1",
+        "title": "Task",
+        "agentType": "CLAUDE",
+        "reasoningEffort": null,
+        "scope": null,
+        "archived": false,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      "content": "HelThree birdsloSubagent done",
+      "reason": "stop"
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "idle"
+    }
+  },
+  {
+    "event": "workspace",
+    "payload": {
+      "payload": {
+        "files": ["birds.md"]
+      },
+      "timestamp": 1014
+    }
+  },
+  {
+    "event": "statusChange",
+    "payload": {
+      "status": "closed"
+    }
+  }
+]

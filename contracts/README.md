@@ -24,6 +24,12 @@ publishes.
 
 ## Versions
 
+- `0.3.0` is the stable release of the `0.3.0-beta.2` surface with the agent session that follows
+  T3: the live `history`, the queue mirrored from the box, `steerQueueItem`, `resumeQueue` and
+  `backgroundTasks`, which the parity cases do not cover. Same parity cases; the version exists so a
+  consumer pinning the stable package can pin a corpus with the same number. Its directory was
+  committed before the betas and was never published, so this release ships it as it is.
+
 - `0.3.0-beta.2` is the `0.3.0-beta.1` parity surface republished with `messenger.sendEmail()` and the
   `emailLoginEnabled` and `passwordLoginEnabled` fields of `apps.update()`, which the parity cases do
   not cover. Same parity cases; the version exists so a consumer pinning the package can pin a corpus
@@ -33,11 +39,6 @@ publishes.
   no messages. Same parity cases; the version exists so a consumer pinning the package can pin a
   corpus with the same number. `0.3.0-beta.0` shipped the same code without its own corpus and has
   no entry here.
-
-- `0.3.0` is the `0.2.13` parity surface republished with the agent session that holds no
-  messages: every message goes out at once and the queue API is deprecated and always empty.
-  Same parity cases; the version exists so a consumer pinning the package can pin a corpus with
-  the same number.
 
 - `0.2.13` is the `0.2.12` parity surface republished with the occupied context of the chat:
   `contextTokens` and `contextWindow` on `AgentTurnUsage`, which the parity cases do not cover.

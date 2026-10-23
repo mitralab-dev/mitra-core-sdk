@@ -569,6 +569,15 @@ export interface PageOptions {
   sort?: string
 }
 
+export interface AgentMessageListOptions extends PageOptions {
+  /**
+   * `all` asks for every row the Copilot recorded from the box, one per piece: also `REASONING`,
+   * `SUBAGENT_TEXT`, `APPROVAL`, `USER_INPUT_REQUEST` and a subagent's tools. Without it the Copilot answers only `TEXT`, `ERROR`
+   * and `TOOL_USE` rows of the chat itself, as before.
+   */
+  kinds?: "all"
+}
+
 export type AppColor =
   { type: "SOLID"; hex: string } | { type: "GRADIENT"; startHex: string; endHex: string }
 
@@ -1199,10 +1208,17 @@ export type AgentTaskInput =
       agentType?: string
       reasoningEffort?: string
       /**
-       * `steer` takes the message into the running turn; a box given none puts it in T3's queue.
-       * The session always sends `steer`. The Copilot does not take the field.
+       * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
+       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot does
+       * not take the field.
        */
-      mode?: "steer"
+      mode?: "queue" | "steer"
+      /**
+       * The id the box echoes on the frames that take the message (`stepStart`, `steer`,
+       * `messageQueued`) and the history item of the question carries. The session sends the one
+       * `send` returned, to the box and to the Copilot, which keeps it and hands it to the box.
+       */
+      clientMessageId?: string
     }
   | { type: "interrupt" }
   | { type: "approval_response"; approved: boolean }
@@ -1218,6 +1234,14 @@ export type AgentTaskInput =
     }
   /** Stops one subagent, as T3's own `subagent.stop`; only the box channel takes it. */
   | { type: "subagent.stop"; subagentId: string }
+  /** Takes a message out of T3's queue, named by its `clientMessageId`; only the box takes it. */
+  | { type: "queued-run.cancel"; clientMessageId: string }
+  /** Changes the text of a message in T3's queue; only the box channel takes it. */
+  | { type: "queued-run.edit"; clientMessageId: string; text: string }
+  /** Moves a message from T3's queue into the running turn, as T3's own Steer on a queued message. */
+  | { type: "queued-message.promote-to-steer"; clientMessageId: string }
+  /** Lets T3's queue go on after a Stop held it, as T3's own `queue.resume`. */
+  | { type: "queue.resume" }
 
 export interface AgentTaskEvent {
   /** Event names are open and can grow without a client release. */
@@ -1234,6 +1258,11 @@ export interface AgentTaskChannel {
   wsUrl: string
   /** Last sequence in the box log, 0 when the box reported none. */
   lastSequence: number
+  /**
+   * Which box log the chat is on now, counted by the Copilot: a box that comes up without the
+   * log starts a new one. The `boxLog` of the history items. Absent from an older Copilot.
+   */
+  boxLog?: number
 }
 
 /** One call to the provider inside a turn, or one model's total when the source gives only that. */
@@ -1296,11 +1325,50 @@ export interface AgentTurnUsage {
 export interface AgentMessage {
   id: string
   sender: string
+  /**
+   * `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING`, `SUBAGENT_TEXT`,
+   * `APPROVAL` and `USER_INPUT_REQUEST`.
+   */
   type: string
   content: string
   createdAt: string
   /** Present on the Agent message that closed a turn, when the Copilot recorded its usage. */
   usage?: AgentTurnUsage
+  /**
+   * The box log's sequence of the row's first chunk, the same as its live event; absent on older
+   * rows.
+   */
+  sequence?: number
+  /** The box log's sequence of the row's last chunk, only when the row came in more than one. */
+  lastSequence?: number
+  /** Which box log `sequence` counts in; absent on older rows. */
+  boxLog?: number
+  /** T3's id of the item the row holds. */
+  itemId?: string
+  /** On a subagent's own reasoning, text or tool: the tool call that spawned the subagent. */
+  parentToolId?: string
+  /** On the person's message: the `clientMessageId` it went out with. */
+  clientMessageId?: string
+  /** On a tool call that spawned a subagent: its last state, as the box sent it. */
+  subagent?: Partial<AgentSubagentFrame>
+  /** On the row that closed a turn: the reason the box ended it with. */
+  reason?: string
+}
+
+/**
+ * A subagent's state as the box sends it in a `subagentUpdate` frame. The Copilot keeps the last
+ * one on the rows of the tool call that spawned the subagent.
+ */
+export interface AgentSubagentFrame {
+  /** The tool call that spawned the subagent. */
+  toolId: string
+  subagentId: string
+  status: string
+  progress?: string
+  /** As the box sent it: epoch milliseconds or an ISO string. */
+  startedAt?: number | string
+  endedAt?: number | string
+  childThreadId?: string
 }
 
 export interface AgentModel {

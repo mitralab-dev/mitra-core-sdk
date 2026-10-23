@@ -10,6 +10,7 @@ import { agentTurnUsageOf, expectCredentialUsage } from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
+  AgentSubagentFrame,
   AgentTask,
   AgentTaskEvent,
   AgentTaskInput,
@@ -57,7 +58,18 @@ export interface AgentTaskEventSource {
     observer: AgentTaskEventObserver,
     signal?: AbortSignal,
     transport?: AgentSessionTransport,
+    historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection>
+}
+
+/**
+ * How far the history the session loaded goes in the box log: the highest `sequence` of the
+ * newest box log it holds. A chat opened with it gets the box's replay from there, so what the
+ * history has not recorded yet still reaches the session.
+ */
+export interface AgentHistoryCursor {
+  sequence: number
+  boxLog?: number
 }
 
 export type AgentSessionTransport = "auto" | "websocket" | "http"
@@ -91,6 +103,13 @@ export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgent
 export interface AgentSendOptions {
   agentType?: string
   reasoningEffort?: string
+  /**
+   * With a turn running: with none, T3 decides as its composer does (into the running turn when the
+   * provider takes a steer, in its queue otherwise); `steer` asks for the running turn, which T3
+   * refuses while the turn is not running yet; `queue` waits in T3's queue, held by a Stop until
+   * `resumeQueue`. With no turn running the message starts one.
+   */
+  mode?: "queue" | "steer"
 }
 
 export interface AgentSendAndWaitOptions extends AgentSendOptions {
@@ -101,11 +120,34 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
-/** @deprecated Messages are no longer held by the session; the queue is always empty. */
+/**
+ * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
+ * client's message, not only this session's.
+ */
+/** One piece of work the provider keeps going in the background, as T3's roster names it. */
+export interface AgentBackgroundTask {
+  taskId: string
+  /** `command`, `monitor`, `subagent` or `background_task`, as T3 names it. */
+  kind: string
+  description?: string
+  /** The subagent's own thread, when it has one. */
+  childThreadId?: string
+}
+
 export interface AgentQueueItem extends AgentSendOptions {
+  /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
   text: string
+  /** Epoch milliseconds of the box frame that first reported it in the queue. */
   createdAt: number
+  /** Its place in T3's queue, as the box sent it. */
+  position?: number
+  /** T3 holds the queue: nothing in it runs until the hold is lifted. */
+  queueHeld?: boolean
+  /** The `sequence` of the last box frame that reported it. */
+  sequence?: number
+  /** The message's own turn id: the `id` of its history item. */
+  turnId?: string
 }
 
 /** T3's subagent statuses; a status this version does not know comes through as it was sent. */
@@ -127,7 +169,20 @@ export interface AgentSubagent {
   childThreadId?: string
 }
 
-export interface AgentToolEvent {
+/**
+ * Where a piece of the conversation goes, as the box sent it on the frame: the same `sequence` and
+ * `itemId` the history item of that piece carries. Absent when the frame did not carry it.
+ */
+export interface AgentPieceIdentity {
+  /** The box log's sequence of the frame: the order of the conversation. */
+  sequence?: number
+  /** T3's id of the item the frame belongs to (one stretch of text, one tool, one subagent). */
+  itemId?: string
+  /** The `lifecycle.turnId` of the frame. */
+  turnId?: string
+}
+
+export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
   toolId?: string
   /** On a tool a subagent called: the `toolId` of the tool call that spawned the subagent. */
@@ -138,16 +193,72 @@ export interface AgentToolEvent {
   timestamp?: number
 }
 
+/**
+ * What the Copilot recorded from the box for a history item, read as it came. Absent on items
+ * written before the Copilot recorded them, or from a box that did not send them.
+ */
+export interface AgentTimelineItemIdentity {
+  /** The box log's sequence of the item: the same number its live frame carried. */
+  sequence?: number
+  /** The box log's sequence of the item's last chunk, only when it came in more than one. */
+  lastSequence?: number
+  /** Which box log the sequence counts in: a box that came up without the log starts again. */
+  boxLog?: number
+  /** T3's id of the item: the `itemId` of its live frames. */
+  itemId?: string
+  /** Only on the item that closed a turn: the reason the box ended it with. */
+  reason?: string
+}
+
 export type AgentTimelineItem =
-  | {
+  | ({
       id: string
       kind: "user" | "agent"
       text: string
       at: string
       /** Only on the `agent` item that closed a turn, when the Copilot recorded its usage. */
       usage?: AgentTurnUsage
-    }
-  | { id: string; kind: "tool"; tool: AgentToolEvent; at: string }
+      /** On a `user` item: the id `send` returned for that message. */
+      clientMessageId?: string
+      /** On a subagent's own text (a `SUBAGENT_TEXT` row): the tool call that spawned it. */
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      /** A stretch of the agent's reasoning, as the box sent it: the `thinking` pieces of one item. */
+      kind: "reasoning"
+      text: string
+      at: string
+      /** On a subagent's own reasoning: the tool call that spawned the subagent. */
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      /**
+       * An approval T3 asked for (`APPROVAL` row) or a question it asked the person mid-turn
+       * (`USER_INPUT_REQUEST` row): the payload of the box's `approval` or `user_input_request`
+       * frame, as it came, the same that reached the session live as a `raw` event.
+       */
+      kind: "approval"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      kind: "userInputRequest"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
+      kind: "tool"
+      tool: AgentToolEvent
+      at: string
+      /** On the tool call that spawned a subagent: its last state, as the box's `subagentUpdate`. */
+      subagent?: Partial<AgentSubagentFrame>
+    } & AgentTimelineItemIdentity)
 
 export interface AgentTurnResult {
   task: AgentTask
@@ -155,16 +266,35 @@ export interface AgentTurnResult {
   reason: string
   /** What the turn consumed, from the box's `stepFinish`; absent when the turn reported none. */
   usage?: AgentTurnUsage
+  /** The `sequence` of the box's `stepFinish` that ended the turn, when it carried one. */
+  sequence?: number
+  /** The `lifecycle.turnId` of that `stepFinish`. */
+  turnId?: string
 }
 
 export interface AgentTaskSessionEventMap {
   statusChange: { status: AgentTaskSessionStatus }
   historyLoaded: { history: readonly AgentTimelineItem[] }
   taskCreated: { task: AgentTask }
-  turnStart: Record<string, never>
-  delta: { delta: string; kind: "text" | "thinking" }
+  /**
+   * A turn started. When the box's `stepStart` opened it, the fields it carried: the `text` and
+   * `clientMessageId` of the message whose turn it is, and the frame's `sequence`, `itemId` and
+   * `turnId`. The place to show that question, also when the history does not have it yet.
+   */
+  turnStart: { text?: string; clientMessageId?: string } & AgentPieceIdentity
+  /**
+   * On a subagent's own text, `parentToolId` is the tool call that spawned it. `itemDelta` is the
+   * box frame's piece of its item: the same as `delta` except on the first piece of a text item
+   * that follows another, where `delta` starts with the `"\n\n"` that 0.2.13 joined them with.
+   */
+  delta: {
+    delta: string
+    kind: "text" | "thinking"
+    parentToolId?: string
+    itemDelta?: string
+  } & AgentPieceIdentity
   tool: AgentToolEvent
-  workspace: { payload: unknown; timestamp: number }
+  workspace: { payload: unknown; timestamp: number; sequence?: number }
   turnEnd: AgentTurnResult
   /**
    * The prompt reached the server: the box admitted the turn on the direct channel, or the
@@ -173,23 +303,38 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
-  /** @deprecated Never emitted: every message is sent at once, so there is no queue to change. */
+  /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
+  /** The provider's background work changed: the roster as T3 shows it waiting. */
+  backgroundTasks: { tasks: readonly AgentBackgroundTask[] }
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
    */
-  steered: { text: string; messageId: string }
+  steered: {
+    text: string
+    messageId: string
+    /** The steered message's own turn id: the `id` of its history item. */
+    turnId?: string
+    sequence?: number
+    /** The id `send` returned for that message. */
+    clientMessageId?: string
+  }
   /** A subagent's status, progress or child thread changed. */
-  subagent: AgentSubagent
+  subagent: AgentSubagent & { sequence?: number }
   /**
-   * Text of a subagent's own thread. It never reaches `delta` or `content`: the chat's answer
-   * stays the parent's.
+   * Text of a subagent's own thread. It also reaches `delta` and `content`, as in 0.2.13; this
+   * event tells it apart from the parent's.
    */
-  subagentDelta: { parentToolId: string; delta: string; kind: "text" | "thinking" }
-  /** A tool a subagent called, in its own thread. */
+  subagentDelta: {
+    parentToolId: string
+    delta: string
+    kind: "text" | "thinking"
+    itemDelta?: string
+  } & AgentPieceIdentity
+  /** A tool a subagent called, in its own thread. It also comes as `tool`, as in 0.2.13. */
   subagentTool: AgentToolEvent & { parentToolId: string }
-  error: { code?: string; error: string }
+  error: { code?: string; error: string; sequence?: number }
   /**
    * The subscription window the chat's harness reported during a turn. It comes only on the
    * direct channel of a business agent chat, and only when the turn runs on the person's or the
@@ -210,11 +355,19 @@ export interface AgentTaskSession {
   readonly status: AgentTaskSessionStatus
   readonly history: readonly AgentTimelineItem[]
   readonly content: string
-  /** @deprecated Always empty: a message sent while a turn runs goes to the box at once. */
+  /**
+   * T3's queue of the chat as the box reports it, in the order it reported the messages. A
+   * message leaves when it is taken into a turn, or when it ends before running.
+   */
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
-  send(prompt: string, options?: AgentSendOptions): void
+  /**
+   * Sends the message at once and returns the id it goes out with: the `clientMessageId` the box
+   * echoes when it takes the message (in `steered`, in `queue` and in the history item of the
+   * question). Undefined for a blank prompt, which is not sent.
+   */
+  send(prompt: string, options?: AgentSendOptions): string | undefined
   sendAndWait(prompt: string, options?: AgentSendAndWaitOptions): Promise<AgentTurnResult>
   cancel(): Promise<void>
   respondApproval(approved: boolean): void
@@ -225,12 +378,27 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
-  /** @deprecated No effect: the queue is always empty. */
+  /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
-  /** @deprecated No effect: the queue is always empty. */
+  /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
   removeQueueItem(id: string): void
-  /** @deprecated No effect: the queue is always empty. */
+  /** Takes every message in `queue` out, one `queued-run.cancel` each. */
   clearQueue(): void
+  /**
+   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`); only the
+   * box channel takes it. It leaves `queue` and enters the history where the turn takes it.
+   */
+  steerQueueItem(id: string): void
+  /**
+   * Lets the queue go on after a Stop held it (T3's `queue.resume`): T3's Stop ends the running
+   * turn and holds what waits, each item with `queueHeld`. Only the box channel takes it.
+   */
+  resumeQueue(): void
+  /**
+   * The work the provider keeps going in the background as T3 shows it waiting (a background
+   * command, a Monitor, a subagent), as the box last reported it. State, not history.
+   */
+  readonly backgroundTasks: readonly AgentBackgroundTask[]
   /** Stops one subagent and leaves the turn running (T3's `subagent.stop`). */
   stopSubagent(subagentId: string): void
   on<K extends keyof AgentTaskSessionEventMap>(
@@ -309,27 +477,64 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-// The box puts a message with no mode in T3's queue when a turn runs; the session steers it into
-// that turn, as it always did.
+// With no mode the box lets T3 decide, as it always did; queue and steer are asked on purpose.
 function messageInput(prompt: string, options: AgentSendOptions): AgentTaskInput {
   return {
     type: "message",
     content: prompt,
     ...(options.agentType ? { agentType: options.agentType } : {}),
     ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
-    mode: "steer",
+    ...(options.mode ? { mode: options.mode } : {}),
   }
 }
 
+function backgroundTasksOf(value: unknown): AgentBackgroundTask[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    const task = asObject(entry)
+    if (typeof task?.taskId !== "string" || typeof task.kind !== "string") return []
+    return [
+      {
+        taskId: task.taskId,
+        kind: task.kind,
+        ...(typeof task.description === "string" ? { description: task.description } : {}),
+        ...(typeof task.childThreadId === "string" ? { childThreadId: task.childThreadId } : {}),
+      },
+    ]
+  })
+}
+
+// Copied from the frame as the box sent it; nothing is derived when a field is absent.
+function pieceIdentityOf(
+  event: AgentTaskEvent,
+  payload: Record<string, unknown> | null,
+): AgentPieceIdentity {
+  const turnId = asObject(payload?.lifecycle)?.turnId
+  return {
+    ...sequenceOf(event),
+    ...(typeof payload?.itemId === "string" ? { itemId: payload.itemId } : {}),
+    ...(typeof turnId === "string" ? { turnId } : {}),
+  }
+}
+
+function itemDeltaOf(payload: Record<string, unknown> | null): { itemDelta?: string } {
+  return typeof payload?.itemDelta === "string" ? { itemDelta: payload.itemDelta } : {}
+}
+
+function sequenceOf(event: AgentTaskEvent): { sequence?: number } {
+  return typeof event.sequence === "number" ? { sequence: event.sequence } : {}
+}
+
 function toolEventOf(
+  event: AgentTaskEvent,
   payload: Record<string, unknown> | null,
   phase: "call" | "result",
-  timestamp: number,
 ): AgentToolEvent {
   return {
     tool: typeof payload?.name === "string" ? payload.name : "",
     phase,
-    timestamp,
+    timestamp: event.timestamp,
+    ...pieceIdentityOf(event, payload),
     ...(typeof payload?.toolId === "string" ? { toolId: payload.toolId } : {}),
     ...(phase === "call" && payload?.input !== undefined ? { input: payload.input } : {}),
     ...(phase === "result" ? { content: payload?.content ?? payload?.output } : {}),
@@ -344,7 +549,79 @@ function epochOf(value: unknown): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
+function timelineIdentityOf(message: AgentMessage): AgentTimelineItemIdentity {
+  return {
+    ...(typeof message.sequence === "number" ? { sequence: message.sequence } : {}),
+    ...(typeof message.lastSequence === "number" ? { lastSequence: message.lastSequence } : {}),
+    ...(typeof message.boxLog === "number" ? { boxLog: message.boxLog } : {}),
+    ...(typeof message.itemId === "string" ? { itemId: message.itemId } : {}),
+    ...(typeof message.reason === "string" ? { reason: message.reason } : {}),
+  }
+}
+
+// The history comes in the box's order, so its last numbered item is in the newest box log. A
+// piece's `sequence` is its first chunk; the replay starts after its last one, or it repeats text.
+function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCursor | undefined {
+  const newest = [...history].reverse().find((item) => typeof item.sequence === "number")
+  if (!newest) return undefined
+  let sequence = 0
+  for (const item of history) {
+    if (item.boxLog === newest.boxLog && typeof item.sequence === "number") {
+      sequence = Math.max(sequence, item.lastSequence ?? item.sequence)
+    }
+  }
+  return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
+}
+
+// A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
+// turn's answer is read from.
+function isChatRow(message: AgentMessage): boolean {
+  return (
+    (message.type === "TEXT" || message.type === "ERROR" || message.type === "TOOL_USE") &&
+    message.parentToolId === undefined
+  )
+}
+
+const REQUEST_ROW_KINDS: Record<string, "approval" | "userInputRequest" | undefined> = {
+  APPROVAL: "approval",
+  USER_INPUT_REQUEST: "userInputRequest",
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+// Every row as it came, one item per row: nothing is built from or attached to its neighbours. A
+// row whose payload does not parse stays useful as plain Agent text, as a tool row does.
 export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
+  if (message.type === "REASONING") {
+    return {
+      id: message.id,
+      kind: "reasoning",
+      text: message.content,
+      at: message.createdAt,
+      ...timelineIdentityOf(message),
+      ...parentToolIdOf(message.parentToolId),
+    }
+  }
+  const requestKind = REQUEST_ROW_KINDS[message.type]
+  if (requestKind) {
+    const payload = asObject(parseJson(message.content))
+    if (payload) {
+      return {
+        id: message.id,
+        kind: requestKind,
+        payload,
+        at: message.createdAt,
+        ...timelineIdentityOf(message),
+        ...parentToolIdOf(message.parentToolId),
+      }
+    }
+  }
   if (message.type === "TOOL_USE") {
     try {
       const payload = JSON.parse(message.content) as Record<string, unknown>
@@ -355,6 +632,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           tool: {
             tool: typeof payload.name === "string" ? payload.name : "",
             ...(typeof payload.toolId === "string" ? { toolId: payload.toolId } : {}),
+            ...parentToolIdOf(payload.parentToolId ?? message.parentToolId),
             ...(payload.input !== undefined ? { input: payload.input } : {}),
             ...(payload.content !== undefined
               ? { content: payload.content }
@@ -365,6 +643,8 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
               payload.output !== undefined || payload.content !== undefined ? "result" : "call",
           },
           at: message.createdAt,
+          ...timelineIdentityOf(message),
+          ...(asObject(message.subagent) ? { subagent: message.subagent } : {}),
         }
       }
     } catch {
@@ -378,7 +658,20 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     text: message.content,
     at: message.createdAt,
     ...(message.usage ? { usage: message.usage } : {}),
+    ...timelineIdentityOf(message),
+    ...(typeof message.clientMessageId === "string"
+      ? { clientMessageId: message.clientMessageId }
+      : {}),
+    ...parentToolIdOf(message.parentToolId),
   }
+}
+
+function liveAtOf(event: AgentTaskEvent): string {
+  return new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now()).toISOString()
+}
+
+function parentToolIdOf(value: unknown): { parentToolId?: string } {
+  return typeof value === "string" ? { parentToolId: value } : {}
 }
 
 export function createAgentTaskSessionManager(
@@ -490,6 +783,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openingAwaitsStart = false
   private turnBaselineIds = new Set<string>()
   private readonly subagentsById = new Map<string, AgentSubagent>()
+  private readonly subagentSequences = new Map<string, number>()
+  private queueItems: AgentQueueItem[] = []
+  private _backgroundTasks: readonly AgentBackgroundTask[] = []
+  /** The text of each message this session sent, by its `clientMessageId`. */
+  private readonly sentTexts = new Map<string, string>()
+  // Messages of this session `accepted` was already emitted for. The frame that names a message
+  // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
+  // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
+  private readonly acceptedIds: string[] = []
+  // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
+  private openingCursor: AgentHistoryCursor | undefined
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -529,21 +833,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get queue(): readonly AgentQueueItem[] {
-    return []
+    return [...this.queueItems]
   }
 
   get subagents(): readonly AgentSubagent[] {
     return [...this.subagentsById.values()]
   }
 
-  send(prompt: string, options: AgentSendOptions = {}): void {
+  send(prompt: string, options: AgentSendOptions = {}): string | undefined {
     this.requireOpen()
-    if (!prompt.trim()) return
-    if (this.isBusy()) {
-      this.steer(prompt, options)
-      return
-    }
-    this.startDispatch(prompt, options)
+    if (!prompt.trim()) return undefined
+    if (this.isBusy()) return this.steer(prompt, options)
+    const clientMessageId = newClientMessageId()
+    this.startDispatch(prompt, options, clientMessageId)
+    return clientMessageId
   }
 
   sendAndWait(prompt: string, options: AgentSendAndWaitOptions = {}): Promise<AgentTurnResult> {
@@ -554,12 +857,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const sendOptions: AgentSendOptions = {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+      ...(options.mode ? { mode: options.mode } : {}),
     }
     if (this.isBusy()) {
       this.steer(prompt, sendOptions, waiter)
       return waiter.promise
     }
-    this.startDispatch(prompt, sendOptions, waiter)
+    this.startDispatch(prompt, sendOptions, newClientMessageId(), waiter)
     return waiter.promise
   }
 
@@ -620,6 +924,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       ...(options.limit !== undefined ? { size: options.limit } : {}),
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     const history = this.history
@@ -627,11 +932,48 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return history
   }
 
-  editQueueItem(): void {}
+  editQueueItem(id: string, text: string): void {
+    this.requireOpen()
+    if (this.sentTexts.has(id)) this.sentTexts.set(id, text)
+    void this.sendInput({ type: "queued-run.edit", clientMessageId: id, text }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to edit the queued Agent message", error)
+      },
+    )
+  }
 
-  removeQueueItem(): void {}
+  removeQueueItem(id: string): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queued-run.cancel", clientMessageId: id }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to remove the queued Agent message", error)
+      },
+    )
+  }
 
-  clearQueue(): void {}
+  clearQueue(): void {
+    for (const item of this.queueItems) this.removeQueueItem(item.id)
+  }
+
+  steerQueueItem(id: string): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
+      (error: unknown) => {
+        this.emitError("Failed to steer the queued Agent message", error)
+      },
+    )
+  }
+
+  resumeQueue(): void {
+    this.requireOpen()
+    void this.sendInput({ type: "queue.resume" }).catch((error: unknown) => {
+      this.emitError("Failed to resume the Agent queue", error)
+    })
+  }
+
+  get backgroundTasks(): readonly AgentBackgroundTask[] {
+    return this._backgroundTasks
+  }
 
   stopSubagent(subagentId: string): void {
     this.requireOpen()
@@ -678,9 +1020,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (this.isClosed()) return false
       await this.loadHistory()
       if (this.isClosed()) return false
+      this.openingCursor = historyCursorOf(this._history)
       await this.ensureChannel()
       if (this.isClosed()) return false
-      this.setStatus("idle")
+      // The replay may have opened the turn that runs on the box.
+      if (this._status === "opening") this.setStatus("idle")
       return true
     } catch (error) {
       if (this.isClosed()) return false
@@ -690,13 +1034,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private startDispatch(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+  private startDispatch(
+    prompt: string,
+    options: AgentSendOptions,
+    clientMessageId: string,
+    waiter?: TurnWaiter,
+  ): void {
+    this.sentTexts.set(clientMessageId, prompt)
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
       handedOver = resolve
     })
-    const dispatch = this.dispatchSend(prompt, options, handedOver, waiter)
+    const dispatch = this.dispatchSend(prompt, options, clientMessageId, handedOver, waiter)
       .catch((error: unknown) => {
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
@@ -708,8 +1058,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       })
       .finally(() => {
         handedOver()
-        this.dispatching = false
-        if (this.dispatch === dispatch) this.dispatch = null
+        // A later message may be dispatching already: the box took this one before it ended here.
+        if (this.dispatch === dispatch) {
+          this.dispatching = false
+          this.dispatch = null
+        }
       })
     this.dispatch = dispatch
   }
@@ -717,13 +1070,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private async dispatchSend(
     prompt: string,
     options: AgentSendOptions,
+    clientMessageId: string,
     handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
     if (this.openingPromise && !(await this.openingPromise)) {
       throw new Error("Agent task session could not be opened.")
     }
-    if (this.isClosed() || waiter?.settled) return false
+    // A waiter that gave up on `timeoutMs` or `signal` only stopped waiting: the message still
+    // goes out and the session follows its turn, as it does after the turn started.
+    if (this.isClosed()) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
     if (this.isClosed()) {
@@ -731,12 +1087,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       // Apps close the creating session inside taskCreated and reopen by task id, so the
       // input still goes out over REST. No channel, status, or event for a closed session,
       // and a failure has no listener left to hear it.
-      await this.sendInput(input).catch(() => undefined)
+      await this.handOver(input, clientMessageId).catch(() => undefined)
       return false
     }
-    if (waiter?.settled) return false
     await this.ensureChannel()
-    if (this.isClosed() || waiter?.settled) return false
+    if (this.isClosed()) return false
     await this.captureTurnBaseline()
     this._content = ""
     this.recoveryUsed = false
@@ -746,13 +1101,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.activeWaiter = waiter
     this.setStatus("streaming")
     this.emit("turnStart", {})
-    this.openingMessageId = newClientMessageId()
+    this.openingMessageId = clientMessageId
     this.openingAwaitsStart = true
     const { admitted, direct } = await this.handOver(input, this.openingMessageId)
     if (!direct) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
-    this.emit("accepted", {})
+    this.acceptOnce(clientMessageId)
     return true
   }
 
@@ -766,7 +1121,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // model alone by itself and needs them for a message that becomes a turn of its own. Only on
   // the Copilot path, with a turn running, they are dropped: the Copilot restarts the live
   // session for a message that asks for another model, which would end that turn.
-  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): void {
+  private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): string {
     const steered: SteeredMessage = {
       clientMessageId: newClientMessageId(),
       ...(waiter ? { waiter } : {}),
@@ -777,6 +1132,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     } else {
       this.strayedSteers.push(steered)
     }
+    this.sentTexts.set(steered.clientMessageId, prompt)
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -803,7 +1159,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         // A box that does not echo the id is only heard here. A queued one is not in a turn yet.
         if (!steered.queued) this.steerTaken(steered)
-        this.emit("accepted", {})
+        this.acceptOnce(steered.clientMessageId)
       })
       .catch((error: unknown) => {
         this.forgetSteer(steered)
@@ -813,6 +1169,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .finally(() => {
         this.pendingSteers -= 1
       })
+    return steered.clientMessageId
   }
 
   // The box took the steer. Into the turn it was sent to, when that turn still runs; into a turn
@@ -865,7 +1222,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
   }
 
-  private openTurnFor(waiter?: TurnWaiter): void {
+  private openTurnFor(
+    waiter?: TurnWaiter,
+    start: AgentTaskSessionEventMap["turnStart"] = {},
+  ): void {
     if (this.isClosed()) return
     if (this._status !== "streaming" && this._status !== "cancelled") {
       this._content = ""
@@ -878,7 +1238,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.turnBaselineIds = new Set(this._history.map((item) => item.id))
       void this.captureTurnBaseline().catch(() => undefined)
       this.setStatus("streaming")
-      this.emit("turnStart", {})
+      this.emit("turnStart", start)
     }
     if (!waiter) return
     if (!this.activeWaiter) this.activeWaiter = waiter
@@ -931,6 +1291,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // was before the direct channel. A chat with an agent asks, and the Copilot has the last
     // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
+    const historyCursor = this.openingCursor
+    this.openingCursor = undefined
     this.connectionPromise = source
       .open(
         this._taskId,
@@ -940,6 +1302,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         },
         abort.signal,
         this.options.transport,
+        historyCursor,
       )
       .then((connection) => {
         if (this.isClosed() || this._status === "error") {
@@ -1000,6 +1363,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
@@ -1009,6 +1373,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
       sort: "createdAt,desc",
+      kinds: "all",
     })
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     this.emit("historyLoaded", { history: this.history })
@@ -1016,7 +1381,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
     // row that closes a turn, with its usage, answers it, and not one closing the turn of a prompt
     // the baseline already had. With the live terminal already heard, the turn is known to be over.
-    const recovered = page.content.find(
+    const rows = page.content.filter(isChatRow)
+    const recovered = rows.find(
       (message) =>
         !this.turnBaselineIds.has(message.id) &&
         message.sender !== "USER" &&
@@ -1031,7 +1397,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.endedPollsWithoutRow += 1
         if (this.endedPollsWithoutRow < ENDED_POLLS_BEFORE_NEWEST) return false
       }
-      const newest = page.content.find(
+      const newest = rows.find(
         (message) =>
           !this.turnBaselineIds.has(message.id) &&
           message.sender !== "USER" &&
@@ -1086,17 +1452,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`.
+    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
+    // echoes it as on the direct channel.
+    const id = clientMessageId === undefined ? {} : { clientMessageId }
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content }
+          ? { type: "message", content: input.content, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
     await this.dependencies.tasks.sendInput(this._taskId, rest)
@@ -1119,6 +1488,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return
     }
     const lifecycle = asObject(payload?.lifecycle)
+    if (this.endsQueuedMessage(event, payload, lifecycle)) return
     if (this.repeatsTheRunningTurn(event, lifecycle)) return
     if (event.type === "stepStart" || event.type === "steer") {
       // A box that names no message is answering ours: it decides one message at a time. Steered
@@ -1142,35 +1512,83 @@ class CoreAgentTaskSession implements AgentTaskSession {
       // texto e o que faz a resposta recuperada aparecer; sem isso ela chega e morre aqui.
       case "textDelta":
       case "textChunk":
-        this.consumeDelta(payload, "text")
+        this.consumeDelta(event, payload, "text")
         break
       case "thinking":
-        this.consumeDelta(payload, "thinking")
+        this.consumeDelta(event, payload, "thinking")
         break
       case "toolCall":
-        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "call", event.timestamp)
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(event, payload, "call")
         break
+      // A result can come after its turn ended: a subagent in the background settles later, and
+      // the box sends its result under the turn that called it. It reaches the app as that tool's
+      // result and touches no turn.
       case "toolResult":
-        if (!this.isFinishedTurnFrame(lifecycle)) this.emitTool(payload, "result", event.timestamp)
+        this.emitTool(event, payload, "result")
         break
       case "workspace":
-        this.emit("workspace", { payload: event.payload, timestamp: event.timestamp })
+        this.emit("workspace", {
+          payload: event.payload,
+          timestamp: event.timestamp,
+          ...sequenceOf(event),
+        })
         break
       case "stepStart":
+        if (!this.isFinishedTurnFrame(lifecycle)) {
+          this.liveQuestion(event, payload?.text, lifecycle?.clientMessageId)
+        }
+        // The box announcing a turn is what starts one, with its content clean: whether a message
+        // steered or got a turn of its own is the box's call, never this session's timing. A
+        // message sent right after a `turnEnd`, before the previous one's admission was heard,
+        // must not take the text of the turn that ended.
+        if (
+          typeof lifecycle?.turnId === "string" &&
+          !this.isFinishedTurnFrame(lifecycle) &&
+          this._status !== "streaming" &&
+          this._status !== "cancelled"
+        ) {
+          this.openTurnFor(undefined, {
+            ...(typeof payload?.text === "string" ? { text: payload.text } : {}),
+            ...(typeof lifecycle.clientMessageId === "string"
+              ? { clientMessageId: lifecycle.clientMessageId }
+              : {}),
+            ...pieceIdentityOf(event, payload),
+          })
+        }
+        this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(asObject(payload?.lifecycle))
+        this.acceptNamed(lifecycle?.clientMessageId)
         break
       case "steer":
+        this.liveQuestion(event, payload?.text, lifecycle?.clientMessageId)
+        this.leaveQueue(lifecycle?.clientMessageId)
         this.steerOpenedBy(lifecycle)
+        this.acceptNamed(lifecycle?.clientMessageId)
         this.emit("steered", {
           text: typeof payload?.text === "string" ? payload.text : "",
           messageId: typeof payload?.messageId === "string" ? payload.messageId : "",
+          ...(typeof payload?.turnId === "string" ? { turnId: payload.turnId } : {}),
+          ...sequenceOf(event),
+          ...(typeof lifecycle?.clientMessageId === "string"
+            ? { clientMessageId: lifecycle.clientMessageId }
+            : {}),
         })
         break
+      case "backgroundTasks":
+        this._backgroundTasks = backgroundTasksOf(payload?.tasks)
+        this.emit("backgroundTasks", { tasks: this._backgroundTasks })
+        break
       case "messageQueued":
+        if (payload?.cancelled === true) {
+          this.cancelQueued(payload, lifecycle)
+          break
+        }
+        this.applyQueued(event, payload, lifecycle)
         this.steerQueuedBy(asObject(payload?.lifecycle))
+        this.acceptNamed(lifecycle?.clientMessageId)
         break
       case "subagentUpdate":
-        this.applySubagent(payload)
+        this.applySubagent(event, payload)
         break
       case "providerUsage": {
         const usage = providerUsageOf(payload)
@@ -1185,12 +1603,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // must not end the turn running now.
         const finished = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : undefined
         if (finished !== undefined && this.finishedTurnIds.includes(finished)) break
+        // A box terminal that names no turn cannot end one the box named. A box asked to replay
+        // past its log ends with such a frame the turn of a box that is gone, and the turn
+        // running now was another one (dev, 2026-10-20).
+        if (finished === undefined && lifecycle && this.turnIds.size > 0) break
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
+        const end = {
+          ...sequenceOf(event),
+          ...(finished === undefined ? {} : { turnId: finished }),
+        }
         if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
           this.rememberFinishedTurn(lifecycle)
-          this.finishTurn("interrupted", usage)
+          this.finishTurn("interrupted", usage, end)
           break
         }
         if (reason === "stop" || reason === "endTurn") {
@@ -1205,7 +1631,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
               })
             }
           } else {
-            this.finishTurn(reason, usage)
+            this.finishTurn(reason, usage, end)
           }
         }
         break
@@ -1214,10 +1640,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const code = typeof payload?.code === "string" ? payload.code : undefined
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
-        this.emit("error", { ...(code ? { code } : {}), error: message })
-        // The box refused an answer to a T3 input request: T3 still waits on that request and the
-        // turn goes on.
+        this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
+        // The box refused an answer to a T3 input request, or a queue command: T3 still waits on
+        // that request, the queued message stays where it is, and no turn ends.
         if (!payload?.lifecycle && payload?.requestId !== undefined) break
+        if (typeof payload?.command === "string") break
         // A refusal names no turn. One naming a message other than the turn's opening one is
         // that message's: the box refused it and the turn goes on. A box that names none:
         // once the turn that runs was accepted, one arriving with a steer pending is the steer's.
@@ -1236,9 +1663,147 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         break
       }
+      case "approval":
+      case "user_input_request":
+        this.liveRequest(event, payload)
+        break
       default:
         break
     }
+  }
+
+  // The box admits every message with a `messageQueued` of no position; only one with a position
+  // is in T3's queue.
+  private applyQueued(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    lifecycle: Record<string, unknown> | null,
+  ): void {
+    const id = payload?.clientMessageId ?? lifecycle?.clientMessageId
+    const position = payload?.position
+    if (typeof id !== "string" || typeof position !== "number") return
+    const known = this.queueItems.find((item) => item.id === id)
+    if (this.alreadyApplied(known?.sequence, event)) return
+    const item: AgentQueueItem = {
+      id,
+      text: typeof payload?.text === "string" ? payload.text : (known?.text ?? ""),
+      createdAt: known?.createdAt ?? event.timestamp,
+      position,
+      ...(typeof payload?.queueHeld === "boolean" ? { queueHeld: payload.queueHeld } : {}),
+      ...sequenceOf(event),
+      ...(typeof lifecycle?.turnId === "string" ? { turnId: lifecycle.turnId } : {}),
+    }
+    this.queueItems = known
+      ? this.queueItems.map((current) => (current === known ? item : current))
+      : [...this.queueItems, item]
+    this.emit("queueChange", { queue: this.queue })
+  }
+
+  // The box took the message out of T3's queue on a `queued-run.cancel`, with no terminal of its
+  // own: it leaves the queue and only its own `sendAndWait` ends. The message that opened this
+  // session's turn was that turn, still waiting behind another one, which ends with it.
+  private cancelQueued(
+    payload: Record<string, unknown>,
+    lifecycle: Record<string, unknown> | null,
+  ): void {
+    const id = payload.clientMessageId ?? lifecycle?.clientMessageId
+    if (typeof id !== "string") return
+    this.leaveQueue(id)
+    const cancelled = new AgentTaskTurnError("The queued Agent message was cancelled.")
+    if (id === this.openingMessageId) {
+      this.cancelOpening(cancelled)
+      return
+    }
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === id,
+    )
+    if (!steered) return
+    this.forgetSteer(steered)
+    steered.waiter?.reject(cancelled)
+  }
+
+  // A frame naming one of this session's messages in flight is the box taking it.
+  private acceptNamed(id: unknown): void {
+    if (typeof id !== "string") return
+    // The box took the opening message: from here a new message is the box's to place, not one
+    // this session holds as a steer because the admission had not reached it yet.
+    if (id === this.openingMessageId) this.dispatching = false
+    const ours =
+      id === this.openingMessageId ||
+      [...this.steers, ...this.strayedSteers].some((pending) => pending.clientMessageId === id)
+    if (ours) this.acceptOnce(id)
+  }
+
+  private acceptOnce(id: string): void {
+    if (this.acceptedIds.includes(id)) return
+    this.acceptedIds.push(id)
+    if (this.acceptedIds.length > 32) this.acceptedIds.shift()
+    this.emit("accepted", {})
+  }
+
+  // As in T3, cancelling a queued run only takes that run out: no turn ends with it. The message
+  // this session opened its turn with never ran, so only its own `sendAndWait` is rejected. A
+  // message of this session still queued behind it keeps the session waiting for the turn the
+  // box opens for it; with none, nothing of this session runs and it goes back to idle.
+  private cancelOpening(cancelled: AgentTaskTurnError): void {
+    this.openingMessageId = undefined
+    if (!this.openingAwaitsStart) return
+    this.openingAwaitsStart = false
+    this.activeWaiter?.reject(cancelled)
+    this.activeWaiter = undefined
+    if (this._status !== "streaming" && this._status !== "cancelled") return
+    if (this.steers.length === 0 && this.strayedSteers.length === 0) this.setStatus("idle")
+  }
+
+  // After a replay the box sends the queue and the subagents as they are, each a copy of the line
+  // that said it last, with that line's sequence: state this session may already hold.
+  private alreadyApplied(applied: number | undefined, event: AgentTaskEvent): boolean {
+    return applied !== undefined && typeof event.sequence === "number" && event.sequence <= applied
+  }
+
+  private leaveQueue(id: unknown): AgentQueueItem | undefined {
+    const item = this.queueItems.find((current) => current.id === id)
+    if (!item) return undefined
+    this.queueItems = this.queueItems.filter((current) => current !== item)
+    this.emit("queueChange", { queue: this.queue })
+    return item
+  }
+
+  // A queued message that ends before running (taken out of the queue, or dropped by T3) closes
+  // with a terminal of its own while another turn may run: it leaves the queue and ends its own
+  // `sendAndWait`, and the running turn goes on. The opening message of this session's turn is
+  // that turn, and ends it as before.
+  private endsQueuedMessage(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    lifecycle: Record<string, unknown> | null,
+  ): boolean {
+    // A refusal names no turn: the box refusing a cancel or edit leaves the message where it is.
+    if ((event.type !== "error" && event.type !== "stepFinish") || !lifecycle) return false
+    const id = payload?.clientMessageId ?? lifecycle.clientMessageId
+    const turnId = lifecycle.turnId
+    const item = this.queueItems.find(
+      (current) => current.id === id || (turnId !== undefined && current.turnId === turnId),
+    )
+    if (!item) return false
+    this.leaveQueue(item.id)
+    if (item.id === this.openingMessageId) return false
+    const message =
+      typeof payload?.message === "string"
+        ? payload.message
+        : "The queued Agent message ended before it ran."
+    if (event.type === "error") {
+      const code = typeof payload?.code === "string" ? payload.code : undefined
+      this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
+    }
+    const steered = [...this.steers, ...this.strayedSteers].find(
+      (pending) => pending.clientMessageId === item.id,
+    )
+    if (steered) {
+      this.forgetSteer(steered)
+      steered.waiter?.reject(new AgentTaskTurnError(message))
+    }
+    return true
   }
 
   private repeatsTheRunningTurn(
@@ -1275,7 +1840,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.finishedTurnIds.length > 8) this.finishedTurnIds.shift()
   }
 
-  private consumeDelta(payload: Record<string, unknown> | null, kind: "text" | "thinking"): void {
+  private consumeDelta(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    kind: "text" | "thinking",
+  ): void {
     const lifecycle = asObject(payload?.lifecycle)
     const turnId = typeof lifecycle?.turnId === "string" ? lifecycle.turnId : null
     if (turnId && this.finishedTurnIds.includes(turnId)) return
@@ -1290,47 +1859,199 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.emit("turnStart", {})
     }
     if (kind === "text") this._content += text
-    this.emit("delta", { delta: text, kind })
+    this.liveText(event, payload, kind)
+    this.emit("delta", {
+      delta: text,
+      kind,
+      ...itemDeltaOf(payload),
+      ...pieceIdentityOf(event, payload),
+    })
   }
 
   private emitTool(
+    event: AgentTaskEvent,
     payload: Record<string, unknown> | null,
     phase: "call" | "result",
-    timestamp: number,
   ): void {
-    this.emit("tool", toolEventOf(payload, phase, timestamp))
+    const tool = toolEventOf(event, payload, phase)
+    this.liveTool(tool, event)
+    this.emit("tool", tool)
   }
 
-  // A child thread's frames are the subagent's conversation: they open no turn, settle no message
-  // and never reach the chat's `content`.
+  // The conversation as it happens: the box's frames grow `history` while a turn runs, one item
+  // per piece of T3, the same pieces the Copilot records and the reload at the turn's end brings
+  // back in the same order. A piece the loaded history already has keeps growing in place, and a
+  // frame it already holds (a replay after a reconnect or an F5) changes nothing.
+  private livePiece(
+    match: (item: AgentTimelineItem) => boolean,
+    create: () => AgentTimelineItem,
+    update: (item: AgentTimelineItem) => AgentTimelineItem,
+  ): void {
+    const index = this._history.findIndex(match)
+    const current = this._history[index]
+    if (current === undefined) this._history.push(create())
+    else this._history[index] = update(current)
+  }
+
+  // The question enters the conversation where the box took it: its turn's `stepStart`, or the
+  // `steer` that took it into the running turn. Until then it is in `queue`.
+  private liveQuestion(event: AgentTaskEvent, boxText: unknown, clientMessageId: unknown): void {
+    const id = typeof clientMessageId === "string" ? clientMessageId : undefined
+    // The question as the person wrote it, as the Copilot records it: the box has the text T3 ran,
+    // which after a box that died carries the recovered context ahead of it.
+    const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
+    if (typeof text !== "string" || !text) return
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    this.livePiece(
+      (item) =>
+        item.kind === "user" &&
+        ((id !== undefined && item.clientMessageId === id) ||
+          (sequence !== undefined && item.sequence === sequence && item.text === text)),
+      () => ({
+        id: `live:user:${id ?? sequence ?? this._history.length}`,
+        kind: "user",
+        text,
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(id === undefined ? {} : { clientMessageId: id }),
+      }),
+      (item) => item,
+    )
+  }
+
+  private liveText(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    kind: "text" | "thinking",
+    parentToolId?: string,
+  ): void {
+    const itemId = typeof payload?.itemId === "string" ? payload.itemId : undefined
+    if (itemId === undefined) return
+    const piece =
+      itemDeltaOf(payload).itemDelta ?? (typeof payload?.text === "string" ? payload.text : "")
+    const itemKind = kind === "thinking" ? "reasoning" : "agent"
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    this.livePiece(
+      (item) => item.kind === itemKind && item.itemId === itemId,
+      () => ({
+        id: `live:${itemKind}:${itemId}`,
+        kind: itemKind,
+        text: piece,
+        at: liveAtOf(event),
+        itemId,
+        ...(sequence === undefined ? {} : { sequence }),
+        ...parentToolIdOf(parentToolId),
+      }),
+      (item) => {
+        const held = item.lastSequence ?? item.sequence
+        if (!("text" in item) || (sequence !== undefined && held !== undefined && sequence <= held))
+          return item
+        return {
+          ...item,
+          text: item.text + piece,
+          ...(sequence === undefined ? {} : { lastSequence: sequence }),
+        }
+      },
+    )
+  }
+
+  private liveTool(tool: AgentToolEvent, event: AgentTaskEvent): void {
+    const toolId = tool.toolId
+    if (toolId === undefined) return
+    // The call and the result are each an item where it came, as the stream sends them and the
+    // Copilot records them (two rows, as in 0.2.13): a result is not moved up onto its call.
+    this.livePiece(
+      (item) =>
+        item.kind === "tool" && item.tool.toolId === toolId && item.tool.phase === tool.phase,
+      () => ({
+        id: tool.phase === "result" ? `live:tool:${toolId}:result` : `live:tool:${toolId}`,
+        kind: "tool",
+        tool,
+        at: liveAtOf(event),
+        ...(tool.sequence === undefined ? {} : { sequence: tool.sequence }),
+        ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
+      }),
+      (item) =>
+        item.kind === "tool"
+          ? { ...item, tool: { ...item.tool, ...tool, input: tool.input ?? item.tool.input } }
+          : item,
+    )
+  }
+
+  // An approval or a question T3 asks mid-turn enters where it came, with the frame's payload as
+  // it came, as the Copilot records it (`APPROVAL` and `USER_INPUT_REQUEST` rows). It still
+  // reaches the app as a `raw` event, as before.
+  private liveRequest(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    parentToolId?: string,
+  ): void {
+    if (!payload) return
+    const kind = event.type === "approval" ? "approval" : "userInputRequest"
+    const itemId = typeof payload.itemId === "string" ? payload.itemId : undefined
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if (itemId === undefined && sequence === undefined) return
+    this.livePiece(
+      (item) =>
+        item.kind === kind &&
+        (itemId !== undefined ? item.itemId === itemId : item.sequence === sequence),
+      () => ({
+        id: `live:${kind}:${itemId ?? sequence}`,
+        kind,
+        payload,
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(itemId === undefined ? {} : { itemId }),
+        ...parentToolIdOf(parentToolId),
+      }),
+      (item) => item,
+    )
+  }
+
+  // A child thread's frames are the subagent's conversation: they open no turn and settle no
+  // message. Its text and tools still reach `delta`, `content` and `tool` as they did in 0.2.13,
+  // which knew no subagents, so an app that only bumps the version sees what it saw before.
   private handleSubagentFrame(event: AgentTaskEvent, payload: Record<string, unknown>): void {
     const parentToolId = payload.parentToolId as string
     switch (event.type) {
       case "textDelta":
       case "textChunk":
-      case "thinking":
-        this.emit("subagentDelta", {
-          parentToolId,
-          delta: typeof payload.text === "string" ? payload.text : "",
-          kind: event.type === "thinking" ? "thinking" : "text",
-        })
+      case "thinking": {
+        const delta = typeof payload.text === "string" ? payload.text : ""
+        const kind = event.type === "thinking" ? "thinking" : "text"
+        const identity = { ...itemDeltaOf(payload), ...pieceIdentityOf(event, payload) }
+        if (kind === "text") this._content += delta
+        this.liveText(event, payload, kind, parentToolId)
+        this.emit("delta", { delta, kind, parentToolId, ...identity })
+        this.emit("subagentDelta", { parentToolId, delta, kind, ...identity })
         break
+      }
       case "toolCall":
-      case "toolResult":
-        this.emit("subagentTool", {
-          ...toolEventOf(payload, event.type === "toolCall" ? "call" : "result", event.timestamp),
+      case "toolResult": {
+        const tool = {
+          ...toolEventOf(event, payload, event.type === "toolCall" ? "call" : "result"),
           parentToolId,
-        })
+        }
+        this.liveTool(tool, event)
+        this.emit("tool", tool)
+        this.emit("subagentTool", tool)
+        break
+      }
+      case "approval":
+      case "user_input_request":
+        this.liveRequest(event, payload, parentToolId)
         break
       default:
         break
     }
   }
 
-  private applySubagent(payload: Record<string, unknown> | null): void {
+  private applySubagent(event: AgentTaskEvent, payload: Record<string, unknown> | null): void {
     const subagentId = payload?.subagentId
     const toolId = payload?.toolId
     if (typeof subagentId !== "string" || typeof toolId !== "string") return
+    if (this.alreadyApplied(this.subagentSequences.get(subagentId), event)) return
+    if (typeof event.sequence === "number") this.subagentSequences.set(subagentId, event.sequence)
     // T3 can report a subagent without a status; it keeps the one it had.
     const status =
       typeof payload?.status === "string"
@@ -1351,10 +2072,34 @@ class CoreAgentTaskSession implements AgentTaskSession {
         : {}),
     }
     this.subagentsById.set(subagentId, subagent)
-    this.emit("subagent", subagent)
+    // The call that spawned it carries its last state, as the history records it.
+    const index = this._history.findIndex(
+      (item) => item.kind === "tool" && item.tool.toolId === toolId,
+    )
+    const spawn = this._history[index]
+    if (spawn?.kind === "tool") {
+      this._history[index] = {
+        ...spawn,
+        subagent: {
+          ...spawn.subagent,
+          toolId,
+          subagentId,
+          status,
+          ...(subagent.progress === undefined ? {} : { progress: subagent.progress }),
+          ...(subagent.childThreadId === undefined
+            ? {}
+            : { childThreadId: subagent.childThreadId }),
+        },
+      }
+    }
+    this.emit("subagent", { ...subagent, ...sequenceOf(event) })
   }
 
-  private finishTurn(reason: string, usage?: AgentTurnUsage): void {
+  private finishTurn(
+    reason: string,
+    usage?: AgentTurnUsage,
+    end: { sequence?: number; turnId?: string } = {},
+  ): void {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
@@ -1373,6 +2118,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       content: this._content,
       reason,
       ...(usage ? { usage } : {}),
+      ...end,
     }
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
