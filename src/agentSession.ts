@@ -411,6 +411,17 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
+  /**
+   * Whether the Copilot has rows older than the oldest item `history` holds, as the last page read
+   * said. False until a history was loaded.
+   */
+  readonly hasOlder: boolean
+  /**
+   * Reads the next page back, with the size `loadHistory` used, and puts the rows `history` does
+   * not have yet before it, in the box's order. Resolves with the items it added (none when there
+   * was no older page) and emits `historyLoaded`. A reload of the newest page keeps them.
+   */
+  loadOlder(): Promise<readonly AgentTimelineItem[]>
   /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
   /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
@@ -830,6 +841,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // as T3 shows its optimistic message: apart, so a history reload neither drops nor repeats them.
   private pendingQuestions: AgentTimelineItem[] = []
   private _connecting = false
+  // The pages behind the newest one, read by `loadOlder`, oldest first: a reload of the newest page
+  // (an open, a recovery) replaces only what it covers.
+  private olderItems: AgentTimelineItem[] = []
+  private historyPageSize = 50
+  // Rows the Copilot has behind the oldest one read, and its row count at the last read. Rows only
+  // ever enter at the newest end, so the count behind holds while new rows push the offsets.
+  private olderRemaining = 0
+  private historyTotal = 0
+  private olderPromise: Promise<readonly AgentTimelineItem[]> | null = null
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
 
@@ -980,10 +1000,72 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
+    this.historyPageSize = options.limit ?? this.historyPageSize
+    this.olderItems = []
+    this.historyTotal = page.page.totalElements
+    this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
+  }
+
+  get hasOlder(): boolean {
+    return this.olderRemaining > 0
+  }
+
+  loadOlder(): Promise<readonly AgentTimelineItem[]> {
+    if (!this.olderPromise) {
+      this.olderPromise = this.readOlder().finally(() => {
+        this.olderPromise = null
+      })
+    }
+    return this.olderPromise
+  }
+
+  // The Copilot pages by offset from the newest row, and rows recorded since the last read push
+  // the older ones further back. The count behind does not move, so the page's own total says
+  // where the rows behind `history` start in it; a page the new rows pushed past is read again at
+  // the offset they moved it to.
+  private async readOlder(): Promise<readonly AgentTimelineItem[]> {
+    const size = this.historyPageSize
+    // Newest first, as the pages come: the rows right behind `history`, up to one page of them.
+    const rows: AgentMessage[] = []
+    while (this._taskId && this.olderRemaining > 0 && rows.length < size && !this.isClosed()) {
+      const number = Math.floor((this.historyTotal - this.olderRemaining) / size)
+      const page = await this.dependencies.tasks.listMessages(this._taskId, {
+        page: number,
+        size,
+        sort: "createdAt,desc",
+        kinds: "all",
+      })
+      const moved = page.page.totalElements !== this.historyTotal
+      this.historyTotal = page.page.totalElements
+      const first = this.historyTotal - this.olderRemaining - number * size
+      if (first >= page.content.length) {
+        // Rows recorded meanwhile pushed the ones behind past this page; a page that comes short
+        // with no new rows is the Copilot holding fewer rows than it counted.
+        if (moved) continue
+        this.olderRemaining = 0
+        break
+      }
+      const taken = page.content.slice(
+        first,
+        first + Math.min(this.olderRemaining, size - rows.length),
+      )
+      rows.push(...taken)
+      this.olderRemaining -= taken.length
+    }
+    const held = new Set(this._history.map((item) => item.id))
+    const older = rows
+      .reverse()
+      .map(toAgentTimelineItem)
+      .filter((item) => !held.has(item.id))
+    if (older.length === 0) return []
+    this.olderItems = [...older, ...this.olderItems]
+    this._history = [...older, ...this._history]
+    this.emit("historyLoaded", { history: this.history })
+    return older
   }
 
   editQueueItem(id: string, text: string): void {
@@ -1448,7 +1530,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.historyTotal = page.page.totalElements
+    const newest = [...page.content].reverse().map(toAgentTimelineItem)
+    const covered = new Set(newest.map((item) => item.id))
+    this._history = [...this.olderItems.filter((item) => !covered.has(item.id)), ...newest]
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the

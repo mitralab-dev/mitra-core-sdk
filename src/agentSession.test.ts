@@ -1632,3 +1632,93 @@ describe("Agent message pending until the box takes it", () => {
     expect(users(session).map((item) => item.kind === "user" && item.text)).toEqual(["first"])
   })
 })
+
+describe("Agent older history", () => {
+  // The Copilot's pages: newest first by offset, over rows kept oldest first.
+  function pagedTasks(rows: AgentMessage[]) {
+    return createTasks({
+      listMessages: vi.fn<AgentTasksModule["listMessages"]>(async (_id, options = {}) => {
+        const size = options.size ?? 50
+        const number = options.page ?? 0
+        const newestFirst = [...rows].reverse()
+        return {
+          content: newestFirst.slice(number * size, (number + 1) * size),
+          page: {
+            size,
+            totalElements: rows.length,
+            totalPages: Math.ceil(rows.length / size),
+            number,
+          },
+        }
+      }),
+    })
+  }
+
+  const row = (n: number) => ({ ...message(`m${n}`, "AGENT", `text ${n}`), sequence: n })
+
+  // Opened and settled: the opening's own history read is done before the test reads its page.
+  async function opened(tasks: ReturnType<typeof createTasks>) {
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    return session
+  }
+
+  const texts = (session: AgentTaskSession) =>
+    session.history.map((item) => (item.kind === "agent" ? item.text : item.kind))
+
+  it("puts the page behind the newest one before it, in order, until there is none", async () => {
+    const rows = Array.from({ length: 5 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    expect(texts(session)).toEqual(["text 4", "text 5"])
+    expect(session.hasOlder).toBe(true)
+
+    await expect(session.loadOlder()).resolves.toHaveLength(2)
+    expect(texts(session)).toEqual(["text 2", "text 3", "text 4", "text 5"])
+    await session.loadOlder()
+    expect(texts(session)).toEqual(["text 1", "text 2", "text 3", "text 4", "text 5"])
+    expect(session.hasOlder).toBe(false)
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(tasks.listMessages).toHaveBeenLastCalledWith("task-1", {
+      page: 2,
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+  })
+
+  it("neither repeats nor skips a row when rows were recorded since the newest page", async () => {
+    const rows = Array.from({ length: 6 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    // Three rows land after the first read: the next page is now only what the session holds.
+    rows.push(row(7), row(8), row(9))
+
+    await session.loadOlder()
+
+    expect(texts(session)).toEqual(["text 3", "text 4", "text 5", "text 6"])
+  })
+
+  it("keeps the older pages when a recovery reloads the newest rows", async () => {
+    const rows = Array.from({ length: 4 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+    await session.loadHistory({ limit: 2 })
+    await session.loadOlder()
+
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    rows.push({ ...closing("m5", "text 5"), sequence: 5 })
+    source.disconnect(new Error("network"))
+    await expect(result).resolves.toMatchObject({ content: "text 5" })
+
+    expect(texts(session)).toEqual(["text 1", "text 2", "text 3", "text 4", "text 5"])
+  })
+})

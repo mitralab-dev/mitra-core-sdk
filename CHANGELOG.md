@@ -21,6 +21,10 @@ did changes.
   models and, for the built-in ones, the reading `usage(provider)` answers.
 - The session's `providerUsage` carries `provider`, the credential of the login the reading is
   (`ANTHROPIC` for `claude`, `OPENAI` for `codex`), absent for a harness this version does not know.
+- `session.loadOlder()` and `session.hasOlder`: the page behind the oldest item `history` holds, in
+  the size `loadHistory` used, put before it in the box's order with nothing repeated or skipped
+  when rows were recorded since (the page's total says where the older rows start). A reload of the
+  newest page, as a turn recovery does, keeps the older pages.
 
 ## 0.3.0
 
