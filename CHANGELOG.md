@@ -37,6 +37,14 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   changes the message in its list or hands the action to the box that took it, and the session
   reads `queue` and `history` again. Needs the Copilot with the cold box queue; an older one
   refuses the action as before.
+- On a chat with a box (`runtime: "T3"` in the task the Copilot answers), nothing waits for the
+  box channel: while it opens (a cold box booting, or a page just opened), a message, a steer and
+  the queue actions go to the Copilot at once (`POST /inputs`, with the same `clientMessageId` and
+  `mode`), which keeps them in its list and in the history, and the channel opens alongside; its
+  replay names what the box took by the same id, so nothing shows twice. Visible change: the turn
+  is `streaming` from the send, not from the end of the boot, and a session opened by `taskId` is
+  `idle` once the history is read, with `connecting` still true. A chat with no box, or a Copilot
+  that does not answer `runtime`, waits for its stream as before.
 - `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
   hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
   it redials a box that dropped. A chat with no box never asks and stays false.

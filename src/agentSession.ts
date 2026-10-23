@@ -1281,7 +1281,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       await this.loadHistory()
       if (this.isClosed()) return false
       this.openingCursor = historyCursorOf(this._history)
-      await this.ensureChannel()
+      await this.openChannel()
       if (this.isClosed()) return false
       // The replay may have opened the turn that runs on the box.
       if (this._status === "opening") this.setStatus("idle")
@@ -1352,7 +1352,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       await this.handOver(input, clientMessageId).catch(() => undefined)
       return false
     }
-    await this.ensureChannel()
+    await this.openChannel()
     if (this.isClosed()) return false
     await this.captureTurnBaseline()
     this._content = ""
@@ -1805,7 +1805,31 @@ class CoreAgentTaskSession implements AgentTaskSession {
       throw new Error("Agent task session could not be opened.")
     }
     await this.ensureTask()
-    if (!this.isClosed()) await this.ensureChannel()
+    if (!this.isClosed()) await this.openChannel()
+  }
+
+  // The channel of a box chat waits for a cold box to boot. Nothing waits for it there: what is
+  // sent meanwhile goes to the Copilot, which keeps it in its list and in the history for the box
+  // to drain, and the channel opens alongside, its replay bringing what the box took, each frame
+  // named by the same `clientMessageId`. Any other chat opens its stream before the first input,
+  // whose events it would otherwise miss.
+  private openChannel(): Promise<void> {
+    const channel = this.ensureChannel()
+    if (!this.deliversBeforeTheChannel()) return channel
+    void channel.catch((error: unknown) => {
+      if (this.isClosed()) return
+      this.emitError("Failed to open Agent task", error)
+      this.setStatus("error")
+    })
+    return Promise.resolve()
+  }
+
+  private deliversBeforeTheChannel(): boolean {
+    return (
+      this._task?.runtime === "T3" &&
+      Boolean(this._task.agentId) &&
+      this.dependencies.channel.canDial(this.options.transport)
+    )
   }
 
   private handleEvent(event: AgentTaskEvent): void {

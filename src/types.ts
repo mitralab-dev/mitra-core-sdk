@@ -1191,6 +1191,8 @@ export interface AgentTask {
   reasoningEffort: string | null
   /** Absent on a Copilot that predates credential scopes; null on a task without one. */
   scope?: AgentCredentialScope | null
+  /** The runtime the chat runs on (`T3` for a box); absent on a Copilot that does not say. */
+  runtime?: AgentTaskRuntime
   archived: boolean
   createdAt: string | null
   updatedAt: string

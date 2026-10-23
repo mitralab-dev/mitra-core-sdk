@@ -3071,3 +3071,188 @@ describe("Agent box coming up", () => {
     expect(session.connecting).toBe(false)
   })
 })
+
+describe("A box chat sends without waiting for the channel", () => {
+  // As the Copilot answers for a chat born on T3: the runtime is what says it has a box.
+  function boxTasks(channel: AgentTasksModule["channel"]) {
+    const tasks = createTasks(channel)
+    tasks.create.mockResolvedValue({ ...TASK, runtime: "T3" })
+    tasks.get.mockResolvedValue({ ...TASK, runtime: "T3" })
+    return tasks
+  }
+
+  function heldChannel() {
+    let boot!: () => void
+    const booted = new Promise<void>((resolve) => {
+      boot = resolve
+    })
+    return {
+      boot,
+      channel: async (): Promise<AgentTaskChannel | null> => {
+        await booted
+        return { wsUrl: BOX_URL, lastSequence: 0 }
+      },
+    }
+  }
+
+  function users(session: AgentTaskSession) {
+    return session.history.flatMap((item) =>
+      item.kind === "user" ? [[item.text, item.pending === true]] : [],
+    )
+  }
+
+  it("hands a message sent while the box boots to the Copilot at once, with its id and mode, and the turn is running", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+
+    const id = session.send("First", { mode: "queue" })
+
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+      type: "message",
+      content: "First",
+      mode: "queue",
+      clientMessageId: id,
+    })
+    expect(session.status).toBe("streaming")
+    expect(session.connecting).toBe(true)
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(users(session)).toEqual([["First", true]])
+  })
+
+  it("sends the steer and the queue actions over the Copilot while the box boots, and nothing twice once the channel connects", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+
+    const first = session.send("First", { mode: "queue" })
+    const second = session.send("Second", { mode: "queue" })
+    const third = session.send("Third", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    expect(session.queue.map((item) => item.id)).toEqual([second, third])
+    session.removeQueueItem(third!)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(4))
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "message", content: "First", mode: "queue", clientMessageId: first },
+      { type: "message", content: "Second", mode: "queue", clientMessageId: second },
+      { type: "message", content: "Third", mode: "queue", clientMessageId: third },
+      { type: "queued-run.cancel", clientMessageId: third },
+    ])
+
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    // The box drained the Copilot's list: its replay names each message by the same id.
+    socket.receive(
+      "stepStart",
+      { text: "First", lifecycle: { turnId: "t1", clientMessageId: first } },
+      1,
+    )
+    socket.receive(
+      "messageQueued",
+      {
+        clientMessageId: second,
+        position: 1,
+        text: "Second",
+        lifecycle: { clientMessageId: second },
+      },
+      2,
+    )
+
+    expect(users(session)).toEqual([["First", false]])
+    expect(session.queue).toEqual([expect.objectContaining({ id: second, position: 1 })])
+    expect(socket.sent.filter((frame) => (frame as { type?: string }).type === "message")).toEqual(
+      [],
+    )
+    expect(tasks.sendInput).toHaveBeenCalledTimes(4)
+  })
+
+  it("hands the message to the Copilot when the box is up but the channel is still opening, and shows it once", async () => {
+    const tasks = boxTasks(offer())
+    const { session } = open(tasks)
+
+    const id = session.send("Hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { text: "Hello", lifecycle: { turnId: "t1", clientMessageId: id } },
+      1,
+    )
+    socket.receive("textDelta", { text: "Hi", lifecycle: { turnId: "t1" } }, 2)
+
+    expect(users(session)).toEqual([["Hello", false]])
+    expect(socket.sent.filter((frame) => (frame as { type?: string }).type === "message")).toEqual(
+      [],
+    )
+  })
+
+  it("opens a chat whose box boots at once, from the history, and its queue actions go over the Copilot", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-2",
+          sender: "USER",
+          type: "TEXT",
+          content: "later",
+          createdAt: "2026-01-01T00:00:02Z",
+          pending: true,
+          mode: "queue",
+          clientMessageId: "cm-2",
+        },
+        {
+          id: "m-1",
+          sender: "USER",
+          type: "TEXT",
+          content: "first",
+          createdAt: "2026-01-01T00:00:01Z",
+          pending: true,
+          mode: "queue",
+          clientMessageId: "cm-1",
+        },
+      ],
+      page: { size: 2, totalElements: 2, totalPages: 1, number: 0 },
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ taskId: "task-1" })
+
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.connecting).toBe(true)
+    expect(users(session)).toEqual([["first", true]])
+    expect(session.queue.map((item) => item.id)).toEqual(["cm-2"])
+
+    session.steerQueueItem("cm-2")
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+        type: "queued-message.promote-to-steer",
+        clientMessageId: "cm-2",
+      }),
+    )
+  })
+
+  it("sends on the box once the channel is connected, as before", async () => {
+    const tasks = boxTasks(offer())
+    const { session } = open(tasks)
+    session.send("Warm up")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    await vi.waitFor(() => expect(session.connecting).toBe(false))
+    tasks.sendInput.mockClear()
+
+    const id = session.send("On the box", { mode: "steer" })
+
+    await vi.waitFor(() =>
+      expect(socket.sent).toContainEqual(
+        expect.objectContaining({ type: "message", content: "On the box", clientMessageId: id }),
+      ),
+    )
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+})
