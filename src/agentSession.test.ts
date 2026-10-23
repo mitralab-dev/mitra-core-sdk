@@ -1476,3 +1476,144 @@ describe("Agent queue without the box channel", () => {
     )
   })
 })
+
+describe("Agent message pending until the box takes it", () => {
+  function sentId(tasks: ReturnType<typeof createTasks>): string {
+    const input = tasks.sendInput.mock.calls[0]?.[1] as { clientMessageId?: string }
+    return input.clientMessageId ?? ""
+  }
+
+  function users(session: AgentTaskSession) {
+    return session.history.filter((item) => item.kind === "user")
+  }
+
+  it("shows the message at send and keeps one item once the box echoes it", async () => {
+    const { session, tasks, source } = createSession()
+    const pending: unknown[] = []
+    session.on("messagePending", (value) => pending.push(value))
+
+    const id = session.send("hello")
+
+    expect(pending).toEqual([{ clientMessageId: id, text: "hello" }])
+    expect(users(session)).toEqual([
+      expect.objectContaining({ kind: "user", text: "hello", clientMessageId: id, pending: true }),
+    ])
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(sentId(tasks)).toBe(id)
+    source.emit({
+      ...event("stepStart", {
+        text: "hello",
+        lifecycle: { turnId: "turn-1", clientMessageId: id },
+      }),
+      sequence: 4,
+    })
+    source.emit({
+      ...event("textDelta", { text: "hi", itemId: "a-1", lifecycle: { turnId: "turn-1" } }),
+      sequence: 5,
+    })
+
+    expect(users(session)).toEqual([
+      expect.objectContaining({ kind: "user", text: "hello", clientMessageId: id, sequence: 4 }),
+    ])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+    expect(session.history.map((item) => item.kind)).toEqual(["user", "agent"])
+  })
+
+  it("does not repeat the message when a reload already has the row the box took", async () => {
+    const tasks = createTasks()
+    const { session, source } = createSession(tasks)
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    tasks.listMessages.mockResolvedValueOnce(
+      page([{ ...message("q", "USER", "hello"), clientMessageId: id, sequence: 4 }]),
+    )
+
+    await session.loadHistory()
+    source.emit({
+      ...event("stepStart", {
+        text: "hello",
+        lifecycle: { turnId: "turn-1", clientMessageId: id },
+      }),
+      sequence: 4,
+    })
+
+    expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
+  })
+
+  it("takes the message out of the conversation when the send fails", async () => {
+    const tasks = createTasks({
+      sendInput: vi.fn(async () => {
+        throw new Error("offline")
+      }),
+    })
+    const { session } = createSession(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+
+    session.send("hello")
+    expect(users(session)).toHaveLength(1)
+
+    await vi.waitFor(() => expect(errors).toEqual(["Failed to send Agent prompt: offline"]))
+    expect(users(session)).toEqual([])
+  })
+
+  it("moves the message to the queue, not both, when T3 queues it behind another turn", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit({
+      ...event("messageQueued", {
+        clientMessageId: id,
+        position: 1,
+        text: "hello",
+        lifecycle: { turnId: "turn-2", clientMessageId: id },
+      }),
+      sequence: 3,
+    })
+
+    expect(users(session)).toEqual([])
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+  })
+
+  it("keeps one item when the box names no message on the stepStart that answers it", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit({
+      ...event("stepStart", { text: "hello", lifecycle: { turnId: "turn-1" } }),
+      sequence: 2,
+    })
+
+    expect(users(session)).toEqual([
+      expect.objectContaining({ text: "hello", clientMessageId: id, sequence: 2 }),
+    ])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+  })
+
+  it("enters where the first text opens the turn on a server that carries no lifecycle", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(event("textDelta", { text: "hi" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    expect(users(session)).toEqual([expect.objectContaining({ text: "hello" })])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+  })
+
+  it("puts no pending item for a message sent while a turn runs", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepStart", { text: "first", lifecycle: { turnId: "t", clientMessageId: id } }),
+    )
+
+    session.send("second")
+
+    expect(users(session).map((item) => item.kind === "user" && item.text)).toEqual(["first"])
+  })
+})

@@ -220,6 +220,12 @@ export type AgentTimelineItem =
       usage?: AgentTurnUsage
       /** On a `user` item: the id `send` returned for that message. */
       clientMessageId?: string
+      /**
+       * On a `user` item this session sent with no turn running, from `send` until the box takes it
+       * (or puts it in `queue`): the message as T3 shows it the moment it is sent. It sits after
+       * every other item and leaves for the item the box confirms, never both at once.
+       */
+      pending?: true
       /** On a subagent's own text (a `SUBAGENT_TEXT` row): the tool call that spawned it. */
       parentToolId?: string
     } & AgentTimelineItemIdentity)
@@ -303,6 +309,12 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
+  /**
+   * A message sent with no turn running entered `history` as `pending`, before the box took it.
+   * It leaves when the box takes it (`turnStart`), puts it in `queue` (`queueChange`) or the send
+   * fails (`error`).
+   */
+  messagePending: { clientMessageId: string; text: string }
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
   /** The provider's background work changed: the roster as T3 shows it waiting. */
@@ -792,6 +804,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
   // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
   private readonly acceptedIds: string[] = []
+  // Messages sent with no turn running that the box has not confirmed yet, shown after `_history`
+  // as T3 shows its optimistic message: apart, so a history reload neither drops nor repeats them.
+  private pendingQuestions: AgentTimelineItem[] = []
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
 
@@ -825,7 +840,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get history(): readonly AgentTimelineItem[] {
-    return [...this._history]
+    if (this.pendingQuestions.length === 0) return [...this._history]
+    // A reload that already has the row the box took is the confirmation.
+    const recorded = new Set(
+      this._history.flatMap((item) =>
+        item.kind === "user" && item.clientMessageId !== undefined ? [item.clientMessageId] : [],
+      ),
+    )
+    return [
+      ...this._history,
+      ...this.pendingQuestions.filter(
+        (item) => item.kind === "user" && !recorded.has(item.clientMessageId ?? ""),
+      ),
+    ]
   }
 
   get content(): string {
@@ -1041,6 +1068,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
     waiter?: TurnWaiter,
   ): void {
     this.sentTexts.set(clientMessageId, prompt)
+    this.pendingQuestions.push({
+      id: `live:user:${clientMessageId}`,
+      kind: "user",
+      text: prompt,
+      at: new Date().toISOString(),
+      clientMessageId,
+      pending: true,
+    })
+    this.emit("messagePending", { clientMessageId, text: prompt })
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
@@ -1048,6 +1084,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     })
     const dispatch = this.dispatchSend(prompt, options, clientMessageId, handedOver, waiter)
       .catch((error: unknown) => {
+        this.dropPending(clientMessageId)
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
         if (this._status === "streaming") {
@@ -1055,6 +1092,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
           this.setStatus("idle")
         }
         return false
+      })
+      .then((admitted) => {
+        // Refused by the box, or never sent: as T3 does, it leaves the conversation.
+        if (!admitted) this.dropPending(clientMessageId)
+        return admitted
       })
       .finally(() => {
         handedOver()
@@ -1696,6 +1738,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.queueItems = known
       ? this.queueItems.map((current) => (current === known ? item : current))
       : [...this.queueItems, item]
+    this.dropPending(id)
     this.emit("queueChange", { queue: this.queue })
   }
 
@@ -1709,6 +1752,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const id = payload.clientMessageId ?? lifecycle?.clientMessageId
     if (typeof id !== "string") return
     this.leaveQueue(id)
+    this.dropPending(id)
     const cancelled = new AgentTaskTurnError("The queued Agent message was cancelled.")
     if (id === this.openingMessageId) {
       this.cancelOpening(cancelled)
@@ -1858,6 +1902,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.setStatus("streaming")
       this.emit("turnStart", {})
     }
+    this.confirmUnnamedOpening(event)
     if (kind === "text") this._content += text
     this.liveText(event, payload, kind)
     this.emit("delta", {
@@ -1896,7 +1941,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // The question enters the conversation where the box took it: its turn's `stepStart`, or the
   // `steer` that took it into the running turn. Until then it is in `queue`.
   private liveQuestion(event: AgentTaskEvent, boxText: unknown, clientMessageId: unknown): void {
-    const id = typeof clientMessageId === "string" ? clientMessageId : undefined
+    // A box that names no message on a `stepStart` is answering ours, the session's rule above.
+    const id =
+      typeof clientMessageId === "string"
+        ? clientMessageId
+        : event.type === "stepStart" && this.isPending(this.openingMessageId)
+          ? this.openingMessageId
+          : undefined
+    if (id !== undefined) this.dropPending(id)
     // The question as the person wrote it, as the Copilot records it: the box has the text T3 ran,
     // which after a box that died carries the recovered context ahead of it.
     const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
@@ -1914,6 +1966,42 @@ class CoreAgentTaskSession implements AgentTaskSession {
         at: liveAtOf(event),
         ...(sequence === undefined ? {} : { sequence }),
         ...(id === undefined ? {} : { clientMessageId: id }),
+      }),
+      (item) => item,
+    )
+  }
+
+  private isPending(id: string | undefined): boolean {
+    return id !== undefined && this.pendingQuestions.some((item) => item.id === `live:user:${id}`)
+  }
+
+  private dropPending(id: string): void {
+    this.pendingQuestions = this.pendingQuestions.filter((item) => item.id !== `live:user:${id}`)
+  }
+
+  // The turn of the opening message ended with no frame that confirmed the message: the turn
+  // answered it, so it is no longer waiting, and the history has it where the server recorded it.
+  private dropOpeningPending(): void {
+    if (this.openingMessageId !== undefined) this.dropPending(this.openingMessageId)
+  }
+
+  // A server that never carries a lifecycle sends no `stepStart` naming the message either: its
+  // first text is the opening message's turn, where the message enters the conversation. A frame
+  // with a lifecycle may be the tail of a turn before it, so only the box's own frames confirm.
+  private confirmUnnamedOpening(event: AgentTaskEvent): void {
+    if (asObject(event.payload)?.lifecycle !== undefined) return
+    const id = this.openingMessageId
+    const pending = this.pendingQuestions.find((item) => item.id === `live:user:${id}`)
+    if (id === undefined || pending?.kind !== "user") return
+    this.dropPending(id)
+    this.livePiece(
+      (item) => item.kind === "user" && item.clientMessageId === id,
+      () => ({
+        id: pending.id,
+        kind: "user",
+        text: pending.text,
+        at: liveAtOf(event),
+        clientMessageId: id,
       }),
       (item) => item,
     )
@@ -2120,6 +2208,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(usage ? { usage } : {}),
       ...end,
     }
+    this.dropOpeningPending()
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
     this.activeWaiter = undefined
@@ -2128,6 +2217,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failTurn(error: AgentTaskTurnError): void {
+    this.dropOpeningPending()
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
     this.recoveryGeneration += 1

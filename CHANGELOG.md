@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.1-beta.0
+
+Additions for the agent template. The history keeps the format of 0.2.13 and nothing that 0.3.0
+did changes.
+
+- A message sent with no turn running enters `history` at once as a `user` item with
+  `pending: true`, after every other item, and the session emits `messagePending`, as T3 shows a
+  message the moment it is sent (with a cold box, while the box boots). It leaves for the item the
+  box confirms (`stepStart` naming it, or naming none), for `queue` when T3 queues it, or on a
+  failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
+  it never shows twice.
+
 ## 0.3.0
 
 This release consolidates the work published to npm as `0.3.0-beta.1` and `0.3.0-beta.2` (below)
