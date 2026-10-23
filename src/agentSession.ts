@@ -315,6 +315,8 @@ export interface AgentTaskSessionEventMap {
    * fails (`error`).
    */
   messagePending: { clientMessageId: string; text: string }
+  /** `connecting` changed: the session started or stopped waiting for the chat's box. */
+  connecting: { connecting: boolean }
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
   /** The provider's background work changed: the roster as T3 shows it waiting. */
@@ -374,6 +376,13 @@ export interface AgentTaskSession {
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
+  /**
+   * True while the session waits for the Copilot to hand over the chat's box: the channel request,
+   * which the Copilot holds while a cold box boots (tens of seconds), and a redial after the box
+   * dropped (`channelReconnecting` until `channelConnected` or the disconnect). False on a chat
+   * with no box, which never asks for it.
+   */
+  readonly connecting: boolean
   /**
    * Sends the message at once and returns the id it goes out with: the `clientMessageId` the box
    * echoes when it takes the message (in `steered`, in `queue` and in the history item of the
@@ -807,6 +816,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Messages sent with no turn running that the box has not confirmed yet, shown after `_history`
   // as T3 shows its optimistic message: apart, so a history reload neither drops nor repeats them.
   private pendingQuestions: AgentTimelineItem[] = []
+  private _connecting = false
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
 
@@ -865,6 +875,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   get subagents(): readonly AgentSubagent[] {
     return [...this.subagentsById.values()]
+  }
+
+  get connecting(): boolean {
+    return this._connecting
   }
 
   send(prompt: string, options: AgentSendOptions = {}): string | undefined {
@@ -1335,6 +1349,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
     const historyCursor = this.openingCursor
     this.openingCursor = undefined
+    const toBox = source === this.dependencies.channel
+    if (toBox) this.setConnecting(true)
     this.connectionPromise = source
       .open(
         this._taskId,
@@ -1355,6 +1371,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       })
       .finally(() => {
         this.connectionPromise = null
+        if (toBox) this.setConnecting(false)
       })
     return this.connectionPromise
   }
@@ -1363,6 +1380,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.connection = null
     this.connectionAbort = null
     if (this.isClosed()) return
+    this.setConnecting(false)
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.recoveryUsed) {
       const disconnectError = new Error("Agent live channel disconnected after one recovery.")
@@ -1523,6 +1541,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private handleEvent(event: AgentTaskEvent): void {
+    if (event.type === "channelReconnecting") this.setConnecting(true)
+    else if (event.type === "channelConnected") this.setConnecting(false)
     this.emit("raw", event)
     const payload = asObject(event.payload)
     if (payload && isSubagentFrame(event)) {
@@ -2290,6 +2310,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(code ? { code } : {}),
       error: `${prefix}: ${errorMessage(error)}`,
     })
+  }
+
+  private setConnecting(connecting: boolean): void {
+    if (this._connecting === connecting) return
+    this._connecting = connecting
+    this.emit("connecting", { connecting })
   }
 
   private setStatus(status: AgentTaskSessionStatus): void {

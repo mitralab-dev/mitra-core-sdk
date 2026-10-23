@@ -13,6 +13,9 @@ did changes.
   box confirms (`stepStart` naming it, or naming none), for `queue` when T3 queues it, or on a
   failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
   it never shows twice.
+- `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
+  hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
+  it redials a box that dropped. A chat with no box never asks and stays false.
 
 ## 0.3.0
 

@@ -2894,3 +2894,60 @@ describe("Agent direct channel steering", () => {
     expect(steerResult).toBe(firstResult)
   })
 })
+
+describe("Agent box coming up", () => {
+  it("is connecting while the Copilot holds the channel request for a cold box", async () => {
+    let boot!: () => void
+    const booted = new Promise<void>((resolve) => {
+      boot = resolve
+    })
+    const tasks = createTasks(async () => {
+      await booted
+      return { wsUrl: BOX_URL, lastSequence: 0 }
+    })
+    const { session } = open(tasks)
+    const changes: boolean[] = []
+    session.on("connecting", ({ connecting }) => changes.push(connecting))
+
+    const id = session.send("Hello")
+    await vi.waitFor(() => expect(tasks.channel).toHaveBeenCalledOnce())
+
+    expect(session.connecting).toBe(true)
+    // The message shows while the box boots.
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "user", clientMessageId: id, pending: true }),
+    ])
+    boot()
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    expect(session.connecting).toBe(false)
+    expect(changes).toEqual([true, false])
+  })
+
+  it("is connecting again while it redials a box that dropped mid-turn", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    const changes: boolean[] = []
+    session.on("connecting", ({ connecting }) => changes.push(connecting))
+
+    session.send("Survive the drop")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().drop()
+    expect(session.connecting).toBe(true)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    expect(session.connecting).toBe(false)
+    expect(changes).toEqual([true, false, true, false])
+  })
+
+  it("is not connecting once the Copilot declines the box and the chat stays on its stream", async () => {
+    const tasks = createTasks(async () => null)
+    const { session, fallback } = open(tasks)
+
+    session.send("Hello")
+    await vi.waitFor(() => expect(fallback.observers).toHaveLength(1))
+
+    expect(session.connecting).toBe(false)
+  })
+})
