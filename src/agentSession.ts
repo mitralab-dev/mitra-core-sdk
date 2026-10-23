@@ -121,10 +121,6 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
-/**
- * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
- * client's message, not only this session's.
- */
 /** One piece of work the provider keeps going in the background, as T3's roster names it. */
 export interface AgentBackgroundTask {
   taskId: string
@@ -135,6 +131,10 @@ export interface AgentBackgroundTask {
   childThreadId?: string
 }
 
+/**
+ * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
+ * client's message, not only this session's.
+ */
 export interface AgentQueueItem extends AgentSendOptions {
   /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
