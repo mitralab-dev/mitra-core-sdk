@@ -2941,11 +2941,12 @@ describe("Agent box coming up", () => {
     const first = session.send("First")
     const second = session.send("Second")
     const third = session.send("Third", { mode: "queue" })
+    // Sent to the queue behind the first, it is in `queue` at once, as the box will put it.
     expect(users()).toEqual([
       ["First", true],
       ["Second", true],
-      ["Third", true],
     ])
+    expect(session.queue).toEqual([expect.objectContaining({ id: third, text: "Third" })])
     boot()
     await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(3))
     const socket = FakeWebSocket.last()
@@ -2957,7 +2958,6 @@ describe("Agent box coming up", () => {
     expect(users()).toEqual([
       ["First", false],
       ["Second", true],
-      ["Third", true],
     ])
     socket.receive(
       "steer",
@@ -2974,7 +2974,7 @@ describe("Agent box coming up", () => {
       ["First", false],
       ["Second", false],
     ])
-    expect(session.queue.map((item) => item.id)).toEqual([third])
+    expect(session.queue).toEqual([expect.objectContaining({ id: third, position: 1 })])
   })
 
   it("takes a message sent while the box boots out when its send fails", async () => {

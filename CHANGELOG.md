@@ -13,7 +13,8 @@ first text came, which 0.3.0 did not add. Everything else is additive.
 - A message sent with no turn running enters `history` at once as a `user` item with
   `pending: true`, after every other item, and the session emits `messagePending`, as T3 shows a
   message the moment it is sent (with a cold box, while the box boots). A message sent while
-  another is still pending (several in a row while a cold box boots) is pending too, in order, and
+  another is still pending (several in a row while a cold box boots) is pending too, in order (or in
+  `queue`, when sent with `mode: "queue"`, as the box will put it when it drains them), and
   leaves by the same rules, a `steer` naming it included; on a stream with no lifecycle it becomes a
   confirmed question at the end of the turn that took it. A live channel that fails for good takes
   every pending message out with its error, since the session stops following the chat; one the
@@ -29,7 +30,8 @@ first text came, which 0.3.0 did not add. Everything else is additive.
 - While the box is cold, the messages the Copilot still holds in its list come in the history read
   as `user` items with `pending: true` (the Copilot marks them, with their `mode`), so a session
   opened anywhere shows them at once: one sent with `mode: "queue"` is in `queue` instead of
-  `history`, as T3 shows it, until the box reports the queue itself; the others stay pending in
+  `history` (except the oldest, with no turn running: it is the turn the box opens, and stays
+  pending), as T3 shows it, until the box reports the queue itself; the others stay pending in
   `history` until the box takes them. `editQueueItem`, `removeQueueItem` and `steerQueueItem` work
   the same with the box cold: with no box channel they go to the Copilot (`POST /inputs`), which
   changes the message in its list or hands the action to the box that took it, and the session

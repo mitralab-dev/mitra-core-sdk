@@ -1396,8 +1396,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
     this.sentTexts.set(steered.clientMessageId, prompt)
     // Behind a message the box has not taken yet (a cold box booting), the box has not this one
-    // either: it shows the same way, until the box takes it, queues it or the send fails.
-    if (this.pendingQuestions.length > 0) this.addPending(steered.clientMessageId, prompt)
+    // either: it shows as it will once the box drains it, in `queue` when sent to the queue and
+    // pending otherwise, until the box takes it, queues it or the send fails.
+    if (this.pendingQuestions.length > 0) {
+      if (options.mode === "queue") this.holdInQueue(steered.clientMessageId, prompt)
+      else this.addPending(steered.clientMessageId, prompt)
+    }
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -1473,6 +1477,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private forgetSteer(steered: SteeredMessage): void {
     this.dropPending(steered.clientMessageId)
+    this.leaveQueue(steered.clientMessageId)
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
   }
@@ -1715,10 +1720,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // A message still in the Copilot's list while the box is cold comes in the history as pending.
   // One sent to T3's queue is the queue's, as T3 shows it, until the box reports the queue itself:
   // a queue item the box reported has a position, one from the list has none and is replaced here.
+  // With no turn running, the oldest one in the list is the turn the box opens when it drains it,
+  // so it stays pending in `history`, as it does on the session that sent it.
   private withListedQueue(rows: readonly AgentMessage[]): AgentMessage[] {
+    const turnRunning = this._status === "streaming" || this._status === "cancelled"
+    const opening = turnRunning
+      ? undefined
+      : [...rows].reverse().find((row) => row.pending === true)
     const listed = rows.filter(
       (row) =>
-        row.pending === true && row.mode === "queue" && typeof row.clientMessageId === "string",
+        row !== opening &&
+        row.pending === true &&
+        row.mode === "queue" &&
+        typeof row.clientMessageId === "string",
     )
     const reported = this.queueItems.filter((item) => item.position !== undefined)
     if (listed.length > 0 || reported.length !== this.queueItems.length) {
@@ -2267,6 +2281,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     for (const steered of this.steers) {
       if (steered.taken) this.confirmPending(steered.clientMessageId, Date.now())
     }
+  }
+
+  // Sent to the queue behind a message the box has not taken yet: in `queue` with no position, as
+  // a queue item read from the Copilot's list, until the box reports the queue.
+  private holdInQueue(clientMessageId: string, text: string): void {
+    this.queueItems = [
+      ...this.queueItems,
+      { id: clientMessageId, text, createdAt: Date.now(), mode: "queue" },
+    ]
+    this.emit("queueChange", { queue: this.queue })
   }
 
   private addPending(clientMessageId: string, text: string): void {

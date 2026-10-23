@@ -1538,7 +1538,28 @@ describe("Agent queue while the box is cold", () => {
     expect(session.queue).toEqual([expect.objectContaining({ id: "cm-3", position: 1 })])
   })
 
+  it("holds a message sent to the queue behind a pending one in `queue`, and drops it when its send fails", async () => {
+    const tasks = createTasks({
+      sendInput: vi
+        .fn<AgentTasksModule["sendInput"]>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("refused")),
+    })
+    const { session } = createSession(tasks)
+    session.on("error", () => undefined)
+
+    session.send("first", { mode: "queue" })
+    const second = session.send("second", { mode: "queue" })
+
+    expect(session.history).toEqual([expect.objectContaining({ text: "first", pending: true })])
+    expect(session.queue).toEqual([expect.objectContaining({ id: second, text: "second" })])
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(session.queue).toEqual([]))
+  })
+
   it("sends the queue actions to the Copilot and reads the queue again from it", async () => {
+    // The oldest one opens the turn when the box drains the list: pending in `history`, not queued.
+    const opening = listed("1", "first", "queue", "2026-01-01T00:00:01Z")
     const tasks = createTasks({
       listMessages: vi
         .fn<AgentTasksModule["listMessages"]>()
@@ -1546,16 +1567,24 @@ describe("Agent queue while the box is cold", () => {
           page([
             listed("3", "promote me", "queue", "2026-01-01T00:00:03Z"),
             listed("2", "drop me", "queue", "2026-01-01T00:00:02Z"),
+            opening,
           ]),
         )
-        .mockResolvedValueOnce(page([listed("3", "promote me", "queue", "2026-01-01T00:00:03Z")]))
-        .mockResolvedValue(page([listed("3", "promote me", "steer", "2026-01-01T00:00:03Z")])),
+        .mockResolvedValueOnce(
+          page([listed("3", "promote me", "queue", "2026-01-01T00:00:03Z"), opening]),
+        )
+        .mockResolvedValue(
+          page([listed("3", "promote me", "steer", "2026-01-01T00:00:03Z"), opening]),
+        ),
     })
     const session = createAgentTaskSessionManager({
       tasks,
       eventSource: new FakeEventSource(),
     }).session({ taskId: "task-1", transport: "http" })
     await vi.waitFor(() => expect(session.queue).toHaveLength(2))
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "user", text: "first", pending: true }),
+    ])
     const changes: number[] = []
     session.on("queueChange", ({ queue }) => changes.push(queue.length))
 
@@ -1570,6 +1599,12 @@ describe("Agent queue while the box is cold", () => {
     ])
     expect(changes).toEqual([1, 0])
     expect(session.history).toEqual([
+      expect.objectContaining({
+        kind: "user",
+        text: "first",
+        clientMessageId: "cm-1",
+        pending: true,
+      }),
       expect.objectContaining({
         kind: "user",
         text: "promote me",
