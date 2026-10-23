@@ -4,6 +4,7 @@ import { encodePathSegment } from "../path"
 import {
   expectAgentConnectionCustomProvider,
   expectAgentModel,
+  expectAgentReadyProvider,
   expectAuthenticationResult,
   expectCredentialStatus,
   expectDeviceAuthorization,
@@ -43,8 +44,9 @@ export interface AgentCredentialsModule {
   /**
    * The providers the next turn can run on, each with its models and its subscription reading: one
    * entry per built-in provider and per custom provider of `listModels(agentId)`, in the catalog's
-   * order, with `usage(provider)` read for the built-in ones. With an `agentId` the models are
-   * the agent connection's, and the reading is still the person's own login.
+   * order, with `usage(provider)` read for the built-in ones. The Copilot assembles it in one call;
+   * a reading it cannot get comes as null. With an `agentId` the models are the agent connection's,
+   * and the reading is still the person's own login.
    */
   providers(agentId?: string, options?: AgentCredentialOptions): Promise<AgentReadyProvider[]>
   /**
@@ -107,24 +109,15 @@ export function createAgentCredentialsModule(
     options?.scope ? { params: { scope: options.scope } } : {}
   const module: AgentCredentialsModule = {
     async providers(agentId, options) {
-      const ready: AgentReadyProvider[] = []
-      for (const model of await module.listModels(agentId, options)) {
-        const providerName = model.providerName ?? null
-        const entry = ready.find(
-          (candidate) =>
-            candidate.provider === model.provider && candidate.providerName === providerName,
-        )
-        if (entry) entry.models.push(model)
-        else ready.push({ provider: model.provider, providerName, models: [model], usage: null })
-      }
-      await Promise.all(
-        ready
-          .filter((entry) => entry.providerName === null)
-          .map(async (entry) => {
-            entry.usage = await module.usage(entry.provider, options)
-          }),
+      return expectObjectArray<AgentReadyProvider>(
+        await transport.request<unknown>("/api/v1/models/providers", {
+          method: "GET",
+          params: { agentId, ...scopeParams(options).params },
+        }),
+        "Ready provider response",
+        errors,
+        expectAgentReadyProvider,
       )
-      return ready
     },
     async list(options) {
       return expectObjectArray<CredentialStatus>(

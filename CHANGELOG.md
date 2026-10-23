@@ -50,7 +50,9 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   it redials a box that dropped. A chat with no box never asks and stays false.
 - `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, grouped
   from `listModels` (one entry per built-in provider and per custom provider), each with its
-  models and, for the built-in ones, the reading `usage(provider)` answers.
+  models and, for the built-in ones, the reading `usage(provider)` answers. One call to the
+  Copilot's `GET /api/v1/models/providers`, which needs `MODEL_READ` and `CREDENTIAL_READ`; a
+  reading the Copilot cannot get comes as null instead of failing the list.
 - The session's `providerUsage` carries `provider`, the credential of the login the reading is
   (`ANTHROPIC` for `claude`, `OPENAI` for `codex`), absent for a harness this version does not know.
 - `session.loadOlder()` and `session.hasOlder`: the page behind the oldest item `history` holds, in

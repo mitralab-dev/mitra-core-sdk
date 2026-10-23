@@ -2092,41 +2092,34 @@ describe("the providers the next turn can run on", () => {
     }
   }
 
-  it("groups the catalog by provider with each built-in provider's reading", async () => {
-    const notFound = Object.assign(new Error("none"), { code: "CREDENTIAL_USAGE_NOT_FOUND" })
+  it("reads the providers the Copilot assembled in one call", async () => {
     const opus = model("ANTHROPIC", "OPUS")
-    const sonnet = model("ANTHROPIC", "SONNET", null)
-    const gpt = model("OPENAI", "GPT")
+    const gpt = model("OPENAI", "GPT", null)
     const groq = model("CUSTOM", "CUSTOM_AI", "Groq")
-    const other = model("CUSTOM", "CUSTOM_AI", "Other")
-    const transport = new RouteTransport({
-      "/api/v1/models": [opus, groq, gpt, sonnet, other],
-      "/api/v1/credentials/ANTHROPIC/usage": claudeUsage,
-      "/api/v1/credentials/OPENAI/usage": notFound,
-    })
+    const ready = [
+      { provider: "ANTHROPIC", providerName: null, models: [opus], usage: claudeUsage },
+      { provider: "CUSTOM", providerName: "Groq", models: [groq], usage: null },
+      { provider: "OPENAI", providerName: null, models: [gpt], usage: null },
+    ]
+    const transport = new RouteTransport({ "/api/v1/models/providers": ready })
 
     await expect(
       createAgentCredentialsModule(transport).providers("agent-1", { scope: "ACCOUNT" }),
-    ).resolves.toEqual([
-      { provider: "ANTHROPIC", providerName: null, models: [opus, sonnet], usage: claudeUsage },
-      { provider: "CUSTOM", providerName: "Groq", models: [groq], usage: null },
-      { provider: "OPENAI", providerName: null, models: [gpt], usage: null },
-      { provider: "CUSTOM", providerName: "Other", models: [other], usage: null },
-    ])
-    // A custom provider has no subscription: no reading is asked for it.
-    expect(transport.paths.sort()).toEqual([
-      '/api/v1/credentials/ANTHROPIC/usage {"scope":"ACCOUNT"}',
-      '/api/v1/credentials/OPENAI/usage {"scope":"ACCOUNT"}',
-      '/api/v1/models {"agentId":"agent-1","scope":"ACCOUNT"}',
+    ).resolves.toEqual(ready)
+    expect(transport.paths).toEqual([
+      '/api/v1/models/providers {"agentId":"agent-1","scope":"ACCOUNT"}',
     ])
   })
 
-  it("fails as the reading fails when the Copilot answers with an error other than no reading", async () => {
+  it("rejects an entry whose reading is not a reading", async () => {
     const transport = new RouteTransport({
-      "/api/v1/models": [model("ANTHROPIC", "OPUS")],
-      "/api/v1/credentials/ANTHROPIC/usage": new Error("unavailable"),
+      "/api/v1/models/providers": [
+        { provider: "ANTHROPIC", providerName: null, models: [], usage: { harness: "claude" } },
+      ],
     })
 
-    await expect(createAgentCredentialsModule(transport).providers()).rejects.toThrow("unavailable")
+    await expect(createAgentCredentialsModule(transport).providers()).rejects.toThrow(
+      "Ready provider response item 0 usage has an invalid observedAt field",
+    )
   })
 })
