@@ -1216,8 +1216,9 @@ export type AgentTaskInput =
       /**
        * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
        * `steer` takes it into the running turn. A box given none lets T3 decide. Over the Copilot
-       * it reaches only a live box the Copilot hosts (mitra-copilot#535): a message waiting in its
-       * prompt list loses it, and a Copilot before #535 ignores it.
+       * it takes effect only with a Copilot that has mitra-copilot#535, and there only on a live box
+       * that Copilot hosts: a message waiting in its prompt list loses it, and a Copilot without
+       * #535 ignores it.
        */
       mode?: "queue" | "steer"
       /**

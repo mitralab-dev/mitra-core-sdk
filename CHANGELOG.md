@@ -4,8 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## 0.3.1-beta.0
 
-Additions for the agent template. The history keeps the format of 0.2.13 and nothing that 0.3.0
-did changes.
+Additions for the agent template. The history keeps the format of 0.2.13. Two changes are
+visible from 0.3.0: the pending message in `history` (an app that draws its own optimistic message
+shows it twice until the box takes it), and on a chat with no box (the Copilot stream, whose frames
+carry no lifecycle) the question stays in `history` as a confirmed `user` item where its turn's
+first text came, which 0.3.0 did not add. Everything else is additive.
 
 - A message sent with no turn running enters `history` at once as a `user` item with
   `pending: true`, after every other item, and the session emits `messagePending`, as T3 shows a
@@ -16,7 +19,9 @@ did changes.
   failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
   it never shows twice. Visible change from 0.3.0: an app that draws its own optimistic message
   next to `history` shows it twice until the box takes it; it drops its own, or draws
-  `history.filter((item) => !item.pending)`, which is what 0.3.0 gave.
+  `history.filter((item) => !item.pending)`. On a chat with no box that filter does not give back
+  what 0.3.0 showed: there the question now stays as a confirmed item where its first text opened
+  the turn, since dropping it from the screen would be worse.
 - `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
   hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
   it redials a box that dropped. A chat with no box never asks and stays false.
