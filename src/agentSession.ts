@@ -2195,7 +2195,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // A server that never carries a lifecycle sends no `stepStart` naming the message either: its
   // first text is the opening message's turn, where the message enters the conversation. A frame
-  // with a lifecycle may be the tail of a turn before it, so only the box's own frames confirm.
+  // with a lifecycle may be the tail of a turn before it, so it confirms nothing here.
   private confirmUnnamedOpening(event: AgentTaskEvent): void {
     if (asObject(event.payload)?.lifecycle !== undefined) return
     const id = this.openingMessageId
