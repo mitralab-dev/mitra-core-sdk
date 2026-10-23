@@ -1236,6 +1236,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   close(): void {
     if (this._status === "closed") return
     this.setStatus("closed")
+    this.setConnecting(false)
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
     this.connectionAbort?.abort()

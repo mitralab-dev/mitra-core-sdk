@@ -2941,6 +2941,23 @@ describe("Agent box coming up", () => {
     expect(changes).toEqual([true, false, true, false])
   })
 
+  it("is not connecting once it closes in the middle of a redial", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 3))
+    const { session } = open(tasks)
+    const changes: boolean[] = []
+    session.on("connecting", ({ connecting }) => changes.push(connecting))
+    session.send("Survive the drop")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    FakeWebSocket.last().drop()
+    expect(session.connecting).toBe(true)
+
+    session.close()
+
+    expect(session.connecting).toBe(false)
+    expect(changes).toEqual([true, false, true, false])
+  })
+
   it("is not connecting once the Copilot declines the box and the chat stays on its stream", async () => {
     const tasks = createTasks(async () => null)
     const { session, fallback } = open(tasks)
