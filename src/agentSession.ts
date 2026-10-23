@@ -1663,6 +1663,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         }
         break
       }
+      case "approval":
+      case "user_input_request":
+        this.liveRequest(event, payload)
+        break
       default:
         break
     }
@@ -1974,6 +1978,36 @@ class CoreAgentTaskSession implements AgentTaskSession {
     )
   }
 
+  // An approval or a question T3 asks mid-turn enters where it came, with the frame's payload as
+  // it came, as the Copilot records it (`APPROVAL` and `USER_INPUT_REQUEST` rows). It still
+  // reaches the app as a `raw` event, as before.
+  private liveRequest(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    parentToolId?: string,
+  ): void {
+    if (!payload) return
+    const kind = event.type === "approval" ? "approval" : "userInputRequest"
+    const itemId = typeof payload.itemId === "string" ? payload.itemId : undefined
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if (itemId === undefined && sequence === undefined) return
+    this.livePiece(
+      (item) =>
+        item.kind === kind &&
+        (itemId !== undefined ? item.itemId === itemId : item.sequence === sequence),
+      () => ({
+        id: `live:${kind}:${itemId ?? sequence}`,
+        kind,
+        payload,
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(itemId === undefined ? {} : { itemId }),
+        ...parentToolIdOf(parentToolId),
+      }),
+      (item) => item,
+    )
+  }
+
   // A child thread's frames are the subagent's conversation: they open no turn and settle no
   // message. Its text and tools still reach `delta`, `content` and `tool` as they did in 0.2.13,
   // which knew no subagents, so an app that only bumps the version sees what it saw before.
@@ -2003,6 +2037,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         this.emit("subagentTool", tool)
         break
       }
+      case "approval":
+      case "user_input_request":
+        this.liveRequest(event, payload, parentToolId)
+        break
       default:
         break
     }

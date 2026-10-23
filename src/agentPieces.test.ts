@@ -472,6 +472,8 @@ function historyList(session: AgentTaskSession): Piece[] {
         key: pieceKey(item.kind === "agent" ? "text" : "reasoning", item.itemId, item.parentToolId),
         text: item.text,
       })
+    } else if (item.kind === "approval" || item.kind === "userInputRequest") {
+      pieces.push({ key: `${item.kind}:${item.itemId}`, text: "", result: item.payload })
     } else if (item.kind === "tool") {
       const key = `tool:${item.tool.toolId}`
       const result = item.tool.phase === "result" ? item.tool.content : undefined
@@ -521,6 +523,57 @@ describe("Agent conversation drawn from the session history alone", () => {
     )
     expect(phases).toEqual(["call", "result"])
     live.close()
+  })
+
+  it("holds T3's approval and question where they came in the turn, as the reload has them", async () => {
+    const live = manager([], 0, 0).session({
+      create: true,
+      agentType: "CLAUDE",
+      agentId: "agent-1",
+    })
+    const first = live.send("Count birds")!
+    await vi.waitFor(() => expect(BoxSocket.instances.at(-1)?.sent).toHaveLength(1))
+    const socket = BoxSocket.instances.at(-1)!
+    const frames = conversation(first, "second-id")
+    // Up to the question, with the turn the agent opened by itself still running.
+    const ASKED = 16
+    for (const frame of frames.slice(0, ASKED)) socket.deliver(frame)
+    // A request the history already holds, as a replay sends it again, changes nothing.
+    socket.deliver(frames[14]!)
+    socket.deliver(frames[15]!)
+
+    BoxSocket.log = frames.slice(0, ASKED)
+    BoxSocket.hello = { threadId: "thread-1", lastSequence: ASKED }
+    const sent = [
+      { id: first, text: "Count birds", after: 0 },
+      { id: "second-id", text: "Also cats", after: SENT_SECOND_AFTER },
+    ]
+    const reloaded = manager(historyAt(frames, ASKED, sent), ASKED, 0).session({
+      taskId: "task-1",
+    })
+    await vi.waitFor(() => expect(reloaded.status).not.toBe("opening"))
+
+    const requests = (session: AgentTaskSession) =>
+      session.history.flatMap((item) =>
+        item.kind === "approval" || item.kind === "userInputRequest"
+          ? [
+              {
+                kind: item.kind,
+                itemId: item.itemId,
+                sequence: item.sequence,
+                payload: item.payload,
+              },
+            ]
+          : [],
+      )
+    expect(requests(live)).toEqual([
+      { kind: "approval", itemId: "ap1", sequence: 15, payload: frames[14]!.payload },
+      { kind: "userInputRequest", itemId: "in1", sequence: 16, payload: frames[15]!.payload },
+    ])
+    expect(requests(live)).toEqual(requests(reloaded))
+    expect(historyList(live)).toEqual(historyList(reloaded))
+    live.close()
+    reloaded.close()
   })
 
   it("draws the same history when opened in the middle of the run (F5) as watched live", async () => {

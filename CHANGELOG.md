@@ -16,7 +16,10 @@ this release the new functions (queue, steer, background tasks) find nothing to 
   the item of its `itemId`. A tool's call and its result are two items, each where it came, as the
   stream sends them and the reload (and 0.2.13) has them; an app that shows a tool as one line
   joins them by `toolId`, as T3's own screen does. The call that spawned a subagent carries its
-  last state. A piece the loaded history already has grows in place, and a frame it already holds
+  last state. An approval or a question T3 asks mid-turn (the box's `approval` and
+  `user_input_request` frames) enters as an `approval` or `userInputRequest` item with the frame's
+  payload, where it came, as the reload has it; it still reaches the app as a `raw` event too. A
+  piece the loaded history already has grows in place, and a frame it already holds
   (a replay after a reconnect or an F5) changes nothing. The reload at the turn's end brings back
   the same pieces in the same order. An app draws `history`, `queue` and `subagents` and keeps
   nothing of its own.
