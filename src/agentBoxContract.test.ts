@@ -342,7 +342,7 @@ describe("Agent box queue and steer, as T3's composer", () => {
   })
 
   it("steers a message on purpose, sends one with no mode for T3 to decide by default, and moves a queued one into the running turn with T3's own promote", async () => {
-    const { session, socket } = await runningTurn()
+    const { session, first, socket } = await runningTurn()
     session.send("Now", { mode: "steer" })
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     expect(socket.sent[1]).toMatchObject({ type: "message", mode: "steer" })
@@ -361,10 +361,11 @@ describe("Agent box queue and steer, as T3's composer", () => {
     await vi.waitFor(() => expect(socket.sent).toHaveLength(6))
     expect(socket.sent[5]).not.toHaveProperty("mode")
     session.close()
+    await expect(first).rejects.toThrow("Agent task session is closed.")
   })
 
   it("holds the provider's background work as T3's roster last stood", async () => {
-    const { session, socket } = await runningTurn()
+    const { session, first, socket } = await runningTurn()
     const seen: unknown[] = []
     session.on("backgroundTasks", ({ tasks }) => seen.push(tasks))
     const roster = [{ taskId: "bg-1", kind: "command", description: "npm run build" }]
@@ -374,6 +375,7 @@ describe("Agent box queue and steer, as T3's composer", () => {
     await vi.waitFor(() => expect(session.backgroundTasks).toEqual([]))
     expect(seen).toEqual([roster, []])
     session.close()
+    await expect(first).rejects.toThrow("Agent task session is closed.")
   })
 })
 
