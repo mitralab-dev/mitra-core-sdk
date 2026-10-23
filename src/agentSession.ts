@@ -1086,7 +1086,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this.historyPageSize = options.limit ?? this.historyPageSize
+    this.historyPageSize = options.limit ?? 50
     this.liveContext = null
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)

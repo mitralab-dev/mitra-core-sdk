@@ -1692,6 +1692,20 @@ describe("Agent older history", () => {
     })
   })
 
+  it("reads older pages in the size of the last loadHistory, the default when it gave none", async () => {
+    const rows = Array.from({ length: 120 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    await session.loadHistory()
+
+    await expect(session.loadOlder()).resolves.toHaveLength(50)
+    expect(tasks.listMessages).toHaveBeenLastCalledWith(
+      "task-1",
+      expect.objectContaining({ page: 1, size: 50 }),
+    )
+  })
+
   it("neither repeats nor skips a row when rows were recorded since the newest page", async () => {
     const rows = Array.from({ length: 6 }, (_, n) => row(n + 1))
     const tasks = pagedTasks(rows)
