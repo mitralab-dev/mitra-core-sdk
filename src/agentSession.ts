@@ -39,6 +39,11 @@ const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
   "interrupt",
   "approval_response",
+  // With the box cold, the Copilot changes a message still in its list, or hands the action on to
+  // the box that took it.
+  "queued-run.cancel",
+  "queued-run.edit",
+  "queued-message.promote-to-steer",
 ])
 
 export interface AgentTaskEventObserver {
@@ -449,15 +454,19 @@ export interface AgentTaskSession {
    * was no older page) and emits `historyLoaded`. A reload of the newest page keeps them.
    */
   loadOlder(): Promise<readonly AgentTimelineItem[]>
-  /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
+  /**
+   * Changes the text of a queued message (T3's `queued-run.edit`). With the box cold it goes to the
+   * Copilot, which changes the message in its list, and `queue` and `history` are read again.
+   */
   editQueueItem(id: string, text: string): void
-  /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
+  /** Takes a message out of the queue (T3's `queued-run.cancel`); with the box cold, as the edit. */
   removeQueueItem(id: string): void
   /** Takes every message in `queue` out, one `queued-run.cancel` each. */
   clearQueue(): void
   /**
-   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`); only the
-   * box channel takes it. It leaves `queue` and enters the history where the turn takes it.
+   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`). It leaves
+   * `queue` and enters the history where the turn takes it. With the box cold, as the edit: the
+   * message leaves `queue` for a pending item in `history`, and runs as a steer when the box is up.
    */
   steerQueueItem(id: string): void
   /**
@@ -734,6 +743,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     ...(typeof message.clientMessageId === "string"
       ? { clientMessageId: message.clientMessageId }
       : {}),
+    ...(message.pending === true && message.sender === "USER" ? { pending: true as const } : {}),
     ...parentToolIdOf(message.parentToolId),
   }
 }
@@ -1094,7 +1104,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.liveContext = null
     this.historyTotal = page.page.totalElements
     this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this._history = this.withListedQueue(page.content).reverse().map(toAgentTimelineItem)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
@@ -1170,7 +1180,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // between the two, so the history starts over from the page and `loadOlder` reads again what is
   // behind it. Either way, what is behind is what the history does not hold.
   private keepNewestPage(page: Page<AgentMessage>): void {
-    const newest = [...page.content].reverse().map(toAgentTimelineItem)
+    const newest = this.withListedQueue(page.content).reverse().map(toAgentTimelineItem)
     const covered = new Set(newest.map((item) => item.id))
     const loaded = this._history.filter((item) => !item.id.startsWith("live:"))
     const touches = loaded.some((item) => covered.has(item.id))
@@ -1184,7 +1194,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   editQueueItem(id: string, text: string): void {
     this.requireOpen()
     if (this.sentTexts.has(id)) this.sentTexts.set(id, text)
-    void this.sendInput({ type: "queued-run.edit", clientMessageId: id, text }).catch(
+    void this.queueAction({ type: "queued-run.edit", clientMessageId: id, text }).catch(
       (error: unknown) => {
         this.emitError("Failed to edit the queued Agent message", error)
       },
@@ -1193,7 +1203,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   removeQueueItem(id: string): void {
     this.requireOpen()
-    void this.sendInput({ type: "queued-run.cancel", clientMessageId: id }).catch(
+    void this.queueAction({ type: "queued-run.cancel", clientMessageId: id }).catch(
       (error: unknown) => {
         this.emitError("Failed to remove the queued Agent message", error)
       },
@@ -1206,7 +1216,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   steerQueueItem(id: string): void {
     this.requireOpen()
-    void this.sendInput({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
+    void this.queueAction({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
       (error: unknown) => {
         this.emitError("Failed to steer the queued Agent message", error)
       },
@@ -1684,6 +1694,47 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!message.usage) return false
     const prompt = message.usage.requestMessageId
     return prompt === undefined || !this.turnBaselineIds.has(prompt)
+  }
+
+  // The box channel answers a queue action with the queue as it is now. The Copilot sends no frame
+  // back when it changed the message in its list (the box is cold), so the history and the queue
+  // are read again from it.
+  private async queueAction(input: AgentTaskInput): Promise<void> {
+    if ((await this.handOver(input)).direct || !this._taskId) return
+    const generation = this.historyGeneration
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      size: this.historyPageSize,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    if (generation !== this.historyGeneration || this.isClosed()) return
+    this.keepNewestPage(page)
+    this.emit("historyLoaded", { history: this.history })
+  }
+
+  // A message still in the Copilot's list while the box is cold comes in the history as pending.
+  // One sent to T3's queue is the queue's, as T3 shows it, until the box reports the queue itself:
+  // a queue item the box reported has a position, one from the list has none and is replaced here.
+  private withListedQueue(rows: readonly AgentMessage[]): AgentMessage[] {
+    const listed = rows.filter(
+      (row) =>
+        row.pending === true && row.mode === "queue" && typeof row.clientMessageId === "string",
+    )
+    const reported = this.queueItems.filter((item) => item.position !== undefined)
+    if (listed.length > 0 || reported.length !== this.queueItems.length) {
+      const fromList = [...listed]
+        .reverse()
+        .filter((row) => !reported.some((item) => item.id === row.clientMessageId))
+        .map((row): AgentQueueItem => ({
+          id: row.clientMessageId!,
+          text: row.content,
+          createdAt: Date.parse(row.createdAt),
+          mode: "queue",
+        }))
+      this.queueItems = [...reported, ...fromList]
+      this.emit("queueChange", { queue: this.queue })
+    }
+    return rows.filter((row) => !listed.includes(row))
   }
 
   /** True once the server took the input; false when the box refused it on the stream. */
@@ -2198,8 +2249,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return id !== undefined && this.pendingQuestions.some((item) => item.id === `live:user:${id}`)
   }
 
+  // The history's own pending item too (a message the Copilot still held in its list when the
+  // history was read): the box taking it puts it where it went in, or in the queue.
   private dropPending(id: string): void {
     this.pendingQuestions = this.pendingQuestions.filter((item) => item.id !== `live:user:${id}`)
+    this._history = this._history.filter(
+      (item) => !(item.kind === "user" && item.pending === true && item.clientMessageId === id),
+    )
   }
 
   // The turn ended with no frame that confirmed its opening message, or a steer it took: the turn

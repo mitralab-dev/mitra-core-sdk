@@ -1361,6 +1361,12 @@ export interface AgentMessage {
   subagent?: Partial<AgentSubagentFrame>
   /** On the row that closed a turn: the reason the box ended it with. */
   reason?: string
+  /**
+   * On the person's message the Copilot still holds in its list while the box is cold: `true`,
+   * with `mode`, how it will enter a running turn.
+   */
+  pending?: boolean
+  mode?: "queue" | "steer"
 }
 
 /**

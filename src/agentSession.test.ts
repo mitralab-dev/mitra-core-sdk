@@ -1476,21 +1476,107 @@ describe("Agent history item identity", () => {
   })
 })
 
-describe("Agent queue without the box channel", () => {
-  it("sends no queue command and says so when the box channel is not connected", async () => {
-    const { session } = createSession()
-    const errors: string[] = []
-    session.on("error", ({ error }) => errors.push(error))
-    session.send("first")
-    await vi.waitFor(() => expect(session.taskId).toBe("task-1"))
-    session.removeQueueItem("q-1")
-    session.editQueueItem("q-1", "edited")
-    await vi.waitFor(() =>
-      expect(errors).toEqual([
-        "Failed to remove the queued Agent message: The Agent queued-run.cancel was not sent: the box channel is not connected right now.",
-        "Failed to edit the queued Agent message: The Agent queued-run.edit was not sent: the box channel is not connected right now.",
-      ]),
-    )
+describe("Agent queue while the box is cold", () => {
+  // As the Copilot answers, newest first: what its list still holds comes pending, with its mode.
+  function listed(id: string, content: string, mode: "queue" | "steer", at: string): AgentMessage {
+    return {
+      ...message(id, "USER", content),
+      createdAt: at,
+      pending: true,
+      mode,
+      clientMessageId: `cm-${id}`,
+    }
+  }
+
+  it("shows the listed messages at open: queue ones in `queue`, the others pending in `history`", async () => {
+    const tasks = createTasks({
+      listMessages: vi.fn(async () =>
+        page([
+          listed("3", "later", "queue", "2026-01-01T00:00:03Z"),
+          listed("2", "now", "steer", "2026-01-01T00:00:02Z"),
+          message("1", "AGENT", "Earlier answer"),
+        ]),
+      ),
+    })
+    const source = new FakeEventSource()
+    const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
+      taskId: "task-1",
+      transport: "http",
+    })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    expect(session.queue).toEqual([
+      { id: "cm-3", text: "later", createdAt: Date.parse("2026-01-01T00:00:03Z"), mode: "queue" },
+    ])
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "agent", text: "Earlier answer" }),
+      expect.objectContaining({
+        kind: "user",
+        text: "now",
+        clientMessageId: "cm-2",
+        pending: true,
+      }),
+    ])
+
+    // The box comes up and drains the list: the steer opens the turn and the queued one waits in
+    // T3's queue, each where the box puts it, never twice.
+    source.emit({
+      ...event("stepStart", {
+        text: "now",
+        lifecycle: { turnId: "turn-2", clientMessageId: "cm-2" },
+      }),
+      sequence: 1,
+    })
+    source.emit({
+      ...event("messageQueued", { position: 1, text: "later", clientMessageId: "cm-3" }),
+      sequence: 2,
+    })
+
+    const users = session.history.filter((item) => item.kind === "user")
+    expect(users).toEqual([expect.objectContaining({ text: "now", clientMessageId: "cm-2" })])
+    expect(users[0]).not.toHaveProperty("pending")
+    expect(session.queue).toEqual([expect.objectContaining({ id: "cm-3", position: 1 })])
+  })
+
+  it("sends the queue actions to the Copilot and reads the queue again from it", async () => {
+    const tasks = createTasks({
+      listMessages: vi
+        .fn<AgentTasksModule["listMessages"]>()
+        .mockResolvedValueOnce(
+          page([
+            listed("3", "promote me", "queue", "2026-01-01T00:00:03Z"),
+            listed("2", "drop me", "queue", "2026-01-01T00:00:02Z"),
+          ]),
+        )
+        .mockResolvedValueOnce(page([listed("3", "promote me", "queue", "2026-01-01T00:00:03Z")]))
+        .mockResolvedValue(page([listed("3", "promote me", "steer", "2026-01-01T00:00:03Z")])),
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FakeEventSource(),
+    }).session({ taskId: "task-1", transport: "http" })
+    await vi.waitFor(() => expect(session.queue).toHaveLength(2))
+    const changes: number[] = []
+    session.on("queueChange", ({ queue }) => changes.push(queue.length))
+
+    session.removeQueueItem("cm-2")
+    await vi.waitFor(() => expect(session.queue.map((item) => item.id)).toEqual(["cm-3"]))
+    session.steerQueueItem("cm-3")
+    await vi.waitFor(() => expect(session.queue).toEqual([]))
+
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "queued-run.cancel", clientMessageId: "cm-2" },
+      { type: "queued-message.promote-to-steer", clientMessageId: "cm-3" },
+    ])
+    expect(changes).toEqual([1, 0])
+    expect(session.history).toEqual([
+      expect.objectContaining({
+        kind: "user",
+        text: "promote me",
+        clientMessageId: "cm-3",
+        pending: true,
+      }),
+    ])
   })
 })
 

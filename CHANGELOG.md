@@ -26,6 +26,15 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   `history.filter((item) => !item.pending)`. On a chat with no box that filter does not give back
   what 0.3.0 showed: there the question now stays as a confirmed item where its first text opened
   the turn, since dropping it from the screen would be worse.
+- While the box is cold, the messages the Copilot still holds in its list come in the history read
+  as `user` items with `pending: true` (the Copilot marks them, with their `mode`), so a session
+  opened anywhere shows them at once: one sent with `mode: "queue"` is in `queue` instead of
+  `history`, as T3 shows it, until the box reports the queue itself; the others stay pending in
+  `history` until the box takes them. `editQueueItem`, `removeQueueItem` and `steerQueueItem` work
+  the same with the box cold: with no box channel they go to the Copilot (`POST /inputs`), which
+  changes the message in its list or hands the action to the box that took it, and the session
+  reads `queue` and `history` again. Needs the Copilot with the cold box queue; an older one
+  refuses the action as before.
 - `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
   hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
   it redials a box that dropped. A chat with no box never asks and stays false.
