@@ -32,7 +32,9 @@ did changes.
   tool's call and result in one entry (by `toolId`) and a subagent's pieces under the call that
   spawned it (by `parentToolId`). A pure function over `history`, which stays as it is.
 - The `mode` a message was sent with also goes to the Copilot (`POST /inputs`), with or without a
-  turn running, for the Copilot to hand to the box (mitra-copilot#535); an older Copilot ignores it.
+  turn running. It is not guaranteed there: a Copilot with mitra-copilot#535 hands it only to a live
+  box it hosts, a message waiting in its prompt list (cold box) loses it and T3 decides, and an
+  older Copilot ignores the field.
 - Documented: `task.agentType` and `task.reasoningEffort` are the chat's current model and effort,
   the catalog's `agentType`, so a reopened chat finds its provider in `providers()` with no search.
 
