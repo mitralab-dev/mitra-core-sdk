@@ -3081,7 +3081,7 @@ describe("A box chat sends without waiting for the channel", () => {
     return tasks
   }
 
-  function heldChannel() {
+  function heldChannel(lastSequence = 0) {
     let boot!: () => void
     const booted = new Promise<void>((resolve) => {
       boot = resolve
@@ -3090,7 +3090,7 @@ describe("A box chat sends without waiting for the channel", () => {
       boot,
       channel: async (): Promise<AgentTaskChannel | null> => {
         await booted
-        return { wsUrl: BOX_URL, lastSequence: 0 }
+        return { wsUrl: BOX_URL, lastSequence }
       },
     }
   }
@@ -3237,13 +3237,18 @@ describe("A box chat sends without waiting for the channel", () => {
     )
   })
 
-  it("sends on the box once the channel is connected, as before", async () => {
+  it("sends on the box once the channel is connected and the box took what went to the Copilot", async () => {
     const tasks = boxTasks(offer())
     const { session } = open(tasks)
-    session.send("Warm up")
+    const warm = session.send("Warm up")
     await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
     const socket = FakeWebSocket.last()
     await vi.waitFor(() => expect(session.connecting).toBe(false))
+    socket.receive(
+      "stepStart",
+      { text: "Warm up", lifecycle: { turnId: "t1", clientMessageId: warm } },
+      1,
+    )
     tasks.sendInput.mockClear()
 
     const id = session.send("On the box", { mode: "steer" })
@@ -3254,5 +3259,237 @@ describe("A box chat sends without waiting for the channel", () => {
       ),
     )
     expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
+
+  it("reads the box log from its beginning when a new chat's message went to the Copilot, and the box's turn for it arrives", async () => {
+    const held = heldChannel(4)
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+    const id = session.send("A", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-1", lastSequence: 4 })
+    await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: "replay", fromSequence: 0 }))
+    socket.receive("stepStart", { text: "A", lifecycle: { turnId: "t1", clientMessageId: id } }, 1)
+    socket.receive("textDelta", { text: "Hi", lifecycle: { turnId: "t1" } }, 2)
+
+    expect(users(session)).toEqual([["A", false]])
+    expect(session.content).toBe("Hi")
+  })
+
+  it("reads the box log from its beginning when the chat reopens during the boot with only pending messages", async () => {
+    const held = heldChannel(2)
+    const tasks = boxTasks(held.channel)
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-1",
+          sender: "USER",
+          type: "TEXT",
+          content: "first",
+          createdAt: "2026-01-01T00:00:01Z",
+          pending: true,
+          mode: "queue",
+          clientMessageId: "cm-1",
+        },
+      ],
+      page: { size: 1, totalElements: 1, totalPages: 1, number: 0 },
+    })
+    createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(tasks.channel).toHaveBeenCalledOnce())
+
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-1", lastSequence: 2 })
+    await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: "replay", fromSequence: 0 }))
+  })
+
+  it("keeps the opening message once, pending, when a queue action reads the Copilot's list again", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+    const a = session.send("A", { mode: "queue" })!
+    const b = session.send("B", { mode: "queue" })!
+    const c = session.send("C", { mode: "queue" })!
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    // The Copilot's list after the cancel of C: A and B still in it, in queue mode.
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-b",
+          sender: "USER",
+          type: "TEXT",
+          content: "B",
+          createdAt: "2026-01-01T00:00:02Z",
+          pending: true,
+          mode: "queue",
+          clientMessageId: b,
+        },
+        {
+          id: "m-a",
+          sender: "USER",
+          type: "TEXT",
+          content: "A",
+          createdAt: "2026-01-01T00:00:01Z",
+          pending: true,
+          mode: "queue",
+          clientMessageId: a,
+        },
+      ],
+      page: { size: 2, totalElements: 2, totalPages: 1, number: 0 },
+    })
+    const reloaded = new Promise<void>((resolve) => session.on("historyLoaded", () => resolve()))
+
+    session.removeQueueItem(c)
+    await reloaded
+
+    expect(users(session)).toEqual([["A", true]])
+    expect(session.queue.map((item) => item.id)).toEqual([b])
+  })
+
+  it("ends the turn and its sendAndWait when the channel cannot be opened at all", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(async () => {
+      await held.channel()
+      return null
+    })
+    const broken = new Error("Copilot stream unavailable")
+    const fallback = new FallbackSource()
+    fallback.open = async () => {
+      throw broken
+    }
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: fallback,
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ create: true, agentType: "CLAUDE", agentId: AGENT_ID })
+    const result = session.sendAndWait("A")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    held.boot()
+
+    await expect(result).rejects.toBe(broken)
+    expect(session.status).toBe("error")
+    expect(users(session)).toEqual([])
+  })
+
+  it("sends a queue action after the message it names, not ahead of it", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+    session.send("A", { mode: "queue" })
+    const b = session.send("B", { mode: "queue" })!
+    session.removeQueueItem(b)
+
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input.type)).toEqual([
+      "message",
+      "message",
+      "queued-run.cancel",
+    ])
+    expect(tasks.sendInput.mock.calls[1]?.[1]).toMatchObject({ clientMessageId: b })
+  })
+
+  it("keeps sending to the Copilot, once the channel is up, until the box took what went there before", async () => {
+    const tasks = boxTasks(offer())
+    const { session } = open(tasks)
+    const a = session.send("A")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    await vi.waitFor(() => expect(session.connecting).toBe(false))
+
+    const b = session.send("B")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    expect(tasks.sendInput.mock.calls[1]?.[1]).toMatchObject({ content: "B", clientMessageId: b })
+    socket.receive("stepStart", { text: "A", lifecycle: { turnId: "t1", clientMessageId: a } }, 1)
+    socket.receive("steer", { text: "B", lifecycle: { turnId: "t1", clientMessageId: b } }, 2)
+
+    const c = session.send("C")
+    await vi.waitFor(() =>
+      expect(socket.sent).toContainEqual(
+        expect.objectContaining({ type: "message", content: "C", clientMessageId: c }),
+      ),
+    )
+    expect(tasks.sendInput).toHaveBeenCalledTimes(2)
+    expect(users(session)).toEqual([
+      ["A", false],
+      ["B", false],
+    ])
+  })
+
+  it("lets go of what the Copilot expired when the box did not come up in time, and ends the turn", async () => {
+    const held = heldChannel()
+    const tasks = boxTasks(async () => {
+      await held.channel()
+      return null
+    })
+    const { session } = open(tasks)
+    const result = session.sendAndWait("A")
+    const b = session.send("B", { mode: "queue" })!
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    const first = tasks.sendInput.mock.calls[0]?.[1]
+    const a = first?.type === "message" ? first.clientMessageId : undefined
+    expect(session.queue.map((item) => item.id)).toEqual([b])
+    const notSent =
+      "This message was not sent: the agent box did not come up in time. Send it again."
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "e-b",
+          sender: "AGENT",
+          type: "ERROR",
+          content: notSent,
+          createdAt: "2026-01-01T00:03:02Z",
+        },
+        {
+          id: "m-b",
+          sender: "USER",
+          type: "TEXT",
+          content: "B",
+          createdAt: "2026-01-01T00:00:02Z",
+          clientMessageId: b,
+        },
+        {
+          id: "e-a",
+          sender: "AGENT",
+          type: "ERROR",
+          content: notSent,
+          createdAt: "2026-01-01T00:03:01Z",
+        },
+        {
+          id: "m-a",
+          sender: "USER",
+          type: "TEXT",
+          content: "A",
+          createdAt: "2026-01-01T00:00:01Z",
+          ...(a === undefined ? {} : { clientMessageId: a }),
+        },
+      ],
+      page: { size: 4, totalElements: 4, totalPages: 1, number: 0 },
+    })
+    const now = Date.now()
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 3 * 60_000 + 1)
+    try {
+      held.boot()
+
+      await expect(result).rejects.toThrow(notSent)
+      expect(session.status).toBe("idle")
+      expect(session.queue).toEqual([])
+      expect(users(session)).toEqual([
+        ["A", false],
+        ["B", false],
+      ])
+    } finally {
+      clock.mockRestore()
+    }
   })
 })

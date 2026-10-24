@@ -10,6 +10,12 @@ shows it twice until the box takes it), and on a chat with no box (the Copilot s
 carry no lifecycle) the question stays in `history` as a confirmed `user` item where its turn's
 first text came, which 0.3.0 did not add. Everything else is additive.
 
+Release order is mandatory: the Copilot with the cold box queue (the `mode` column of its prompt
+list, the pending rows in the history and the queue actions on the list) and with
+`GET /api/v1/models/providers` goes out before this SDK. Against an older Copilot the queue actions
+on a cold box are refused and `providers()` fails. The production Copilot already answers
+`runtime` in the task, which is what moves a box chat to the send-without-waiting path below.
+
 - A message sent with no turn running enters `history` at once as a `user` item with
   `pending: true`, after every other item, and the session emits `messagePending`, as T3 shows a
   message the moment it is sent (with a cold box, while the box boots). A message sent while
@@ -41,7 +47,17 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   box channel: while it opens (a cold box booting, or a page just opened), a message, a steer and
   the queue actions go to the Copilot at once (`POST /inputs`, with the same `clientMessageId` and
   `mode`), which keeps them in its list and in the history, and the channel opens alongside; its
-  replay names what the box took by the same id, so nothing shows twice. Visible change: the turn
+  replay names what the box took by the same id, so nothing shows twice. A chat whose history has
+  no box sequence yet (a new one, or one reopened while only the Copilot's list has its messages)
+  asks that replay from the start of the box log, so the frames the box wrote before the socket
+  was up are not lost. Until the box takes each message this session sent to the Copilot, the next
+  message and the queue actions go there too, even with the channel up, so none reaches the box
+  ahead of an earlier one; the queue actions also wait behind the messages sent before them. A
+  channel that cannot be opened at all ends the turn and its `sendAndWait` with the error. When
+  the channel settles (the box up, or the Copilot's stream when it never came) with a message
+  still on its way past the Copilot's 3 minute deadline, the session reads the newest page again:
+  a message the Copilot expired (its row no longer pending, an ERROR row right after it) leaves
+  the pending items and the queue, and its turn or `sendAndWait` ends with that error. Visible change: the turn
   is `streaming` from the send, not from the end of the boot, and a session opened by `taskId` is
   `idle` once the history is read, with `connecting` still true. A chat with no box, or a Copilot
   that does not answer `runtime`, waits for its stream as before.
@@ -70,9 +86,9 @@ first text came, which 0.3.0 did not add. Everything else is additive.
   tool's call and result in one entry (by `toolId`) and a subagent's pieces under the call that
   spawned it (by `parentToolId`). A pure function over `history`, which stays as it is.
 - The `mode` a message was sent with also goes to the Copilot (`POST /inputs`), with or without a
-  turn running. It is not guaranteed there: a Copilot with mitra-copilot#535 hands it only to a live
-  box it hosts, a message waiting in its prompt list (cold box) loses it and T3 decides, and an
-  older Copilot ignores the field.
+  turn running. The Copilot hands it to the live box it hosts and keeps it in its prompt list for a
+  cold box, which runs the message in that mode when it drains the list; an older Copilot ignores
+  the field and T3 decides.
 - Documented: `task.agentType` and `task.reasoningEffort` are the chat's current model and effort,
   the catalog's `agentType`, so a reopened chat finds its provider in `providers()` with no search.
 

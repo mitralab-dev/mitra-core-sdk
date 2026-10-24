@@ -27,6 +27,8 @@ const CANCEL_SAFETY_MS = 10_000
 const RECONCILE_DELAY_MS = 1_000
 // About 3 s at the poll interval: the Copilot writes the closing row right after the terminal.
 const ENDED_POLLS_BEFORE_NEWEST = 3
+// How long the Copilot keeps a message in its list for a box (its QUEUE_DEADLINE).
+const COPILOT_LIST_DEADLINE_MS = 3 * 60_000
 const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
   "textDelta",
   "textChunk",
@@ -41,6 +43,11 @@ const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "approval_response",
   // With the box cold, the Copilot changes a message still in its list, or hands the action on to
   // the box that took it.
+  "queued-run.cancel",
+  "queued-run.edit",
+  "queued-message.promote-to-steer",
+])
+const QUEUE_INPUT_TYPES: ReadonlySet<string> = new Set([
   "queued-run.cancel",
   "queued-run.edit",
   "queued-message.promote-to-steer",
@@ -950,8 +957,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private historyGeneration = 0
   private olderPromise: Promise<readonly AgentTimelineItem[]> | null = null
   private olderGeneration = 0
-  // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
+  // Taken by the first channel; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
+  private openingCursorTaken = false
+  // Messages this session handed to the Copilot, so the box gets them from its list. Until the box
+  // takes each one, the next message goes the same way, or it would reach the box first.
+  private readonly overCopilot = new Map<string, number>()
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -1577,8 +1588,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // was before the direct channel. A chat with an agent asks, and the Copilot has the last
     // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
-    const historyCursor = this.openingCursor
+    // A box chat whose history has no box sequence yet (a new one, or one whose only rows are still
+    // in the Copilot's list) sends before its channel opens, and the box may take those messages
+    // from the list meanwhile: the box log is read from its beginning, each frame naming its
+    // message by `clientMessageId`.
+    const historyCursor = this.openingCursorTaken
+      ? undefined
+      : (this.openingCursor ?? (this.deliversBeforeTheChannel() ? { sequence: 0 } : undefined))
     this.openingCursor = undefined
+    this.openingCursorTaken = true
     const toBox = source === this.dependencies.channel
     if (toBox) this.setConnecting(true)
     this.connectionPromise = source
@@ -1598,12 +1616,64 @@ class CoreAgentTaskSession implements AgentTaskSession {
           return
         }
         this.connection = connection
+        if (toBox) {
+          void this.releaseExpired().catch((error: unknown) => {
+            this.emitError("Failed to read the Agent history", error)
+          })
+        }
       })
       .finally(() => {
         this.connectionPromise = null
         if (toBox) this.setConnecting(false)
       })
     return this.connectionPromise
+  }
+
+  // Past the Copilot's deadline a message in its list expires: its row is no longer pending and an
+  // ERROR row right after it says it was not sent. No frame says so, and a box that came up late,
+  // or the Copilot's stream when it never did, would leave the message pending, its queue item
+  // held and the turn running for good. So once the channel settles, the newest page is read again
+  // when a message still on its way is past the deadline. Not before: the page would replace the
+  // live pieces of a turn the box runs now that the Copilot has not recorded yet.
+  private async releaseExpired(): Promise<void> {
+    const waiting = [...this.overCopilot.keys()].filter((id) => this.awaitsBox(id))
+    const deadline = Date.now() - COPILOT_LIST_DEADLINE_MS
+    if (!waiting.some((id) => this.overCopilot.get(id)! <= deadline) || !this._taskId) return
+    const generation = this.historyGeneration
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      size: this.historyPageSize,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    if (generation !== this.historyGeneration || this.isClosed()) return
+    this.keepNewestPage(page)
+    const rows = [...page.content].reverse()
+    const notSent = new Map<string, AgentTaskTurnError>()
+    for (const id of waiting) {
+      const at = rows.findIndex(
+        (row) => row.sender === "USER" && row.clientMessageId === id && row.pending !== true,
+      )
+      const next = at >= 0 ? rows[at + 1] : undefined
+      if (next?.type === "ERROR") notSent.set(id, new AgentTaskTurnError(next.content))
+    }
+    // The steers first: failing the turn sends the ones it had not taken to wait for their own.
+    for (const steered of [...this.steers, ...this.strayedSteers]) {
+      const error = notSent.get(steered.clientMessageId)
+      if (!error) continue
+      notSent.delete(steered.clientMessageId)
+      this.forgetSteer(steered)
+      steered.waiter?.reject(error)
+    }
+    for (const [id, error] of notSent) {
+      this.overCopilot.delete(id)
+      if (id === this.openingMessageId && this._status === "streaming") {
+        this.emit("error", { error: error.message })
+        this.failTurn(error)
+      } else {
+        this.dropPending(id)
+      }
+    }
+    this.emit("historyLoaded", { history: this.history })
   }
 
   private handleDisconnect(error?: unknown): void {
@@ -1718,9 +1788,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // The box channel answers a queue action with the queue as it is now. The Copilot sends no frame
   // back when it changed the message in its list (the box is cold), so the history and the queue
-  // are read again from it.
+  // are read again from it. It waits its turn behind the messages sent before it, as a steer does:
+  // a cancel that overtook the message it names would find nothing to cancel.
   private async queueAction(input: AgentTaskInput): Promise<void> {
-    if ((await this.handOver(input)).direct || !this._taskId) return
+    const handed = this.handOff.then(async () => {
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
+      await this.prepareSend()
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
+      return this.handOver(input)
+    })
+    this.handOff = handed.then(
+      () => undefined,
+      () => undefined,
+    )
+    if ((await handed).direct || !this._taskId) return
     const generation = this.historyGeneration
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: this.historyPageSize,
@@ -1736,7 +1817,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // One sent to T3's queue is the queue's, as T3 shows it, until the box reports the queue itself:
   // a queue item the box reported has a position, one from the list has none and is replaced here.
   // With no turn running, the oldest one in the list is the turn the box opens when it drains it,
-  // so it stays pending in `history`, as it does on the session that sent it.
+  // so it stays pending in `history`, as it does on the session that sent it. A message this session
+  // shows as pending is already in `history` and never goes to the queue as well.
   private withListedQueue(rows: readonly AgentMessage[]): AgentMessage[] {
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
     const opening = turnRunning
@@ -1747,7 +1829,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
         row !== opening &&
         row.pending === true &&
         row.mode === "queue" &&
-        typeof row.clientMessageId === "string",
+        typeof row.clientMessageId === "string" &&
+        !this.isPending(row.clientMessageId),
     )
     const reported = this.queueItems.filter((item) => item.position !== undefined)
     if (listed.length > 0 || reported.length !== this.queueItems.length) {
@@ -1779,7 +1862,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     steering = false,
   ): Promise<{ admitted: Promise<boolean>; direct: boolean }> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
-    const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
+    const direct = this.behindCopilot(input)
+      ? null
+      : this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return { admitted: direct, direct: true }
     // Only the box knows T3's input requests and subagents; the Copilot would refuse the type.
     if (input.type === "runtime-request.respond") {
@@ -1812,7 +1897,28 @@ class CoreAgentTaskSession implements AgentTaskSession {
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
     await this.dependencies.tasks.sendInput(this._taskId, rest)
+    if (input.type === "message" && clientMessageId !== undefined) {
+      this.overCopilot.set(clientMessageId, Date.now())
+    }
     return { admitted: Promise.resolve(true), direct: false }
+  }
+
+  // A message, or a queue action on a message, behind one the Copilot still holds for the box.
+  private behindCopilot(input: AgentTaskInput): boolean {
+    if (input.type !== "message" && !QUEUE_INPUT_TYPES.has(input.type)) return false
+    for (const id of this.overCopilot.keys()) {
+      if (this.awaitsBox(id)) return true
+      this.overCopilot.delete(id)
+    }
+    return false
+  }
+
+  // Shown as pending, or in the queue with no position the box reported: the box has not taken it.
+  private awaitsBox(id: string): boolean {
+    return (
+      this.isPending(id) ||
+      this.queueItems.some((item) => item.id === id && item.position === undefined)
+    )
   }
 
   private async prepareSend(): Promise<void> {
@@ -1831,10 +1937,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openChannel(): Promise<void> {
     const channel = this.ensureChannel()
     if (!this.deliversBeforeTheChannel()) return channel
+    // Nothing awaits it, so the turn and the waiters of what went to the Copilot end here.
     void channel.catch((error: unknown) => {
       if (this.isClosed()) return
-      this.emitError("Failed to open Agent task", error)
-      this.setStatus("error")
+      this.failLiveChannel(error, error instanceof Error ? error : new Error(errorMessage(error)))
     })
     return Promise.resolve()
   }

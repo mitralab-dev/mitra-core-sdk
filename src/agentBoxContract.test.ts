@@ -849,7 +849,9 @@ describe("Agent box queue", () => {
     queued(socket, id, "turn-2", 1, 2, { text: "Later" })
 
     session.removeQueueItem(id)
-    expect(socket.sent.at(-1)).toEqual({ type: "queued-run.cancel", clientMessageId: id })
+    await vi.waitFor(() =>
+      expect(socket.sent.at(-1)).toEqual({ type: "queued-run.cancel", clientMessageId: id }),
+    )
     // T3 drops the run before it started: the box ends it with a terminal of its own.
     frame(
       socket,
@@ -1015,6 +1017,9 @@ describe("Agent box queue", () => {
     // The box refuses a command for a message it cannot take out (not in T3's queue yet, or
     // running): the refusal goes to this client only and the message stays.
     session.removeQueueItem("other-2")
+    await vi.waitFor(() =>
+      expect(socket.sent.at(-1)).toEqual({ type: "queued-run.cancel", clientMessageId: "other-2" }),
+    )
     frame(socket, "error", {
       code: "INVALID_MESSAGE",
       message: "The message is not in the queue",
@@ -1025,18 +1030,22 @@ describe("Agent box queue", () => {
     expect(session.status).toBe("streaming")
 
     session.editQueueItem("other-1", "Edited")
-    expect(socket.sent.at(-1)).toEqual({
-      type: "queued-run.edit",
-      clientMessageId: "other-1",
-      text: "Edited",
-    })
+    await vi.waitFor(() =>
+      expect(socket.sent.at(-1)).toEqual({
+        type: "queued-run.edit",
+        clientMessageId: "other-1",
+        text: "Edited",
+      }),
+    )
     queued(socket, "other-1", "turn-8", 1, 4, { text: "Edited" })
     expect(session.queue.map((item) => item.text)).toEqual(["Edited", "Also queued"])
 
     session.clearQueue()
-    expect(socket.sent.slice(-2)).toEqual([
-      { type: "queued-run.cancel", clientMessageId: "other-1" },
-      { type: "queued-run.cancel", clientMessageId: "other-2" },
-    ])
+    await vi.waitFor(() =>
+      expect(socket.sent.slice(-2)).toEqual([
+        { type: "queued-run.cancel", clientMessageId: "other-1" },
+        { type: "queued-run.cancel", clientMessageId: "other-2" },
+      ]),
+    )
   })
 })
