@@ -1398,7 +1398,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.openingMessageId = clientMessageId
     this.openingAwaitsStart = true
     const { admitted, direct } = await this.handOver(input, this.openingMessageId)
-    if (!direct) this.openingAwaitsStart = false
+    // The Copilot hands a box chat's message on to the box, whose `stepStart` names it as on the
+    // direct channel; any other chat's stream names no message.
+    if (!direct && !this.deliversBeforeTheChannel()) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
@@ -2042,9 +2044,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (event.type === "stepStart" || event.type === "steer") {
       // A box that names no message is answering ours: it decides one message at a time. Steered
       // into a turn another client opened, ours goes on in that turn, whose frames before the
-      // `steer` were not ours but whose next ones are.
+      // `steer` were not ours but whose next ones are. A later message of this session the box
+      // took first (the opening one expired in the Copilot's list) makes the turn ours too.
       const id = lifecycle?.clientMessageId
-      if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
+      const ours =
+        id === this.openingMessageId ||
+        [...this.steers, ...this.strayedSteers].some((pending) => pending.clientMessageId === id)
+      if (ours || (id === undefined && event.type === "stepStart")) {
         this.openingAwaitsStart = false
         this.forgetFinishedTurn(lifecycle)
       }
@@ -2369,6 +2375,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     lifecycle: Record<string, unknown> | null,
   ): boolean {
     if (this._status !== "streaming" && this._status !== "cancelled") return false
+    // On connect the box sends its last readings ahead of the replay, each a copy of the line that
+    // said it, with that line's sequence: taken as the turn's progress, they made the replayed
+    // `stepStart` before them look like a repeat, and the question and the turn's start were lost
+    // (dev, 2026-10-24). A reading is no piece of the turn and says nothing about what was seen.
+    if (event.type === "providerUsage" || event.type === "contextUsage") return false
     const turnId = lifecycle?.turnId
     if (typeof turnId !== "string") return false
     if (typeof event.sequence === "number") {

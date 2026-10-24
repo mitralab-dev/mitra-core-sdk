@@ -3813,6 +3813,123 @@ describe("A box chat sends without waiting for the channel", () => {
     session.close()
   })
 
+  it("keeps the question of a message sent before the history loaded when the box sends its readings ahead of the replay", async () => {
+    const tasks = boxTasks(offer(BOX_URL, 28))
+    let loaded!: () => void
+    const history = new Promise<void>((resolve) => {
+      loaded = resolve
+    })
+    tasks.listMessages.mockImplementation(async () => {
+      await history
+      return {
+        content: [
+          {
+            id: "m-1",
+            sender: "AGENT",
+            type: "TEXT",
+            content: "Earlier answer",
+            createdAt: "2026-01-01T00:00:01Z",
+            sequence: 24,
+          },
+        ],
+        page: { size: 1, totalElements: 1, totalPages: 1, number: 0 },
+      }
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ taskId: "task-1" })
+    let id: string | undefined
+    session.on("messagePending", ({ clientMessageId }) => {
+      id = clientMessageId
+    })
+    const answer = session.sendAndWait("Hello")
+    loaded()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    const socket = FakeWebSocket.last()
+    const now = { turnId: "t2", clientMessageId: id }
+    // On connect the box sends its last readings, each with the sequence of the line that said it,
+    // before the replay of what came after the history.
+    socket.receive("hello", { threadId: "th-1", lastSequence: 28 })
+    socket.receive("providerUsage", { harness: "codex", windows: [], lifecycle: now }, 28)
+    socket.receive("contextUsage", { contextTokens: 100, lifecycle: { turnId: "t1" } }, 24)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t1" } }, 25)
+    socket.receive("messageQueued", { position: null, text: "Hello", lifecycle: now }, 26)
+    socket.receive("stepStart", { text: "Hello", lifecycle: now }, 27)
+    socket.receive("providerUsage", { harness: "codex", windows: [], lifecycle: now }, 28)
+    socket.receive("textDelta", { text: "Hi", lifecycle: { turnId: "t2" } }, 29)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t2" } }, 31)
+
+    await expect(answer).resolves.toMatchObject({ content: "Hi" })
+    expect(
+      session.history.flatMap((item) =>
+        item.kind === "user" ? [[item.text, item.clientMessageId, item.pending === true]] : [],
+      ),
+    ).toEqual([["Hello", id, false]])
+  })
+
+  it("keeps the question of a message that went to the Copilot before the history loaded when the box sends its readings ahead of the replay", async () => {
+    const held = heldChannel(28)
+    const tasks = boxTasks(held.channel)
+    let loaded!: () => void
+    const history = new Promise<void>((resolve) => {
+      loaded = resolve
+    })
+    tasks.listMessages.mockImplementation(async () => {
+      await history
+      return {
+        content: [
+          {
+            id: "m-1",
+            sender: "AGENT",
+            type: "TEXT",
+            content: "Earlier answer",
+            createdAt: "2026-01-01T00:00:01Z",
+            sequence: 24,
+          },
+        ],
+        page: { size: 1, totalElements: 1, totalPages: 1, number: 0 },
+      }
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ taskId: "task-1" })
+    let id: string | undefined
+    session.on("messagePending", ({ clientMessageId }) => {
+      id = clientMessageId
+    })
+    const answer = session.sendAndWait("Hello")
+    loaded()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+    const socket = FakeWebSocket.last()
+    const now = { turnId: "t2", clientMessageId: id }
+    // On connect the box sends its last readings, each with the sequence of the line that said it,
+    // before the replay of what came after the history.
+    socket.receive("hello", { threadId: "th-1", lastSequence: 28 })
+    socket.receive("providerUsage", { harness: "codex", windows: [], lifecycle: now }, 28)
+    socket.receive("contextUsage", { contextTokens: 100, lifecycle: { turnId: "t1" } }, 24)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t1" } }, 25)
+    socket.receive("messageQueued", { position: null, text: "Hello", lifecycle: now }, 26)
+    socket.receive("stepStart", { text: "Hello", lifecycle: now }, 27)
+    socket.receive("providerUsage", { harness: "codex", windows: [], lifecycle: now }, 28)
+    socket.receive("textDelta", { text: "Hi", lifecycle: { turnId: "t2" } }, 29)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t2" } }, 31)
+
+    await expect(answer).resolves.toMatchObject({ content: "Hi" })
+    expect(
+      session.history.flatMap((item) =>
+        item.kind === "user" ? [[item.text, item.clientMessageId, item.pending === true]] : [],
+      ),
+    ).toEqual([["Hello", id, false]])
+  })
+
   it("keeps sending to the Copilot while a message it promoted to steer is still in its list", async () => {
     const held = heldChannel()
     const tasks = boxTasks(held.channel)
