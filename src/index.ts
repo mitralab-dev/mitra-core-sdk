@@ -2,6 +2,7 @@ export { createSdkCore } from "./core"
 export type { SdkCore, SdkCoreOptions, SdkCoreTransports } from "./core"
 export {
   AgentTaskTurnError,
+  agentTimeline,
   createAgentTaskSessionManager,
   toAgentTimelineItem,
   withAgentTaskSessions,
@@ -11,6 +12,7 @@ export type {
   AgentPieceIdentity,
   AgentProviderUsage,
   AgentBackgroundTask,
+  AgentContextUsage,
   AgentQueueItem,
   AgentSendAndWaitOptions,
   AgentSendOptions,
@@ -27,6 +29,7 @@ export type {
   AgentTasksWithSessions,
   AgentSubagent,
   AgentSubagentStatus,
+  AgentTimelineEntry,
   AgentTimelineItem,
   AgentTimelineItemIdentity,
   AgentToolEvent,
@@ -141,6 +144,7 @@ export type {
   AgentMessageListOptions,
   AgentSubagentFrame,
   AgentModel,
+  AgentReadyProvider,
   AgentTask,
   AgentTaskChannel,
   AgentTaskCreateInput,

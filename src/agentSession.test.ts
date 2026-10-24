@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   AgentTaskTurnError,
+  agentTimeline,
   createAgentTaskSessionManager,
   withAgentTaskSessions,
 } from "./agentSession"
@@ -9,6 +10,7 @@ import type {
   AgentTaskEventObserver,
   AgentTaskEventSource,
   AgentTaskSession,
+  AgentTimelineItem,
 } from "./agentSession"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentMessage, AgentTask, AgentTaskEvent, Page } from "./types"
@@ -330,7 +332,22 @@ describe("Agent task session", () => {
     source.emit(event("stepFinish", { reason: "endTurn" }))
 
     await expect(result).resolves.toMatchObject({ content: "ok", reason: "endTurn" })
-    expect(readings).toEqual([reading])
+    expect(readings).toEqual([{ ...reading, provider: "ANTHROPIC" }])
+  })
+
+  it("names the provider of the login the reading is, and none for a harness it does not know", async () => {
+    const { session, tasks, source } = createSession()
+    const readings: { provider?: string }[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    session.send("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const reading = { observedAt: "2026-09-26T12:00:00.000Z", status: null, windows: [] }
+
+    source.emit(event("providerUsage", { ...reading, harness: "codex" }))
+    source.emit(event("providerUsage", { ...reading, harness: "opencode" }))
+
+    expect(readings.map((value) => value.provider)).toEqual(["OPENAI", undefined])
+    expect(readings[1]).not.toHaveProperty("provider")
   })
 
   it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {
@@ -1459,20 +1476,784 @@ describe("Agent history item identity", () => {
   })
 })
 
-describe("Agent queue without the box channel", () => {
-  it("sends no queue command and says so when the box channel is not connected", async () => {
-    const { session } = createSession()
+describe("Agent queue while the box is cold", () => {
+  // As the Copilot answers, newest first: what its list still holds comes pending, with its mode.
+  function listed(id: string, content: string, mode: "queue" | "steer", at: string): AgentMessage {
+    return {
+      ...message(id, "USER", content),
+      createdAt: at,
+      pending: true,
+      mode,
+      clientMessageId: `cm-${id}`,
+    }
+  }
+
+  it("shows the listed messages at open: queue ones in `queue`, the others pending in `history`", async () => {
+    const tasks = createTasks({
+      listMessages: vi.fn(async () =>
+        page([
+          listed("3", "later", "queue", "2026-01-01T00:00:03Z"),
+          listed("2", "now", "steer", "2026-01-01T00:00:02Z"),
+          message("1", "AGENT", "Earlier answer"),
+        ]),
+      ),
+    })
+    const source = new FakeEventSource()
+    const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
+      taskId: "task-1",
+      transport: "http",
+    })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    expect(session.queue).toEqual([
+      { id: "cm-3", text: "later", createdAt: Date.parse("2026-01-01T00:00:03Z"), mode: "queue" },
+    ])
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "agent", text: "Earlier answer" }),
+      expect.objectContaining({
+        kind: "user",
+        text: "now",
+        clientMessageId: "cm-2",
+        pending: true,
+      }),
+    ])
+
+    // The box comes up and drains the list: the steer opens the turn and the queued one waits in
+    // T3's queue, each where the box puts it, never twice.
+    source.emit({
+      ...event("stepStart", {
+        text: "now",
+        lifecycle: { turnId: "turn-2", clientMessageId: "cm-2" },
+      }),
+      sequence: 1,
+    })
+    source.emit({
+      ...event("messageQueued", { position: 1, text: "later", clientMessageId: "cm-3" }),
+      sequence: 2,
+    })
+
+    const users = session.history.filter((item) => item.kind === "user")
+    expect(users).toEqual([expect.objectContaining({ text: "now", clientMessageId: "cm-2" })])
+    expect(users[0]).not.toHaveProperty("pending")
+    expect(session.queue).toEqual([expect.objectContaining({ id: "cm-3", position: 1 })])
+  })
+
+  it("holds a message sent to the queue behind a pending one in `queue`, and drops it when its send fails", async () => {
+    const tasks = createTasks({
+      sendInput: vi
+        .fn<AgentTasksModule["sendInput"]>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("refused")),
+    })
+    const { session } = createSession(tasks)
+    session.on("error", () => undefined)
+
+    session.send("first", { mode: "queue" })
+    const second = session.send("second", { mode: "queue" })
+
+    expect(session.history).toEqual([expect.objectContaining({ text: "first", pending: true })])
+    expect(session.queue).toEqual([expect.objectContaining({ id: second, text: "second" })])
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(session.queue).toEqual([]))
+  })
+
+  it("sends the queue actions to the Copilot and reads the queue again from it", async () => {
+    // The oldest one opens the turn when the box drains the list: pending in `history`, not queued.
+    const opening = listed("1", "first", "queue", "2026-01-01T00:00:01Z")
+    const tasks = createTasks({
+      listMessages: vi
+        .fn<AgentTasksModule["listMessages"]>()
+        .mockResolvedValueOnce(
+          page([
+            listed("3", "promote me", "queue", "2026-01-01T00:00:03Z"),
+            listed("2", "drop me", "queue", "2026-01-01T00:00:02Z"),
+            opening,
+          ]),
+        )
+        .mockResolvedValueOnce(
+          page([listed("3", "promote me", "queue", "2026-01-01T00:00:03Z"), opening]),
+        )
+        .mockResolvedValue(
+          page([listed("3", "promote me", "steer", "2026-01-01T00:00:03Z"), opening]),
+        ),
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FakeEventSource(),
+    }).session({ taskId: "task-1", transport: "http" })
+    await vi.waitFor(() => expect(session.queue).toHaveLength(2))
+    expect(session.history).toEqual([
+      expect.objectContaining({ kind: "user", text: "first", pending: true }),
+    ])
+    const changes: number[] = []
+    session.on("queueChange", ({ queue }) => changes.push(queue.length))
+
+    session.removeQueueItem("cm-2")
+    await vi.waitFor(() => expect(session.queue.map((item) => item.id)).toEqual(["cm-3"]))
+    session.steerQueueItem("cm-3")
+    await vi.waitFor(() => expect(session.queue).toEqual([]))
+
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "queued-run.cancel", clientMessageId: "cm-2" },
+      { type: "queued-message.promote-to-steer", clientMessageId: "cm-3" },
+    ])
+    expect(changes).toEqual([1, 0])
+    expect(session.history).toEqual([
+      expect.objectContaining({
+        kind: "user",
+        text: "first",
+        clientMessageId: "cm-1",
+        pending: true,
+      }),
+      expect.objectContaining({
+        kind: "user",
+        text: "promote me",
+        clientMessageId: "cm-3",
+        pending: true,
+      }),
+    ])
+  })
+})
+
+describe("Agent message pending until the box takes it", () => {
+  function sentId(tasks: ReturnType<typeof createTasks>): string {
+    const input = tasks.sendInput.mock.calls[0]?.[1] as { clientMessageId?: string }
+    return input.clientMessageId ?? ""
+  }
+
+  function users(session: AgentTaskSession) {
+    return session.history.flatMap((item) => (item.kind === "user" ? [item] : []))
+  }
+
+  it("shows the message at send and keeps one item once the box echoes it", async () => {
+    const { session, tasks, source } = createSession()
+    const pending: unknown[] = []
+    session.on("messagePending", (value) => pending.push(value))
+
+    const id = session.send("hello")
+
+    expect(pending).toEqual([{ clientMessageId: id, text: "hello" }])
+    expect(users(session)).toEqual([
+      expect.objectContaining({ kind: "user", text: "hello", clientMessageId: id, pending: true }),
+    ])
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    expect(sentId(tasks)).toBe(id)
+    source.emit({
+      ...event("stepStart", {
+        text: "hello",
+        lifecycle: { turnId: "turn-1", clientMessageId: id },
+      }),
+      sequence: 4,
+    })
+    source.emit({
+      ...event("textDelta", { text: "hi", itemId: "a-1", lifecycle: { turnId: "turn-1" } }),
+      sequence: 5,
+    })
+
+    expect(users(session)).toEqual([
+      expect.objectContaining({ kind: "user", text: "hello", clientMessageId: id, sequence: 4 }),
+    ])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+    expect(session.history.map((item) => item.kind)).toEqual(["user", "agent"])
+  })
+
+  it("does not repeat the message when a reload already has the row the box took", async () => {
+    const tasks = createTasks()
+    const { session, source } = createSession(tasks)
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    tasks.listMessages.mockResolvedValueOnce(
+      page([{ ...message("q", "USER", "hello"), clientMessageId: id, sequence: 4 }]),
+    )
+
+    await session.loadHistory()
+    expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
+    source.emit({
+      ...event("stepStart", {
+        text: "hello",
+        lifecycle: { turnId: "turn-1", clientMessageId: id },
+      }),
+      sequence: 4,
+    })
+
+    expect(users(session)).toEqual([expect.objectContaining({ id: "q", clientMessageId: id })])
+  })
+
+  it("keeps a message sent behind a pending one on a stream with no lifecycle after the turn", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("first")
+    session.send("second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    expect(users(session).map((item) => [item.text, item.pending === true])).toEqual([
+      ["first", true],
+      ["second", true],
+    ])
+    source.emit(event("textDelta", { text: "answer" }))
+    source.emit(event("stepFinish", { reason: "stop" }))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(users(session).map((item) => item.text)).toEqual(["first", "second"])
+  })
+
+  it("takes the pending message out when the live channel fails for good", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    tasks.listMessages.mockRejectedValue(new Error("copilot down"))
+    source.disconnect(new Error("network"))
+    await vi.waitFor(() => expect(session.status).toBe("error"))
+    expect(users(session).map((item) => [item.text, item.pending === true])).toEqual([])
+  })
+
+  it("takes the message out when the box cancels it before it ever showed in the queue", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(
+      event("messageQueued", {
+        clientMessageId: id,
+        position: null,
+        cancelled: true,
+        lifecycle: { clientMessageId: id },
+      }),
+    )
+
+    expect(users(session)).toEqual([])
+  })
+
+  it("takes the message out of the conversation when the send fails", async () => {
+    const tasks = createTasks({
+      sendInput: vi.fn(async () => {
+        throw new Error("offline")
+      }),
+    })
+    const { session } = createSession(tasks)
     const errors: string[] = []
     session.on("error", ({ error }) => errors.push(error))
-    session.send("first")
-    await vi.waitFor(() => expect(session.taskId).toBe("task-1"))
-    session.removeQueueItem("q-1")
-    session.editQueueItem("q-1", "edited")
-    await vi.waitFor(() =>
-      expect(errors).toEqual([
-        "Failed to remove the queued Agent message: The Agent queued-run.cancel was not sent: the box channel is not connected right now.",
-        "Failed to edit the queued Agent message: The Agent queued-run.edit was not sent: the box channel is not connected right now.",
+
+    session.send("hello")
+    expect(users(session)).toHaveLength(1)
+
+    await vi.waitFor(() => expect(errors).toEqual(["Failed to send Agent prompt: offline"]))
+    expect(users(session)).toEqual([])
+  })
+
+  it("moves the message to the queue, not both, when T3 queues it behind another turn", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello") ?? ""
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit({
+      ...event("messageQueued", {
+        clientMessageId: id,
+        position: 1,
+        text: "hello",
+        lifecycle: { turnId: "turn-2", clientMessageId: id },
+      }),
+      sequence: 3,
+    })
+
+    expect(users(session)).toEqual([])
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+  })
+
+  it("keeps one item when the box names no message on the stepStart that answers it", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit({
+      ...event("stepStart", { text: "hello", lifecycle: { turnId: "turn-1" } }),
+      sequence: 2,
+    })
+
+    expect(users(session)).toEqual([
+      expect.objectContaining({ text: "hello", clientMessageId: id, sequence: 2 }),
+    ])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+  })
+
+  it("enters where the first text opens the turn on a server that carries no lifecycle", async () => {
+    const { session, tasks, source } = createSession()
+    session.send("hello")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.emit(event("textDelta", { text: "hi" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    expect(users(session)).toEqual([expect.objectContaining({ text: "hello" })])
+    expect(users(session)[0]).not.toHaveProperty("pending")
+  })
+
+  it("puts no pending item for a message sent while a turn runs", async () => {
+    const { session, tasks, source } = createSession()
+    const id = session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepStart", { text: "first", lifecycle: { turnId: "t", clientMessageId: id } }),
+    )
+
+    session.send("second")
+
+    expect(users(session).map((item) => item.kind === "user" && item.text)).toEqual(["first"])
+  })
+})
+
+describe("Agent older history", () => {
+  // The Copilot's pages: newest first by offset, over rows kept oldest first.
+  function pagedTasks(rows: AgentMessage[]) {
+    return createTasks({
+      listMessages: vi.fn<AgentTasksModule["listMessages"]>(async (_id, options = {}) => {
+        const size = options.size ?? 50
+        const number = options.page ?? 0
+        const newestFirst = [...rows].reverse()
+        return {
+          content: newestFirst.slice(number * size, (number + 1) * size),
+          page: {
+            size,
+            totalElements: rows.length,
+            totalPages: Math.ceil(rows.length / size),
+            number,
+          },
+        }
+      }),
+    })
+  }
+
+  const row = (n: number) => ({ ...message(`m${n}`, "AGENT", `text ${n}`), sequence: n })
+
+  // Opened and settled: the opening's own history read is done before the test reads its page.
+  async function opened(tasks: ReturnType<typeof createTasks>) {
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    return session
+  }
+
+  const texts = (session: AgentTaskSession) =>
+    session.history.map((item) => (item.kind === "agent" ? item.text : item.kind))
+
+  it("puts the page behind the newest one before it, in order, until there is none", async () => {
+    const rows = Array.from({ length: 5 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    expect(texts(session)).toEqual(["text 4", "text 5"])
+    expect(session.hasOlder).toBe(true)
+
+    await expect(session.loadOlder()).resolves.toHaveLength(2)
+    expect(texts(session)).toEqual(["text 2", "text 3", "text 4", "text 5"])
+    await session.loadOlder()
+    expect(texts(session)).toEqual(["text 1", "text 2", "text 3", "text 4", "text 5"])
+    expect(session.hasOlder).toBe(false)
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(tasks.listMessages).toHaveBeenLastCalledWith("task-1", {
+      page: 2,
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+  })
+
+  it("reads older pages in the size of the last loadHistory, the default when it gave none", async () => {
+    const rows = Array.from({ length: 120 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    await session.loadHistory()
+
+    await expect(session.loadOlder()).resolves.toHaveLength(50)
+    expect(tasks.listMessages).toHaveBeenLastCalledWith(
+      "task-1",
+      expect.objectContaining({ page: 1, size: 50 }),
+    )
+  })
+
+  it("neither repeats nor skips a row when rows were recorded since the newest page", async () => {
+    const rows = Array.from({ length: 6 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    // Three rows land after the first read: the next page is now only what the session holds.
+    rows.push(row(7), row(8), row(9))
+
+    await session.loadOlder()
+
+    expect(texts(session)).toEqual(["text 3", "text 4", "text 5", "text 6"])
+  })
+
+  // A recovery reads the newest 100 rows while the turn kept writing them.
+  async function recovered(rows: AgentMessage[], limit: number | undefined, written: number) {
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory(limit === undefined ? {} : { limit })
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const first = rows.length + 1
+    for (let n = first; n < first + written - 1; n += 1) rows.push(row(n))
+    rows.push({ ...closing(`m${first + written - 1}`, "last"), sequence: first + written - 1 })
+    source.disconnect(new Error("network"))
+    await result
+    return session
+  }
+
+  const numbers = (session: AgentTaskSession) =>
+    session.history.map((item) => Number(item.id.replace("m", "")))
+
+  it("keeps the rows of the page it had when the recovery's rows reach them", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 2, 100)
+
+    while (session.hasOlder) await session.loadOlder()
+
+    expect(numbers(session)).toEqual(Array.from({ length: 110 }, (_, n) => n + 1))
+  })
+
+  it("counts what is behind from the recovery's page when it covers more than the history had", async () => {
+    const rows = Array.from({ length: 200 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, undefined, 1)
+
+    await expect(session.loadOlder()).resolves.toHaveLength(50)
+    expect(numbers(session)).toEqual(Array.from({ length: 150 }, (_, n) => n + 52))
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 201 }, (_, n) => n + 1))
+  })
+
+  it("leaves no hole when loadOlder moved the total before the recovery", async () => {
+    const rows = Array.from({ length: 200 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory()
+    for (let n = 201; n <= 230; n += 1) rows.push(row(n))
+    await session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    for (let n = 231; n < 330; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m330", "last"), sequence: 330 })
+    source.disconnect(new Error("network"))
+    await result
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 330 }, (_, n) => n + 1))
+  })
+
+  it("drops what a loadOlder in flight read when a recovery starts the history over", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    let release!: () => void
+    let block: Promise<void> | null = null
+    const base = pagedTasks(rows)
+    const inner = base.listMessages.getMockImplementation()!
+    base.listMessages.mockImplementation(async (id, options = {}) => {
+      if (options.page !== undefined && block) await block
+      return inner(id, options)
+    })
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks: base, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    block = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const older = session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(base.sendInput).toHaveBeenCalledOnce())
+    for (let n = 11; n < 160; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m160", "last"), sequence: 160 })
+    source.disconnect(new Error("network"))
+    await result
+    block = null
+    release()
+    await older
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 160 }, (_, n) => n + 1))
+  })
+
+  // The older pages wait on `release` while the test moves the history under them.
+  function blockedOlder(rows: AgentMessage[]) {
+    const tasks = pagedTasks(rows)
+    const inner = tasks.listMessages.getMockImplementation()!
+    const gate: { block: Promise<void> | null; release: () => void } = {
+      block: null,
+      release: () => undefined,
+    }
+    tasks.listMessages.mockImplementation(async (id, options = {}) => {
+      if (options.page !== undefined && gate.block) await gate.block
+      return inner(id, options)
+    })
+    const hold = () => {
+      gate.block = new Promise<void>((resolve) => {
+        gate.release = () => {
+          gate.block = null
+          resolve()
+        }
+      })
+    }
+    return { tasks, hold, release: () => gate.release() }
+  }
+
+  it("reads behind the new history when called again while a read of the old one is still out", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const { tasks, hold, release } = blockedOlder(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    hold()
+    const stale = session.loadOlder()
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    for (let n = 11; n < 160; n += 1) rows.push(row(n))
+    rows.push({ ...closing("m160", "last"), sequence: 160 })
+    source.disconnect(new Error("network"))
+    await result
+    const loaded = vi.fn()
+    session.on("historyLoaded", loaded)
+
+    const next = session.loadOlder()
+    release()
+
+    await expect(stale).resolves.toEqual([])
+    await expect(next).resolves.toHaveLength(2)
+    expect(loaded).toHaveBeenCalledOnce()
+    expect(numbers(session)).toEqual(Array.from({ length: 102 }, (_, n) => n + 59))
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("lets nothing of a read still out enter once loadHistory replaced the history", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const { tasks, hold, release } = blockedOlder(rows)
+    const session = await opened(tasks)
+    await session.loadHistory({ limit: 2 })
+    hold()
+    const older = session.loadOlder()
+
+    await session.loadHistory({ limit: 2 })
+    release()
+
+    await expect(older).resolves.toEqual([])
+    expect(numbers(session)).toEqual([9, 10])
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("has nothing older after a recovery when the history held every row", async () => {
+    const rows = Array.from({ length: 150 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 150, 60)
+
+    expect(session.hasOlder).toBe(false)
+    expect(numbers(session)).toEqual(Array.from({ length: 210 }, (_, n) => n + 1))
+  })
+
+  it("starts over from the recovery's page when a gap leaves the history it had behind", async () => {
+    const rows = Array.from({ length: 10 }, (_, n) => row(n + 1))
+    const session = await recovered(rows, 2, 150)
+
+    expect(numbers(session)).toEqual(Array.from({ length: 100 }, (_, n) => n + 61))
+    while (session.hasOlder) await session.loadOlder()
+    expect(numbers(session)).toEqual(Array.from({ length: 160 }, (_, n) => n + 1))
+  })
+
+  it("keeps the older pages when a recovery reloads the newest rows", async () => {
+    const rows = Array.from({ length: 4 }, (_, n) => row(n + 1))
+    const tasks = pagedTasks(rows)
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+    await session.loadHistory({ limit: 2 })
+    await session.loadOlder()
+
+    const result = session.sendAndWait("next", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    rows.push({ ...closing("m5", "text 5"), sequence: 5 })
+    source.disconnect(new Error("network"))
+    await expect(result).resolves.toMatchObject({ content: "text 5" })
+
+    expect(texts(session)).toEqual(["text 1", "text 2", "text 3", "text 4", "text 5"])
+  })
+})
+
+describe("Agent context window", () => {
+  it("reads the newest history usage, then the live turnEnd, and keeps it through a turn without one", async () => {
+    const tasks = createTasks()
+    tasks.listMessages.mockResolvedValue(
+      page([
+        { ...closing("b", "second"), usage: { inputTokens: 1, outputTokens: 1 } },
+        { ...closing("a", "first"), usage: { inputTokens: 1, outputTokens: 1, contextTokens: 9 } },
       ]),
     )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    expect(session.context).toBeNull()
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    // The newest turn reported no context: the one before it still says how full the window is.
+    expect(session.context).toEqual({ contextTokens: 9 })
+
+    const first = session.sendAndWait("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: { inputTokens: 1, outputTokens: 1, contextTokens: 50_000, contextWindow: 200_000 },
+      }),
+    )
+    await first
+    expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
+
+    const second = session.sendAndWait("again")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    source.emit(
+      event("stepFinish", { reason: "endTurn", usage: { inputTokens: 1, outputTokens: 1 } }),
+    )
+    await second
+    expect(session.context).toEqual({ contextTokens: 50_000, contextWindow: 200_000 })
+  })
+
+  it("follows the box's live contextUsage while a turn runs, and the turnEnd after it", async () => {
+    const tasks = createTasks()
+    tasks.listMessages.mockResolvedValue(
+      page([
+        { ...closing("a", "first"), usage: { inputTokens: 1, outputTokens: 1, contextTokens: 9 } },
+      ]),
+    )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const changes: unknown[] = []
+    session.on("contextChange", (change) => changes.push(change))
+
+    const turn = session.sendAndWait("go")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("contextUsage", { contextTokens: 18_766, contextWindow: 1_000_000 }))
+    expect(session.status).toBe("streaming")
+    expect(session.context).toEqual({ contextTokens: 18_766, contextWindow: 1_000_000 })
+    // A window the box does not know is left out, as on the turn's usage.
+    source.emit(event("contextUsage", { contextTokens: 20_109, contextWindow: 0 }))
+    expect(session.context).toEqual({ contextTokens: 20_109 })
+    // A reading this client cannot read changes nothing.
+    source.emit(event("contextUsage", { contextTokens: "20k" }))
+    expect(session.context).toEqual({ contextTokens: 20_109 })
+    expect(changes).toEqual([
+      { context: { contextTokens: 18_766, contextWindow: 1_000_000 } },
+      { context: { contextTokens: 20_109 } },
+    ])
+
+    source.emit(
+      event("stepFinish", {
+        reason: "endTurn",
+        usage: { inputTokens: 1, outputTokens: 1, contextTokens: 20_200, contextWindow: 1_000_000 },
+      }),
+    )
+    await turn
+    expect(session.context).toEqual({ contextTokens: 20_200, contextWindow: 1_000_000 })
+  })
+})
+
+describe("Agent timeline for the screen", () => {
+  const user: AgentTimelineItem = { id: "u", kind: "user", text: "go", at: "t", sequence: 1 }
+  const call = (id: string, toolId: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "tool",
+    at: "t",
+    tool: { tool: "Task", toolId, phase: "call", ...(parentToolId ? { parentToolId } : {}) },
+  })
+  const result = (id: string, toolId: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "tool",
+    at: "t",
+    tool: {
+      tool: "Task",
+      toolId,
+      phase: "result",
+      content: "ok",
+      ...(parentToolId ? { parentToolId } : {}),
+    },
+  })
+  const text = (id: string, parentToolId?: string): AgentTimelineItem => ({
+    id,
+    kind: "agent",
+    text: id,
+    at: "t",
+    ...(parentToolId ? { parentToolId } : {}),
+  })
+
+  it("joins a call and its result and puts a subagent's pieces under the call that spawned it", () => {
+    const history = [
+      user,
+      call("spawn", "t-1"),
+      text("sub-text", "t-1"),
+      call("sub-call", "t-2", "t-1"),
+      text("main-text"),
+      result("sub-result", "t-2", "t-1"),
+      result("spawn-result", "t-1"),
+      text("after"),
+    ]
+
+    const view = agentTimeline(history)
+
+    expect(view.map((entry) => entry.item.id)).toEqual(["u", "spawn", "main-text", "after"])
+    const spawn = view[1]
+    expect(spawn?.result?.id).toBe("spawn-result")
+    expect(spawn?.children.map((entry) => entry.item.id)).toEqual(["sub-text", "sub-call"])
+    expect(spawn?.children[1]?.result?.id).toBe("sub-result")
+    // The history itself is left as it came.
+    expect(history.map((item) => item.id)).toEqual([
+      "u",
+      "spawn",
+      "sub-text",
+      "sub-call",
+      "main-text",
+      "sub-result",
+      "spawn-result",
+      "after",
+    ])
+  })
+
+  it("keeps a result with no call and a piece with no spawning call where they are", () => {
+    const view = agentTimeline([result("late", "t-9"), text("orphan", "t-8"), user])
+
+    expect(view.map((entry) => [entry.item.id, entry.children.length])).toEqual([
+      ["late", 0],
+      ["orphan", 0],
+      ["u", 0],
+    ])
+  })
+
+  it("is the session's history, pending message included", async () => {
+    const { session } = createSession()
+    session.send("hello")
+
+    expect(session.timeline()).toEqual([
+      { item: expect.objectContaining({ kind: "user", pending: true }), children: [] },
+    ])
+  })
+})
+
+describe("Agent message mode over the Copilot", () => {
+  it("hands the mode to the Copilot with or without a turn running, and none when not asked", async () => {
+    const { session, tasks, source } = createSession()
+    const first = session.send("first", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.emit(event("stepStart", { lifecycle: { turnId: "t", clientMessageId: first } }))
+
+    session.send("into it", { mode: "steer", agentType: "CODEX" })
+    session.send("let T3 decide")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+
+    expect(tasks.sendInput.mock.calls.map(([, input]) => input)).toEqual([
+      { type: "message", content: "first", mode: "queue", clientMessageId: first },
+      { type: "message", content: "into it", mode: "steer", clientMessageId: expect.any(String) },
+      { type: "message", content: "let T3 decide", clientMessageId: expect.any(String) },
+    ])
   })
 })

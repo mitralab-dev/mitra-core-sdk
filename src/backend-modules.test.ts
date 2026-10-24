@@ -2060,3 +2060,66 @@ describe("turn usage on Agent messages", () => {
     ])
   })
 })
+
+describe("the providers the next turn can run on", () => {
+  const model = (
+    provider: string,
+    agentType: string,
+    providerName?: string | null,
+  ): AgentModel => ({
+    model: `${provider}/${agentType}`,
+    name: agentType,
+    provider,
+    agentType,
+    reasoningOptions: [],
+    ...(providerName === undefined ? {} : { providerName }),
+  })
+  const claudeUsage = {
+    harness: "claude",
+    observedAt: "2026-10-23T00:00:00Z",
+    status: null,
+    windows: [{ kind: "FIVE_HOUR", usedPercent: 12, resetsAt: null, windowSeconds: 18_000 }],
+  }
+
+  class RouteTransport implements Transport {
+    readonly paths: string[] = []
+    constructor(private readonly routes: Record<string, unknown>) {}
+    async request<T>(path: string, options: TransportRequestOptions = {}): Promise<T> {
+      this.paths.push(`${path} ${JSON.stringify(options.params ?? {})}`)
+      const answer = this.routes[path]
+      if (answer instanceof Error) throw answer
+      return answer as T
+    }
+  }
+
+  it("reads the providers the Copilot assembled in one call", async () => {
+    const opus = model("ANTHROPIC", "OPUS")
+    const gpt = model("OPENAI", "GPT", null)
+    const groq = model("CUSTOM", "CUSTOM_AI", "Groq")
+    const ready = [
+      { provider: "ANTHROPIC", providerName: null, models: [opus], usage: claudeUsage },
+      { provider: "CUSTOM", providerName: "Groq", models: [groq], usage: null },
+      { provider: "OPENAI", providerName: null, models: [gpt], usage: null },
+    ]
+    const transport = new RouteTransport({ "/api/v1/models/providers": ready })
+
+    await expect(
+      createAgentCredentialsModule(transport).providers("agent-1", { scope: "ACCOUNT" }),
+    ).resolves.toEqual(ready)
+    expect(transport.paths).toEqual([
+      '/api/v1/models/providers {"agentId":"agent-1","scope":"ACCOUNT"}',
+    ])
+  })
+
+  it("rejects an entry whose reading is not a reading", async () => {
+    const transport = new RouteTransport({
+      "/api/v1/models/providers": [
+        { provider: "ANTHROPIC", providerName: null, models: [], usage: { harness: "claude" } },
+      ],
+    })
+
+    await expect(createAgentCredentialsModule(transport).providers()).rejects.toThrow(
+      "Ready provider response item 0 usage has an invalid observedAt field",
+    )
+  })
+})

@@ -16,7 +16,9 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
   AgentTurnUsage,
+  CopilotProvider,
   CredentialUsage,
+  Page,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -25,6 +27,10 @@ const CANCEL_SAFETY_MS = 10_000
 const RECONCILE_DELAY_MS = 1_000
 // About 3 s at the poll interval: the Copilot writes the closing row right after the terminal.
 const ENDED_POLLS_BEFORE_NEWEST = 3
+// How long the Copilot keeps a message in its list for a box (its QUEUE_DEADLINE).
+const COPILOT_LIST_DEADLINE_MS = 3 * 60_000
+const EXPIRY_RETRY_MS = 30_000
+const EXPIRY_RETRIES = 4
 const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
   "textDelta",
   "textChunk",
@@ -37,6 +43,16 @@ const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
   "interrupt",
   "approval_response",
+  // With the box cold, the Copilot changes a message still in its list, or hands the action on to
+  // the box that took it.
+  "queued-run.cancel",
+  "queued-run.edit",
+  "queued-message.promote-to-steer",
+])
+const QUEUE_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "queued-run.cancel",
+  "queued-run.edit",
+  "queued-message.promote-to-steer",
 ])
 
 export interface AgentTaskEventObserver {
@@ -120,10 +136,6 @@ export interface AgentSendAndWaitOptions extends AgentSendOptions {
 export type AgentTaskSessionStatus =
   "opening" | "idle" | "streaming" | "cancelled" | "error" | "closed"
 
-/**
- * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
- * client's message, not only this session's.
- */
 /** One piece of work the provider keeps going in the background, as T3's roster names it. */
 export interface AgentBackgroundTask {
   taskId: string
@@ -134,6 +146,10 @@ export interface AgentBackgroundTask {
   childThreadId?: string
 }
 
+/**
+ * A message in T3's queue of the chat, as the box reports it: not taken into a turn yet. Any
+ * client's message, not only this session's.
+ */
 export interface AgentQueueItem extends AgentSendOptions {
   /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
@@ -220,6 +236,12 @@ export type AgentTimelineItem =
       usage?: AgentTurnUsage
       /** On a `user` item: the id `send` returned for that message. */
       clientMessageId?: string
+      /**
+       * On a `user` item this session sent with no turn running, from `send` until the box takes it
+       * (or puts it in `queue`): the message as T3 shows it the moment it is sent. It sits after
+       * every other item and leaves for the item the box confirms, never both at once.
+       */
+      pending?: true
       /** On a subagent's own text (a `SUBAGENT_TEXT` row): the tool call that spawned it. */
       parentToolId?: string
     } & AgentTimelineItemIdentity)
@@ -259,6 +281,16 @@ export type AgentTimelineItem =
       /** On the tool call that spawned a subagent: its last state, as the box's `subagentUpdate`. */
       subagent?: Partial<AgentSubagentFrame>
     } & AgentTimelineItemIdentity)
+
+/** One line of the conversation as T3's screen draws it, built from `history` by `agentTimeline`. */
+export interface AgentTimelineEntry {
+  /** The piece as `history` has it: on a tool, its call, or its result when the call is not there. */
+  item: AgentTimelineItem
+  /** On a tool call: its result, joined by `toolId`. */
+  result?: Extract<AgentTimelineItem, { kind: "tool" }>
+  /** On the tool call that spawned a subagent: the subagent's pieces (`parentToolId`), in order. */
+  children: AgentTimelineEntry[]
+}
 
 export interface AgentTurnResult {
   task: AgentTask
@@ -303,6 +335,16 @@ export interface AgentTaskSessionEventMap {
    */
   accepted: Record<string, never>
   cancelled: Record<string, never>
+  /**
+   * A message sent with no turn running entered `history` as `pending`, before the box took it.
+   * It leaves when the box takes it (`turnStart`), puts it in `queue` (`queueChange`) or the send
+   * fails (`error`).
+   */
+  messagePending: { clientMessageId: string; text: string }
+  /** The box read the chat's context window while a turn runs: `context` is this reading now. */
+  contextChange: { context: AgentContextUsage }
+  /** `connecting` changed: the session started or stopped waiting for the chat's box. */
+  connecting: { connecting: boolean }
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
   /** The provider's background work changed: the roster as T3 shows it waiting. */
@@ -345,8 +387,27 @@ export interface AgentTaskSessionEventMap {
   raw: AgentTaskEvent
 }
 
-/** The same shape `agentCredentials.usage` answers with. */
-export type AgentProviderUsage = CredentialUsage
+/**
+ * The same shape `agentCredentials.usage` answers with, plus the provider whose login the reading
+ * is: the one to pass to `agentCredentials.usage`, absent for a harness this version does not know.
+ */
+export type AgentProviderUsage = CredentialUsage & { provider?: CopilotProvider }
+
+// Only a subscription login reports windows, and each harness has one: Claude's login is the
+// ANTHROPIC credential and the ChatGPT login Codex runs on is the OPENAI one (the included AI and
+// custom providers reach Codex by API key, which reports none).
+const SUBSCRIPTION_PROVIDER: Record<string, CopilotProvider | undefined> = {
+  claude: "ANTHROPIC",
+  codex: "OPENAI",
+}
+
+/** How full the chat's context window is, as the box last reported it. */
+export interface AgentContextUsage {
+  /** The `contextTokens` of the box's reading. */
+  contextTokens: number
+  /** The `contextWindow` of the box's reading, when the box knew it. */
+  contextWindow?: number
+}
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -362,6 +423,22 @@ export interface AgentTaskSession {
   readonly queue: readonly AgentQueueItem[]
   /** Every subagent the box reported on this session, in the order first seen. */
   readonly subagents: readonly AgentSubagent[]
+  /** `agentTimeline(history)`: the conversation as T3's screen draws it. `history` stays as it is. */
+  timeline(): AgentTimelineEntry[]
+  /**
+   * True while the session waits for the Copilot to hand over the chat's box: the channel request,
+   * which the Copilot holds while a cold box boots (tens of seconds), and a redial after the box
+   * dropped (`channelReconnecting` until `channelConnected` or the disconnect). False on a chat
+   * with no box, which never asks for it.
+   */
+  readonly connecting: boolean
+  /**
+   * The chat's context window as the box last reported it: its live reading while a turn runs
+   * (`contextChange`), the live `turnEnd`, or the newest `history` item whose usage has it. Null
+   * before any. A box older than the live reading moves it only when a turn ends; `contextChange`,
+   * `turnEnd` and `historyLoaded` say it changed.
+   */
+  readonly context: AgentContextUsage | null
   /**
    * Sends the message at once and returns the id it goes out with: the `clientMessageId` the box
    * echoes when it takes the message (in `steered`, in `queue` and in the history item of the
@@ -378,15 +455,30 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
-  /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
+  /**
+   * Whether the Copilot has rows older than the oldest item `history` holds, as the last page read
+   * said. False until a history was loaded.
+   */
+  readonly hasOlder: boolean
+  /**
+   * Reads the next page back, with the size `loadHistory` used, and puts the rows `history` does
+   * not have yet before it, in the box's order. Resolves with the items it added (none when there
+   * was no older page) and emits `historyLoaded`. A reload of the newest page keeps them.
+   */
+  loadOlder(): Promise<readonly AgentTimelineItem[]>
+  /**
+   * Changes the text of a queued message (T3's `queued-run.edit`). With the box cold it goes to the
+   * Copilot, which changes the message in its list, and `queue` and `history` are read again.
+   */
   editQueueItem(id: string, text: string): void
-  /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
+  /** Takes a message out of the queue (T3's `queued-run.cancel`); with the box cold, as the edit. */
   removeQueueItem(id: string): void
   /** Takes every message in `queue` out, one `queued-run.cancel` each. */
   clearQueue(): void
   /**
-   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`); only the
-   * box channel takes it. It leaves `queue` and enters the history where the turn takes it.
+   * Moves a queued message into the running turn (T3's `queued-message.promote-to-steer`). It leaves
+   * `queue` and enters the history where the turn takes it. With the box cold, as the edit: the
+   * message leaves `queue` for a pending item in `history`, and runs as a steer when the box is up.
    */
   steerQueueItem(id: string): void
   /**
@@ -446,7 +538,8 @@ function providerUsageOf(payload: Record<string, unknown> | null): AgentProvider
   if (!payload) return null
   try {
     const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
-    return { harness, observedAt, status, windows }
+    const provider = SUBSCRIPTION_PROVIDER[harness]
+    return { harness, observedAt, status, windows, ...(provider ? { provider } : {}) }
   } catch {
     return null
   }
@@ -662,8 +755,67 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
     ...(typeof message.clientMessageId === "string"
       ? { clientMessageId: message.clientMessageId }
       : {}),
+    ...(message.pending === true && message.sender === "USER" ? { pending: true as const } : {}),
     ...parentToolIdOf(message.parentToolId),
   }
+}
+
+function liveContextOf(payload: Record<string, unknown> | null): AgentContextUsage | null {
+  const tokens = payload?.contextTokens
+  if (typeof tokens !== "number" || !Number.isInteger(tokens) || tokens < 0) return null
+  const window = payload?.contextWindow
+  return {
+    contextTokens: tokens,
+    ...(typeof window === "number" && Number.isInteger(window) && window > 0
+      ? { contextWindow: window }
+      : {}),
+  }
+}
+
+function contextOf(usage: AgentTurnUsage): AgentContextUsage | null {
+  if (usage.contextTokens === undefined) return null
+  return {
+    contextTokens: usage.contextTokens,
+    ...(usage.contextWindow === undefined ? {} : { contextWindow: usage.contextWindow }),
+  }
+}
+
+function parentOf(item: AgentTimelineItem): string | undefined {
+  return item.kind === "tool" ? item.tool.parentToolId : item.parentToolId
+}
+
+/**
+ * The conversation as T3's screen draws it, from the items of `history`, which it does not change:
+ * a tool's call and result are one entry, joined by `toolId`, and a subagent's pieces sit under
+ * the tool call that spawned it, by `parentToolId`. The order is the history's. A result whose call
+ * is not in `history`, and a piece whose spawning call is not (a page not loaded), stand alone
+ * where they are.
+ */
+export function agentTimeline(history: readonly AgentTimelineItem[]): AgentTimelineEntry[] {
+  const calls = new Map<string, AgentTimelineEntry>()
+  for (const item of history) {
+    const toolId = item.kind === "tool" ? item.tool.toolId : undefined
+    if (item.kind === "tool" && item.tool.phase === "call" && toolId && !calls.has(toolId)) {
+      calls.set(toolId, { item, children: [] })
+    }
+  }
+  const entries: AgentTimelineEntry[] = []
+  for (const item of history) {
+    const call = item.kind === "tool" ? calls.get(item.tool.toolId ?? "") : undefined
+    if (item.kind === "tool" && item.tool.phase === "result" && call) {
+      call.result ??= item
+      continue
+    }
+    entries.push(call?.item === item ? call : { item, children: [] })
+  }
+  const top: AgentTimelineEntry[] = []
+  for (const entry of entries) {
+    const parentToolId = parentOf(entry.item)
+    const spawn = parentToolId === undefined ? undefined : calls.get(parentToolId)
+    if (spawn && spawn !== entry) spawn.children.push(entry)
+    else top.push(entry)
+  }
+  return top
 }
 
 function liveAtOf(event: AgentTaskEvent): string {
@@ -792,8 +944,31 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // emits it in its place in the stream, so a turn delivered in one tick gives the same events as
   // one spaced out; the admission the send awaits only covers a box or a Copilot that names none.
   private readonly acceptedIds: string[] = []
-  // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
+  // Messages sent with no turn running that the box has not confirmed yet, shown after `_history`
+  // as T3 shows its optimistic message: apart, so a history reload neither drops nor repeats them.
+  private pendingQuestions: AgentTimelineItem[] = []
+  private _connecting = false
+  // The live `turnEnd`'s reading, until a history read brings the closing rows that hold it.
+  private liveContext: AgentContextUsage | null = null
+  private historyPageSize = 50
+  // Rows the Copilot has behind the oldest one read, and its row count at the last read. Rows only
+  // ever enter at the newest end, so the count behind holds while new rows push the offsets.
+  private olderRemaining = 0
+  private historyTotal = 0
+  // Moves whenever the history is replaced, so a `loadOlder` still reading drops what it read.
+  private historyGeneration = 0
+  private olderPromise: Promise<readonly AgentTimelineItem[]> | null = null
+  private olderGeneration = 0
+  // Taken by the first channel; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
+  private openingCursorTaken = false
+  // Whether the channel being opened asks for a replay.
+  private openingReplays = false
+  // Messages this session handed to the Copilot, so the box gets them from its list. Until the box
+  // takes each one, the next message goes the same way, or it would reach the box first.
+  private readonly overCopilot = new Map<string, number>()
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null
+  private expiryRetries = 0
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -825,7 +1000,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   get history(): readonly AgentTimelineItem[] {
-    return [...this._history]
+    if (this.pendingQuestions.length === 0) return [...this._history]
+    // A reload that already has the row the box took is the confirmation.
+    const recorded = new Set(
+      this._history.flatMap((item) =>
+        item.kind === "user" && item.clientMessageId !== undefined ? [item.clientMessageId] : [],
+      ),
+    )
+    return [
+      ...this._history,
+      ...this.pendingQuestions.filter(
+        (item) => item.kind === "user" && !recorded.has(item.clientMessageId ?? ""),
+      ),
+    ]
   }
 
   get content(): string {
@@ -838,6 +1025,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   get subagents(): readonly AgentSubagent[] {
     return [...this.subagentsById.values()]
+  }
+
+  get connecting(): boolean {
+    return this._connecting
+  }
+
+  timeline(): AgentTimelineEntry[] {
+    return agentTimeline(this.history)
+  }
+
+  get context(): AgentContextUsage | null {
+    if (this.liveContext) return this.liveContext
+    for (let index = this._history.length - 1; index >= 0; index -= 1) {
+      const item = this._history[index]
+      const usage = item?.kind === "agent" ? item.usage : undefined
+      if (usage?.contextTokens !== undefined) return contextOf(usage)
+    }
+    return null
   }
 
   send(prompt: string, options: AgentSendOptions = {}): string | undefined {
@@ -926,16 +1131,102 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.historyPageSize = options.limit ?? 50
+    this.historyGeneration += 1
+    this.liveContext = null
+    this.historyTotal = page.page.totalElements
+    this.olderRemaining = Math.max(0, page.page.totalElements - page.content.length)
+    this._history = this.withListedQueue(page.content).reverse().map(toAgentTimelineItem)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
   }
 
+  get hasOlder(): boolean {
+    return this.olderRemaining > 0
+  }
+
+  loadOlder(): Promise<readonly AgentTimelineItem[]> {
+    // A read of a history since replaced resolves with nothing: a new call reads behind this one.
+    if (!this.olderPromise || this.olderGeneration !== this.historyGeneration) {
+      const promise = this.readOlder().finally(() => {
+        if (this.olderPromise === promise) this.olderPromise = null
+      })
+      this.olderPromise = promise
+      this.olderGeneration = this.historyGeneration
+    }
+    return this.olderPromise
+  }
+
+  // The Copilot pages by offset from the newest row, and rows recorded since the last read push
+  // the older ones further back. The count behind does not move, so the page's own total says
+  // where the rows behind `history` start in it; a page the new rows pushed past is read again at
+  // the offset they moved it to.
+  private async readOlder(): Promise<readonly AgentTimelineItem[]> {
+    const size = this.historyPageSize
+    const generation = this.historyGeneration
+    let total = this.historyTotal
+    let remaining = this.olderRemaining
+    // Newest first, as the pages come: the rows right behind `history`, up to one page of them.
+    const rows: AgentMessage[] = []
+    while (this._taskId && remaining > 0 && rows.length < size && !this.isClosed()) {
+      const number = Math.floor((total - remaining) / size)
+      const page = await this.dependencies.tasks.listMessages(this._taskId, {
+        page: number,
+        size,
+        sort: "createdAt,desc",
+        kinds: "all",
+      })
+      // A recovery or a `loadHistory` replaced the history meanwhile: what was read is behind
+      // another history, and the new one says on its own what is behind it.
+      if (generation !== this.historyGeneration) return []
+      const moved = page.page.totalElements !== total
+      total = page.page.totalElements
+      const first = total - remaining - number * size
+      if (first >= page.content.length) {
+        // Rows recorded meanwhile pushed the ones behind past this page; a page that comes short
+        // with no new rows is the Copilot holding fewer rows than it counted.
+        if (moved) continue
+        remaining = 0
+        break
+      }
+      const taken = page.content.slice(first, first + Math.min(remaining, size - rows.length))
+      rows.push(...taken)
+      remaining -= taken.length
+    }
+    this.historyTotal = total
+    this.olderRemaining = remaining
+    const held = new Set(this._history.map((item) => item.id))
+    const older = rows
+      .reverse()
+      .map(toAgentTimelineItem)
+      .filter((item) => !held.has(item.id))
+    if (older.length === 0) return []
+    this._history = [...older, ...this._history]
+    this.emit("historyLoaded", { history: this.history })
+    return older
+  }
+
+  // A recovery reads the newest rows while the turn keeps writing them. The rows the history had
+  // stay behind that page when it shares a row with them; with none in common there may be rows
+  // between the two, so the history starts over from the page and `loadOlder` reads again what is
+  // behind it. Either way, what is behind is what the history does not hold.
+  private keepNewestPage(page: Page<AgentMessage>): void {
+    const newest = this.withListedQueue(page.content).reverse().map(toAgentTimelineItem)
+    const covered = new Set(newest.map((item) => item.id))
+    const loaded = this._history.filter((item) => !item.id.startsWith("live:"))
+    const touches = loaded.some((item) => covered.has(item.id))
+    const held = touches ? loaded.filter((item) => !covered.has(item.id)) : []
+    this.historyGeneration += 1
+    this._history = [...held, ...newest]
+    this.historyTotal = page.page.totalElements
+    this.olderRemaining = Math.max(0, this.historyTotal - this._history.length)
+  }
+
   editQueueItem(id: string, text: string): void {
     this.requireOpen()
     if (this.sentTexts.has(id)) this.sentTexts.set(id, text)
-    void this.sendInput({ type: "queued-run.edit", clientMessageId: id, text }).catch(
+    void this.queueAction({ type: "queued-run.edit", clientMessageId: id, text }).catch(
       (error: unknown) => {
         this.emitError("Failed to edit the queued Agent message", error)
       },
@@ -944,7 +1235,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   removeQueueItem(id: string): void {
     this.requireOpen()
-    void this.sendInput({ type: "queued-run.cancel", clientMessageId: id }).catch(
+    void this.queueAction({ type: "queued-run.cancel", clientMessageId: id }).catch(
       (error: unknown) => {
         this.emitError("Failed to remove the queued Agent message", error)
       },
@@ -957,7 +1248,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   steerQueueItem(id: string): void {
     this.requireOpen()
-    void this.sendInput({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
+    void this.queueAction({ type: "queued-message.promote-to-steer", clientMessageId: id }).catch(
       (error: unknown) => {
         this.emitError("Failed to steer the queued Agent message", error)
       },
@@ -999,8 +1290,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
   close(): void {
     if (this._status === "closed") return
     this.setStatus("closed")
+    this.setConnecting(false)
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
+    if (this.expiryTimer) clearTimeout(this.expiryTimer)
+    this.expiryTimer = null
     this.connectionAbort?.abort()
     this.connectionAbort = null
     this.connection?.close()
@@ -1021,7 +1315,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       await this.loadHistory()
       if (this.isClosed()) return false
       this.openingCursor = historyCursorOf(this._history)
-      await this.ensureChannel()
+      await this.openChannel()
       if (this.isClosed()) return false
       // The replay may have opened the turn that runs on the box.
       if (this._status === "opening") this.setStatus("idle")
@@ -1041,6 +1335,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     waiter?: TurnWaiter,
   ): void {
     this.sentTexts.set(clientMessageId, prompt)
+    this.addPending(clientMessageId, prompt)
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
@@ -1048,6 +1343,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     })
     const dispatch = this.dispatchSend(prompt, options, clientMessageId, handedOver, waiter)
       .catch((error: unknown) => {
+        this.dropPending(clientMessageId)
         waiter?.reject(error)
         this.emitError("Failed to send Agent prompt", error)
         if (this._status === "streaming") {
@@ -1090,7 +1386,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       await this.handOver(input, clientMessageId).catch(() => undefined)
       return false
     }
-    await this.ensureChannel()
+    await this.openChannel()
     if (this.isClosed()) return false
     await this.captureTurnBaseline()
     this._content = ""
@@ -1104,7 +1400,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.openingMessageId = clientMessageId
     this.openingAwaitsStart = true
     const { admitted, direct } = await this.handOver(input, this.openingMessageId)
-    if (!direct) this.openingAwaitsStart = false
+    // The Copilot hands a box chat's message on to the box, whose `stepStart` names it as on the
+    // direct channel, but this session only hears it when the channel's replay covers what the box
+    // logged before the socket was up: the opening replay, or the redial of a channel it has. With
+    // no replay the `stepStart` is gone, and waiting for it would take the whole turn for a tail.
+    const replayed = this.connection !== null || this.openingReplays
+    if (!direct && !(replayed && this.deliversBeforeTheChannel())) {
+      this.openingAwaitsStart = false
+    }
     handedOver()
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
@@ -1133,6 +1436,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.strayedSteers.push(steered)
     }
     this.sentTexts.set(steered.clientMessageId, prompt)
+    // Behind a message the box has not taken yet (a cold box booting), the box has not this one
+    // either: it shows as it will once the box drains it, in `queue` when sent to the queue and
+    // pending otherwise, until the box takes it, queues it or the send fails.
+    if (this.pendingQuestions.length > 0) {
+      if (options.mode === "queue") this.holdInQueue(steered.clientMessageId, prompt)
+      else this.addPending(steered.clientMessageId, prompt)
+    }
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -1207,6 +1517,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private forgetSteer(steered: SteeredMessage): void {
+    this.dropPending(steered.clientMessageId)
+    this.leaveQueue(steered.clientMessageId)
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
   }
@@ -1291,8 +1603,23 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // was before the direct channel. A chat with an agent asks, and the Copilot has the last
     // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
-    const historyCursor = this.openingCursor
+    // A box chat with nothing recorded yet (a new one, or one whose only rows are still in the
+    // Copilot's list) sends before its channel opens, and the box may take those messages from the
+    // list meanwhile: the box log is read from its beginning, each frame naming its message by
+    // `clientMessageId`. A history with recorded rows and no box sequence (rows from before the
+    // Copilot numbered them) asks for nothing, as before: the log may hold what those rows hold.
+    const nothingRecorded = this._history.every(
+      (item) => item.kind === "user" && item.pending === true,
+    )
+    const historyCursor = this.openingCursorTaken
+      ? undefined
+      : (this.openingCursor ??
+        (nothingRecorded && this.deliversBeforeTheChannel() ? { sequence: 0 } : undefined))
     this.openingCursor = undefined
+    this.openingCursorTaken = true
+    this.openingReplays = historyCursor !== undefined
+    const toBox = source === this.dependencies.channel
+    if (toBox) this.setConnecting(true)
     this.connectionPromise = source
       .open(
         this._taskId,
@@ -1310,17 +1637,126 @@ class CoreAgentTaskSession implements AgentTaskSession {
           return
         }
         this.connection = connection
+        if (toBox) {
+          void this.releaseExpired().catch((error: unknown) => {
+            this.emitError("Failed to read the Agent history", error)
+          })
+        }
       })
       .finally(() => {
         this.connectionPromise = null
+        if (toBox) this.setConnecting(false)
       })
     return this.connectionPromise
+  }
+
+  // Past the Copilot's deadline a message in its list expires: its row is no longer pending and an
+  // ERROR row right after it says it was not sent. No frame says so, and a box that came up late,
+  // or the Copilot's stream, would leave the message pending, its queue item held and the turn
+  // running for good. So the newest page is read again once the oldest message still on its way
+  // is past the deadline, and again when the channel settles. Not before: the page would replace
+  // the live pieces of a turn the box runs now that the Copilot has not recorded yet.
+  private scheduleExpiryCheck(delayMs?: number): void {
+    if (this.expiryTimer || this.isClosed()) return
+    // Without a delay, the next deadline ahead: one already past was read on its own retries,
+    // and reading it again on a loop would only cost the device.
+    const after = delayMs === undefined ? Date.now() - COPILOT_LIST_DEADLINE_MS : -Infinity
+    let oldest: number | undefined
+    for (const [id, sentAt] of this.overCopilot) {
+      if (sentAt > after && this.awaitsBox(id) && (oldest === undefined || sentAt < oldest)) {
+        oldest = sentAt
+      }
+    }
+    if (oldest === undefined) return
+    const wait = delayMs ?? Math.max(0, oldest + COPILOT_LIST_DEADLINE_MS - Date.now())
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null
+      void this.releaseExpired().catch((error: unknown) => {
+        this.emitError("Failed to read the Agent history", error)
+      })
+    }, wait)
+  }
+
+  private async releaseExpired(): Promise<void> {
+    const deadline = Date.now() - COPILOT_LIST_DEADLINE_MS
+    const waiting = [...this.overCopilot].flatMap(([id, sentAt]) =>
+      sentAt <= deadline && this.awaitsBox(id) ? [id] : [],
+    )
+    if (waiting.length === 0 || !this._taskId) {
+      this.expiryRetries = 0
+      this.scheduleExpiryCheck()
+      return
+    }
+    const generation = this.historyGeneration
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      size: this.historyPageSize,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    if (generation !== this.historyGeneration || this.isClosed()) return
+    const rows = [...page.content].reverse()
+    const notSent = new Map<string, AgentTaskTurnError>()
+    let settled = 0
+    for (const id of waiting) {
+      const at = rows.findIndex(
+        (row) => row.sender === "USER" && row.clientMessageId === id && row.pending !== true,
+      )
+      if (at < 0) continue
+      const next = rows[at + 1]
+      settled += 1
+      if (next?.type === "ERROR") {
+        notSent.set(id, new AgentTaskTurnError(next.content))
+        continue
+      }
+      // Recorded with no error after it: the box took it, and nothing is left to read again for.
+      this.overCopilot.delete(id)
+      this.confirmPending(id, Date.parse(rows[at]!.createdAt))
+    }
+    // The Copilot sweeps its list every 30 s or so: a message past the deadline it has not swept
+    // yet is read again a little later, a few times, until the box takes it or it expires.
+    if (settled < waiting.length && this.expiryRetries < EXPIRY_RETRIES) {
+      this.expiryRetries += 1
+      this.scheduleExpiryCheck(EXPIRY_RETRY_MS)
+    } else {
+      this.expiryRetries = 0
+      queueMicrotask(() => this.scheduleExpiryCheck())
+    }
+    // A message that never ran: it leaves, and its own `sendAndWait` ends with the error.
+    for (const steered of [...this.steers, ...this.strayedSteers]) {
+      const error = notSent.get(steered.clientMessageId)
+      if (!error || steered.taken) continue
+      notSent.delete(steered.clientMessageId)
+      this.forgetSteer(steered)
+      steered.waiter?.reject(error)
+    }
+    // A turn the box opened runs for a message the box did take: the expired one only leaves the
+    // screen, and neither the turn nor the history it is growing are touched.
+    const boxTurn = this.turnIds.size > 0
+    if (!boxTurn) this.keepNewestPage(page)
+    for (const [id, error] of notSent) {
+      this.overCopilot.delete(id)
+      if (!boxTurn && id === this.openingMessageId && this._status === "streaming") {
+        this.emit("error", { error: error.message })
+        this.failTurn(error)
+        continue
+      }
+      this.dropPending(id)
+      this.leaveQueue(id)
+      // The turn running is the later message's: its answer is not this one's.
+      if (id === this.openingMessageId) {
+        this.openingMessageId = undefined
+        this.activeWaiter?.reject(error)
+        this.activeWaiter = undefined
+      }
+    }
+    this.emit("historyLoaded", { history: this.history })
   }
 
   private handleDisconnect(error?: unknown): void {
     this.connection = null
     this.connectionAbort = null
     if (this.isClosed()) return
+    this.setConnecting(false)
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.recoveryUsed) {
       const disconnectError = new Error("Agent live channel disconnected after one recovery.")
@@ -1375,7 +1811,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.keepNewestPage(page)
+    this.liveContext = null
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
@@ -1425,6 +1862,69 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return prompt === undefined || !this.turnBaselineIds.has(prompt)
   }
 
+  // The box channel answers a queue action with the queue as it is now. The Copilot sends no frame
+  // back when it changed the message in its list (the box is cold), so the history and the queue
+  // are read again from it. It waits its turn behind the messages sent before it, as a steer does:
+  // a cancel that overtook the message it names would find nothing to cancel.
+  private async queueAction(input: AgentTaskInput): Promise<void> {
+    const handed = this.handOff.then(async () => {
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
+      await this.prepareSend()
+      if (this.isClosed()) throw new Error("Agent task session is closed.")
+      return this.handOver(input)
+    })
+    this.handOff = handed.then(
+      () => undefined,
+      () => undefined,
+    )
+    if ((await handed).direct || !this._taskId) return
+    const generation = this.historyGeneration
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      size: this.historyPageSize,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    if (generation !== this.historyGeneration || this.isClosed()) return
+    this.keepNewestPage(page)
+    this.emit("historyLoaded", { history: this.history })
+  }
+
+  // A message still in the Copilot's list while the box is cold comes in the history as pending.
+  // One sent to T3's queue is the queue's, as T3 shows it, until the box reports the queue itself:
+  // a queue item the box reported has a position, one from the list has none and is replaced here.
+  // With no turn running, the oldest one in the list is the turn the box opens when it drains it,
+  // so it stays pending in `history`, as it does on the session that sent it. A message this session
+  // shows as pending is already in `history` and never goes to the queue as well.
+  private withListedQueue(rows: readonly AgentMessage[]): AgentMessage[] {
+    const turnRunning = this._status === "streaming" || this._status === "cancelled"
+    const opening = turnRunning
+      ? undefined
+      : [...rows].reverse().find((row) => row.pending === true)
+    const listed = rows.filter(
+      (row) =>
+        row !== opening &&
+        row.pending === true &&
+        row.mode === "queue" &&
+        typeof row.clientMessageId === "string" &&
+        !this.isPending(row.clientMessageId),
+    )
+    const reported = this.queueItems.filter((item) => item.position !== undefined)
+    if (listed.length > 0 || reported.length !== this.queueItems.length) {
+      const fromList = [...listed]
+        .reverse()
+        .filter((row) => !reported.some((item) => item.id === row.clientMessageId))
+        .map((row): AgentQueueItem => ({
+          id: row.clientMessageId!,
+          text: row.content,
+          createdAt: Date.parse(row.createdAt),
+          mode: "queue",
+        }))
+      this.queueItems = [...reported, ...fromList]
+      this.emit("queueChange", { queue: this.queue })
+    }
+    return rows.filter((row) => !listed.includes(row))
+  }
+
   /** True once the server took the input; false when the box refused it on the stream. */
   private async sendInput(input: AgentTaskInput): Promise<boolean> {
     return (await this.handOver(input)).admitted
@@ -1438,7 +1938,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
     steering = false,
   ): Promise<{ admitted: Promise<boolean>; direct: boolean }> {
     if (!this._taskId) throw new Error("Agent task has not been created.")
-    const direct = this.dependencies.channel.send(this._taskId, input, clientMessageId)
+    const direct = this.behindCopilot(input)
+      ? null
+      : this.dependencies.channel.send(this._taskId, input, clientMessageId)
     if (direct) return { admitted: direct, direct: true }
     // Only the box knows T3's input requests and subagents; the Copilot would refuse the type.
     if (input.type === "runtime-request.respond") {
@@ -1452,24 +1954,55 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
-    // echoes it as on the direct channel.
+    // The Copilot keeps the `clientMessageId` and hands it to the box, which echoes it as on the
+    // direct channel, and hands the `mode` on as the channel would send it.
     const id = clientMessageId === undefined ? {} : { clientMessageId }
+    const mode = input.type === "message" && input.mode ? { mode: input.mode } : {}
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content, ...id }
+          ? { type: "message", content: input.content, ...mode, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...mode,
               ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
     await this.dependencies.tasks.sendInput(this._taskId, rest)
+    if (input.type === "message" && clientMessageId !== undefined) {
+      this.overCopilot.set(clientMessageId, Date.now())
+      this.scheduleExpiryCheck()
+    }
     return { admitted: Promise.resolve(true), direct: false }
+  }
+
+  // A message, or a queue action on a message, behind one the Copilot still holds for the box.
+  // One past the Copilot's deadline is no longer in its list, so it holds nothing back.
+  private behindCopilot(input: AgentTaskInput): boolean {
+    if (input.type !== "message" && !QUEUE_INPUT_TYPES.has(input.type)) return false
+    const deadline = Date.now() - COPILOT_LIST_DEADLINE_MS
+    for (const [id, sentAt] of this.overCopilot) {
+      if (!this.awaitsBox(id)) this.overCopilot.delete(id)
+      else if (sentAt > deadline) return true
+    }
+    return false
+  }
+
+  // Shown as pending (by this session, or by the Copilot's list in the history read, as a queued
+  // message promoted to steer while the box is cold), or in the queue with no position the box
+  // reported: the box has not taken it.
+  private awaitsBox(id: string): boolean {
+    return (
+      this.isPending(id) ||
+      this._history.some(
+        (item) => item.kind === "user" && item.pending === true && item.clientMessageId === id,
+      ) ||
+      this.queueItems.some((item) => item.id === id && item.position === undefined)
+    )
   }
 
   private async prepareSend(): Promise<void> {
@@ -1477,10 +2010,36 @@ class CoreAgentTaskSession implements AgentTaskSession {
       throw new Error("Agent task session could not be opened.")
     }
     await this.ensureTask()
-    if (!this.isClosed()) await this.ensureChannel()
+    if (!this.isClosed()) await this.openChannel()
+  }
+
+  // The channel of a box chat waits for a cold box to boot. Nothing waits for it there: what is
+  // sent meanwhile goes to the Copilot, which keeps it in its list and in the history for the box
+  // to drain, and the channel opens alongside, its replay bringing what the box took, each frame
+  // named by the same `clientMessageId`. Any other chat opens its stream before the first input,
+  // whose events it would otherwise miss.
+  private openChannel(): Promise<void> {
+    const channel = this.ensureChannel()
+    if (!this.deliversBeforeTheChannel()) return channel
+    // Nothing awaits it, so the turn and the waiters of what went to the Copilot end here.
+    void channel.catch((error: unknown) => {
+      if (this.isClosed()) return
+      this.failLiveChannel(error, error instanceof Error ? error : new Error(errorMessage(error)))
+    })
+    return Promise.resolve()
+  }
+
+  private deliversBeforeTheChannel(): boolean {
+    return (
+      this._task?.runtime === "T3" &&
+      Boolean(this._task.agentId) &&
+      this.dependencies.channel.canDial(this.options.transport)
+    )
   }
 
   private handleEvent(event: AgentTaskEvent): void {
+    if (event.type === "channelReconnecting") this.setConnecting(true)
+    else if (event.type === "channelConnected") this.setConnecting(false)
     this.emit("raw", event)
     const payload = asObject(event.payload)
     if (payload && isSubagentFrame(event)) {
@@ -1493,9 +2052,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (event.type === "stepStart" || event.type === "steer") {
       // A box that names no message is answering ours: it decides one message at a time. Steered
       // into a turn another client opened, ours goes on in that turn, whose frames before the
-      // `steer` were not ours but whose next ones are.
+      // `steer` were not ours but whose next ones are. A later message of this session the box
+      // took first (the opening one expired in the Copilot's list) makes the turn ours too.
       const id = lifecycle?.clientMessageId
-      if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
+      const ours =
+        id === this.openingMessageId ||
+        [...this.steers, ...this.strayedSteers].some((pending) => pending.clientMessageId === id)
+      if (ours || (id === undefined && event.type === "stepStart")) {
         this.openingAwaitsStart = false
         this.forgetFinishedTurn(lifecycle)
       }
@@ -1590,6 +2153,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "subagentUpdate":
         this.applySubagent(event, payload)
         break
+      case "contextUsage": {
+        const context = liveContextOf(payload)
+        if (!context) break
+        this.liveContext = context
+        this.emit("contextChange", { context })
+        break
+      }
       case "providerUsage": {
         const usage = providerUsageOf(payload)
         if (usage) this.emit("providerUsage", usage)
@@ -1696,6 +2266,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.queueItems = known
       ? this.queueItems.map((current) => (current === known ? item : current))
       : [...this.queueItems, item]
+    this.dropPending(id)
     this.emit("queueChange", { queue: this.queue })
   }
 
@@ -1709,6 +2280,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const id = payload.clientMessageId ?? lifecycle?.clientMessageId
     if (typeof id !== "string") return
     this.leaveQueue(id)
+    this.dropPending(id)
     const cancelled = new AgentTaskTurnError("The queued Agent message was cancelled.")
     if (id === this.openingMessageId) {
       this.cancelOpening(cancelled)
@@ -1811,6 +2383,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     lifecycle: Record<string, unknown> | null,
   ): boolean {
     if (this._status !== "streaming" && this._status !== "cancelled") return false
+    // On connect the box sends its last readings ahead of the replay, each a copy of the line that
+    // said it, with that line's sequence: taken as the turn's progress, they made the replayed
+    // `stepStart` before them look like a repeat, and the question and the turn's start were lost
+    // (dev, 2026-10-24). A reading is no piece of the turn and says nothing about what was seen.
+    if (event.type === "providerUsage" || event.type === "contextUsage") return false
     const turnId = lifecycle?.turnId
     if (typeof turnId !== "string") return false
     if (typeof event.sequence === "number") {
@@ -1858,6 +2435,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.setStatus("streaming")
       this.emit("turnStart", {})
     }
+    this.confirmUnnamedOpening(event)
     if (kind === "text") this._content += text
     this.liveText(event, payload, kind)
     this.emit("delta", {
@@ -1896,7 +2474,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // The question enters the conversation where the box took it: its turn's `stepStart`, or the
   // `steer` that took it into the running turn. Until then it is in `queue`.
   private liveQuestion(event: AgentTaskEvent, boxText: unknown, clientMessageId: unknown): void {
-    const id = typeof clientMessageId === "string" ? clientMessageId : undefined
+    // A box that names no message on a `stepStart` is answering ours, the session's rule above.
+    const id =
+      typeof clientMessageId === "string"
+        ? clientMessageId
+        : event.type === "stepStart" && this.isPending(this.openingMessageId)
+          ? this.openingMessageId
+          : undefined
+    if (id !== undefined) this.dropPending(id)
     // The question as the person wrote it, as the Copilot records it: the box has the text T3 ran,
     // which after a box that died carries the recovered context ahead of it.
     const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
@@ -1914,6 +2499,80 @@ class CoreAgentTaskSession implements AgentTaskSession {
         at: liveAtOf(event),
         ...(sequence === undefined ? {} : { sequence }),
         ...(id === undefined ? {} : { clientMessageId: id }),
+      }),
+      (item) => item,
+    )
+  }
+
+  private isPending(id: string | undefined): boolean {
+    return id !== undefined && this.pendingQuestions.some((item) => item.id === `live:user:${id}`)
+  }
+
+  // The history's own pending item too (a message the Copilot still held in its list when the
+  // history was read): the box taking it puts it where it went in, or in the queue.
+  private dropPending(id: string): void {
+    this.pendingQuestions = this.pendingQuestions.filter((item) => item.id !== `live:user:${id}`)
+    this._history = this._history.filter(
+      (item) => !(item.kind === "user" && item.pending === true && item.clientMessageId === id),
+    )
+  }
+
+  // The turn ended with no frame that confirmed its opening message, or a steer it took: the turn
+  // answered them, so they are no longer waiting. The opening message is where the server recorded
+  // it. A steer no frame placed (a stream with no lifecycle) stays as a question the turn took,
+  // where the turn ended, rather than leaving the screen.
+  private dropAnsweredPending(): void {
+    if (this.openingMessageId !== undefined) this.dropPending(this.openingMessageId)
+    for (const steered of this.steers) {
+      if (steered.taken) this.confirmPending(steered.clientMessageId, Date.now())
+    }
+  }
+
+  // Sent to the queue behind a message the box has not taken yet: in `queue` with no position, as
+  // a queue item read from the Copilot's list, until the box reports the queue.
+  private holdInQueue(clientMessageId: string, text: string): void {
+    this.queueItems = [
+      ...this.queueItems,
+      { id: clientMessageId, text, createdAt: Date.now(), mode: "queue" },
+    ]
+    this.emit("queueChange", { queue: this.queue })
+  }
+
+  private addPending(clientMessageId: string, text: string): void {
+    this.pendingQuestions.push({
+      id: `live:user:${clientMessageId}`,
+      kind: "user",
+      text,
+      at: new Date().toISOString(),
+      clientMessageId,
+      pending: true,
+    })
+    this.emit("messagePending", { clientMessageId, text })
+  }
+
+  // A server that never carries a lifecycle sends no `stepStart` naming the message either: its
+  // first text is the opening message's turn, where the message enters the conversation. A frame
+  // with a lifecycle may be the tail of a turn before it, so it confirms nothing here.
+  private confirmUnnamedOpening(event: AgentTaskEvent): void {
+    if (asObject(event.payload)?.lifecycle !== undefined) return
+    if (this.openingMessageId !== undefined) {
+      this.confirmPending(this.openingMessageId, event.timestamp)
+    }
+  }
+
+  // The pending message becomes the question in `history`, where the session is now.
+  private confirmPending(id: string, at: number): void {
+    const pending = this.pendingQuestions.find((item) => item.id === `live:user:${id}`)
+    if (pending?.kind !== "user") return
+    this.dropPending(id)
+    this.livePiece(
+      (item) => item.kind === "user" && item.clientMessageId === id,
+      () => ({
+        id: pending.id,
+        kind: "user",
+        text: pending.text,
+        at: new Date(at).toISOString(),
+        clientMessageId: id,
       }),
       (item) => item,
     )
@@ -2120,6 +2779,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(usage ? { usage } : {}),
       ...end,
     }
+    this.dropAnsweredPending()
+    if (usage?.contextTokens !== undefined) this.liveContext = contextOf(usage)
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)
     this.activeWaiter = undefined
@@ -2128,6 +2789,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failTurn(error: AgentTaskTurnError): void {
+    this.dropAnsweredPending()
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
     this.recoveryGeneration += 1
@@ -2138,6 +2800,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private failLiveChannel(observed: unknown, waiterError: Error): void {
+    // The session stops following the chat, so nothing it shows as on its way would ever settle.
+    // A message the Copilot already took may still run once the box is back; a reload has it.
+    this.pendingQuestions = []
     this.recoveryGeneration += 1
     this.emitError("Agent live channel failed", observed)
     this.activeWaiter?.reject(waiterError)
@@ -2200,6 +2865,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(code ? { code } : {}),
       error: `${prefix}: ${errorMessage(error)}`,
     })
+  }
+
+  private setConnecting(connecting: boolean): void {
+    if (this._connecting === connecting) return
+    this._connecting = connecting
+    this.emit("connecting", { connecting })
   }
 
   private setStatus(status: AgentTaskSessionStatus): void {

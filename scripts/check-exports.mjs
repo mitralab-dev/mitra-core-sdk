@@ -7,6 +7,7 @@ const esm = await import("../dist/index.js")
 
 const expectedRuntimeExports = {
   AgentTaskTurnError: "function",
+  agentTimeline: "function",
   API_KEY_EXCHANGE_PATH: "string",
   appAccessTokenPath: "function",
   createAgentConnectionsModule: "function",

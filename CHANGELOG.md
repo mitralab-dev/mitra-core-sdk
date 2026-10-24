@@ -2,6 +2,101 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.1-beta.0
+
+Additions for the agent template. The history keeps the format of 0.2.13. Two changes are
+visible from 0.3.0: the pending message in `history` (an app that draws its own optimistic message
+shows it twice until the box takes it), and on a chat with no box (the Copilot stream, whose frames
+carry no lifecycle) the question stays in `history` as a confirmed `user` item where its turn's
+first text came, which 0.3.0 did not add. Everything else is additive.
+
+Release order is mandatory: the Copilot with the cold box queue (the `mode` column of its prompt
+list, the pending rows in the history and the queue actions on the list) and with
+`GET /api/v1/models/providers` goes out before this SDK. Against an older Copilot the queue actions
+on a cold box are refused and `providers()` fails. The production Copilot already answers
+`runtime` in the task, which is what moves a box chat to the send-without-waiting path below.
+
+- A message sent with no turn running enters `history` at once as a `user` item with
+  `pending: true`, after every other item, and the session emits `messagePending`, as T3 shows a
+  message the moment it is sent (with a cold box, while the box boots). A message sent while
+  another is still pending (several in a row while a cold box boots) is pending too, in order (or in
+  `queue`, when sent with `mode: "queue"`, as the box will put it when it drains them), and
+  leaves by the same rules, a `steer` naming it included; on a stream with no lifecycle it becomes a
+  confirmed question at the end of the turn that took it. A live channel that fails for good takes
+  every pending message out with its error, since the session stops following the chat; one the
+  Copilot already accepted may still run once the box is back, and a reload brings it with its
+  answer. It leaves for the item the
+  box confirms (`stepStart` naming it, or naming none), for `queue` when T3 queues it, or on a
+  failed or refused send; a reload holding the row with the same `clientMessageId` confirms it, so
+  it never shows twice. Visible change from 0.3.0: an app that draws its own optimistic message
+  next to `history` shows it twice until the box takes it; it drops its own, or draws
+  `history.filter((item) => !item.pending)`. On a chat with no box that filter does not give back
+  what 0.3.0 showed: there the question now stays as a confirmed item where its first text opened
+  the turn, since dropping it from the screen would be worse.
+- While the box is cold, the messages the Copilot still holds in its list come in the history read
+  as `user` items with `pending: true` (the Copilot marks them, with their `mode`), so a session
+  opened anywhere shows them at once: one sent with `mode: "queue"` is in `queue` instead of
+  `history` (except the oldest, with no turn running: it is the turn the box opens, and stays
+  pending), as T3 shows it, until the box reports the queue itself; the others stay pending in
+  `history` until the box takes them. `editQueueItem`, `removeQueueItem` and `steerQueueItem` work
+  the same with the box cold: with no box channel they go to the Copilot (`POST /inputs`), which
+  changes the message in its list or hands the action to the box that took it, and the session
+  reads `queue` and `history` again. Needs the Copilot with the cold box queue; an older one
+  refuses the action as before.
+- On a chat with a box (`runtime: "T3"` in the task the Copilot answers), nothing waits for the
+  box channel: while it opens (a cold box booting, or a page just opened), a message, a steer and
+  the queue actions go to the Copilot at once (`POST /inputs`, with the same `clientMessageId` and
+  `mode`), which keeps them in its list and in the history, and the channel opens alongside; its
+  replay names what the box took by the same id, so nothing shows twice. A chat with nothing
+  recorded yet (a new one, or one reopened while only the Copilot's list has its messages) asks
+  that replay from the start of the box log; one with recorded rows and no box sequence asks for
+  none, as before, so the frames the box wrote before the socket
+  was up are not lost. Until the box takes each message this session sent to the Copilot, the next
+  message and the queue actions go there too, even with the channel up, so none reaches the box
+  ahead of an earlier one (a message past the Copilot's 3 minute deadline no longer holds the
+  next one back); the queue actions also wait behind the messages sent before them. A
+  channel that cannot be opened at all ends the turn and its `sendAndWait` with the error. When
+  the oldest message still on its way reaches the Copilot's deadline, and when the channel
+  settles past it, the session reads the newest page again (and a few more times, 30 s apart,
+  until the Copilot's sweep marks it): a message the Copilot expired (its row no longer pending,
+  an ERROR row right after it) leaves the pending items and the queue, and its turn or
+  `sendAndWait` ends with that error. With a turn the box opened running (the box took a later
+  message), only the expired message leaves, its `sendAndWait`
+  rejected with the expiry; the turn and the history go on. Visible change: the turn
+  is `streaming` from the send, not from the end of the boot, and a session opened by `taskId` is
+  `idle` once the history is read, with `connecting` still true. A chat with no box, or a Copilot
+  that does not answer `runtime`, waits for its stream as before.
+- `session.connecting` and the `connecting` event: true while the session waits for the Copilot to
+  hand over the chat's box (the channel request the Copilot holds while a cold box boots) and while
+  it redials a box that dropped. A chat with no box never asks and stays false.
+- `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, grouped
+  from `listModels` (one entry per built-in provider and per custom provider), each with its
+  models and, for the built-in ones, the reading `usage(provider)` answers. One call to the
+  Copilot's `GET /api/v1/models/providers`, which needs `MODEL_READ` and `CREDENTIAL_READ`; a
+  reading the Copilot cannot get comes as null instead of failing the list.
+- The session's `providerUsage` carries `provider`, the credential of the login the reading is
+  (`ANTHROPIC` for `claude`, `OPENAI` for `codex`), absent for a harness this version does not know.
+- `session.loadOlder()` and `session.hasOlder`: the page behind the oldest item `history` holds, in
+  the size `loadHistory` used, put before it in the box's order with nothing repeated or skipped
+  when rows were recorded since (the page's total says where the older rows start). A turn
+  recovery, which reads the newest 100 rows, keeps what `history` held behind them when the page
+  shares a row with it, and otherwise starts over from the page, for `loadOlder` to read the rest
+  again; a `loadOlder` still reading when the history is replaced drops what it read.
+- `session.context`: `{ contextTokens, contextWindow? }` as the box last reported it (its live
+  `contextUsage` reading while a turn runs, the live `turnEnd`, or the newest `history` item whose
+  usage has it), null before any. The `contextChange` event says the live reading moved; the box
+  sends one after each model request of the turn whose reading changed. A box without the live
+  reading moves it only when a turn ends.
+- `agentTimeline(history)` and `session.timeline()`: the conversation as T3's screen draws it, with a
+  tool's call and result in one entry (by `toolId`) and a subagent's pieces under the call that
+  spawned it (by `parentToolId`). A pure function over `history`, which stays as it is.
+- The `mode` a message was sent with also goes to the Copilot (`POST /inputs`), with or without a
+  turn running. The Copilot hands it to the live box it hosts and keeps it in its prompt list for a
+  cold box, which runs the message in that mode when it drains the list; an older Copilot ignores
+  the field and T3 decides.
+- Documented: `task.agentType` and `task.reasoningEffort` are the chat's current model and effort,
+  the catalog's `agentType`, so a reopened chat finds its provider in `providers()` with no search.
+
 ## 0.3.0
 
 This release consolidates the work published to npm as `0.3.0-beta.1` and `0.3.0-beta.2` (below)

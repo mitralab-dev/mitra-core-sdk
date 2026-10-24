@@ -1181,10 +1181,18 @@ export interface AgentTask {
   agentId: string | null
   userId: string | null
   title: string | null
+  /**
+   * The model the chat runs on now: the `agentType` of its entry in `agentCredentials.listModels`
+   * (a constant name, or the catalog id of a custom provider's model), whose `provider` and
+   * `providerName` name the provider. The Copilot moves it with each turn that switched model.
+   */
   agentType: string
+  /** The effort the chat runs with now, moved like `agentType`. */
   reasoningEffort: string | null
   /** Absent on a Copilot that predates credential scopes; null on a task without one. */
   scope?: AgentCredentialScope | null
+  /** The runtime the chat runs on (`T3` for a box); absent on a Copilot that does not say. */
+  runtime?: AgentTaskRuntime
   archived: boolean
   createdAt: string | null
   updatedAt: string
@@ -1209,8 +1217,10 @@ export type AgentTaskInput =
       reasoningEffort?: string
       /**
        * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
-       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot does
-       * not take the field.
+       * `steer` takes it into the running turn. A box given none lets T3 decide. Over the Copilot
+       * it takes effect only with a Copilot that has mitra-copilot#535, and there only on a live box
+       * that Copilot hosts: a message waiting in its prompt list loses it, and a Copilot without
+       * #535 ignores it.
        */
       mode?: "queue" | "steer"
       /**
@@ -1353,6 +1363,12 @@ export interface AgentMessage {
   subagent?: Partial<AgentSubagentFrame>
   /** On the row that closed a turn: the reason the box ended it with. */
   reason?: string
+  /**
+   * On the person's message the Copilot still holds in its list while the box is cold: `true`,
+   * with `mode`, how it will enter a running turn.
+   */
+  pending?: boolean
+  mode?: "queue" | "steer"
 }
 
 /**
@@ -1379,6 +1395,23 @@ export interface AgentModel {
   reasoningOptions: string[]
   /** Name the person chose for a custom provider; null on built-in models. Absent on an older Copilot. */
   providerName?: string | null
+}
+
+/**
+ * A provider the next turn can run on, with the models the catalog offers on it and the last
+ * subscription reading of the person's login.
+ */
+export interface AgentReadyProvider {
+  provider: CopilotProvider
+  /** Name the person chose for a custom provider; null on a built-in one. */
+  providerName: string | null
+  /** The catalog's models of this provider, in the catalog's order. */
+  models: AgentModel[]
+  /**
+   * The same reading `usage(provider)` answers; null on an API key, before a turn reported a
+   * window, and on a custom provider, which has no subscription.
+   */
+  usage: CredentialUsage | null
 }
 
 export interface CredentialStatus {
