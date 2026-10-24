@@ -3743,6 +3743,76 @@ describe("A box chat sends without waiting for the channel", () => {
     session.close()
   })
 
+  it("stops reading the history again once the message past the deadline is recorded with no error after it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const tasks = boxTasks(async () => null)
+    const { session, fallback } = open(tasks)
+    session.send("A")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(fallback.observers).toHaveLength(1))
+    const input = tasks.sendInput.mock.calls[0]?.[1]
+    const a = input?.type === "message" ? input.clientMessageId : undefined
+    // The box took A late, over the Copilot's stream: its row is recorded, no longer pending.
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-a",
+          sender: "USER",
+          type: "TEXT",
+          content: "A",
+          createdAt: "2026-01-01T00:00:01Z",
+          ...(a === undefined ? {} : { clientMessageId: a }),
+        },
+      ],
+      page: { size: 1, totalElements: 1, totalPages: 1, number: 0 },
+    })
+    const reads = () =>
+      tasks.listMessages.mock.calls.filter(([, options]) => options?.size !== 100).length
+
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1)
+    expect(reads()).toBe(1)
+    await vi.advanceTimersByTimeAsync(3 * 60_000)
+
+    expect(reads()).toBe(1)
+    expect(session.history.filter((item) => item.kind === "user" && item.pending)).toEqual([])
+    session.close()
+  })
+
+  it("reads a message the Copilot has not swept a few times past the deadline, then stops", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const tasks = boxTasks(async () => null)
+    const { session, fallback } = open(tasks)
+    session.send("A")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(fallback.observers).toHaveLength(1))
+    const input = tasks.sendInput.mock.calls[0]?.[1]
+    const a = input?.type === "message" ? input.clientMessageId : undefined
+    // The Copilot's sweep never gets to A: its row stays pending in the list.
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-a",
+          sender: "USER",
+          type: "TEXT",
+          content: "A",
+          createdAt: "2026-01-01T00:00:01Z",
+          pending: true,
+          ...(a === undefined ? {} : { clientMessageId: a }),
+        },
+      ],
+      page: { size: 1, totalElements: 1, totalPages: 1, number: 0 },
+    })
+    const reads = () =>
+      tasks.listMessages.mock.calls.filter(([, options]) => options?.size !== 100).length
+
+    await vi.advanceTimersByTimeAsync(3 * 60_000 + 1)
+    expect(reads()).toBe(1)
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+
+    expect(reads()).toBe(5)
+    session.close()
+  })
+
   it("keeps sending to the Copilot while a message it promoted to steer is still in its list", async () => {
     const held = heldChannel()
     const tasks = boxTasks(held.channel)

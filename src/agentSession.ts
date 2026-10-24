@@ -1648,9 +1648,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // the live pieces of a turn the box runs now that the Copilot has not recorded yet.
   private scheduleExpiryCheck(delayMs?: number): void {
     if (this.expiryTimer || this.isClosed()) return
+    // Without a delay, the next deadline ahead: one already past was read on its own retries,
+    // and reading it again on a loop would only cost the device.
+    const after = delayMs === undefined ? Date.now() - COPILOT_LIST_DEADLINE_MS : -Infinity
     let oldest: number | undefined
     for (const [id, sentAt] of this.overCopilot) {
-      if (this.awaitsBox(id) && (oldest === undefined || sentAt < oldest)) oldest = sentAt
+      if (sentAt > after && this.awaitsBox(id) && (oldest === undefined || sentAt < oldest)) {
+        oldest = sentAt
+      }
     }
     if (oldest === undefined) return
     const wait = delayMs ?? Math.max(0, oldest + COPILOT_LIST_DEADLINE_MS - Date.now())
@@ -1681,16 +1686,25 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (generation !== this.historyGeneration || this.isClosed()) return
     const rows = [...page.content].reverse()
     const notSent = new Map<string, AgentTaskTurnError>()
+    let settled = 0
     for (const id of waiting) {
       const at = rows.findIndex(
         (row) => row.sender === "USER" && row.clientMessageId === id && row.pending !== true,
       )
-      const next = at >= 0 ? rows[at + 1] : undefined
-      if (next?.type === "ERROR") notSent.set(id, new AgentTaskTurnError(next.content))
+      if (at < 0) continue
+      const next = rows[at + 1]
+      settled += 1
+      if (next?.type === "ERROR") {
+        notSent.set(id, new AgentTaskTurnError(next.content))
+        continue
+      }
+      // Recorded with no error after it: the box took it, and nothing is left to read again for.
+      this.overCopilot.delete(id)
+      this.confirmPending(id, Date.parse(rows[at]!.createdAt))
     }
     // The Copilot sweeps its list every 30 s or so: a message past the deadline it has not swept
     // yet is read again a little later, a few times, until the box takes it or it expires.
-    if (notSent.size < waiting.length && this.expiryRetries < EXPIRY_RETRIES) {
+    if (settled < waiting.length && this.expiryRetries < EXPIRY_RETRIES) {
       this.expiryRetries += 1
       this.scheduleExpiryCheck(EXPIRY_RETRY_MS)
     } else {
