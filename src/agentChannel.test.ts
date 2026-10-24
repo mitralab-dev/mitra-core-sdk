@@ -3813,6 +3813,49 @@ describe("A box chat sends without waiting for the channel", () => {
     session.close()
   })
 
+  it("ends the turn of a message sent to the Copilot on an old chat whose channel asks no replay", async () => {
+    const held = heldChannel(5)
+    const tasks = boxTasks(held.channel)
+    tasks.listMessages.mockResolvedValue({
+      content: [
+        {
+          id: "m-2",
+          sender: "AGENT",
+          type: "TEXT",
+          content: "old answer",
+          createdAt: "2026-01-01T00:00:02Z",
+        },
+        {
+          id: "m-1",
+          sender: "USER",
+          type: "TEXT",
+          content: "old question",
+          createdAt: "2026-01-01T00:00:01Z",
+        },
+      ],
+      page: { size: 2, totalElements: 2, totalPages: 1, number: 0 },
+    })
+    const session = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    }).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const answer = session.sendAndWait("A", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    // The box logged the turn's stepStart before the socket was up, and no replay brings it.
+    socket.receive("hello", { threadId: "th-1", lastSequence: 5 })
+    socket.receive("textDelta", { text: "more", lifecycle: { turnId: "t1" } }, 6)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t1", terminal: true } }, 7)
+
+    await expect(answer).resolves.toMatchObject({ content: "more", reason: "stop" })
+    expect(session.status).toBe("idle")
+  })
+
   it("keeps the question of a message sent before the history loaded when the box sends its readings ahead of the replay", async () => {
     const tasks = boxTasks(offer(BOX_URL, 28))
     let loaded!: () => void

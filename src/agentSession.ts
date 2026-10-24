@@ -962,6 +962,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Taken by the first channel; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
   private openingCursorTaken = false
+  // Whether the channel being opened asks for a replay.
+  private openingReplays = false
   // Messages this session handed to the Copilot, so the box gets them from its list. Until the box
   // takes each one, the next message goes the same way, or it would reach the box first.
   private readonly overCopilot = new Map<string, number>()
@@ -1399,8 +1401,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.openingAwaitsStart = true
     const { admitted, direct } = await this.handOver(input, this.openingMessageId)
     // The Copilot hands a box chat's message on to the box, whose `stepStart` names it as on the
-    // direct channel; any other chat's stream names no message.
-    if (!direct && !this.deliversBeforeTheChannel()) this.openingAwaitsStart = false
+    // direct channel, but this session only hears it when the channel's replay covers what the box
+    // logged before the socket was up: the opening replay, or the redial of a channel it has. With
+    // no replay the `stepStart` is gone, and waiting for it would take the whole turn for a tail.
+    const replayed = this.connection !== null || this.openingReplays
+    if (!direct && !(replayed && this.deliversBeforeTheChannel())) {
+      this.openingAwaitsStart = false
+    }
     handedOver()
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
@@ -1610,6 +1617,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         (nothingRecorded && this.deliversBeforeTheChannel() ? { sequence: 0 } : undefined))
     this.openingCursor = undefined
     this.openingCursorTaken = true
+    this.openingReplays = historyCursor !== undefined
     const toBox = source === this.dependencies.channel
     if (toBox) this.setConnecting(true)
     this.connectionPromise = source
