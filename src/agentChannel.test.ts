@@ -3623,6 +3623,85 @@ describe("A box chat sends without waiting for the channel", () => {
     session.close()
   })
 
+  it("rejects the sendAndWait of the expired first message with the expiry, while the later one's turn goes on", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    const held = heldChannel()
+    const tasks = boxTasks(held.channel)
+    const { session } = open(tasks)
+    const first = session.sendAndWait("A")
+    const firstRejected = vi.fn()
+    first.catch(firstRejected)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const opening = tasks.sendInput.mock.calls[0]?.[1]
+    const a = opening?.type === "message" ? opening.clientMessageId : undefined
+    await vi.advanceTimersByTimeAsync(150_000)
+    const second = session.sendAndWait("B")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(2))
+    const input = tasks.sendInput.mock.calls[1]?.[1]
+    const b = input?.type === "message" ? input.clientMessageId : undefined
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    tasks.listMessages.mockImplementation(async () => {
+      await gate
+      return {
+        content: [
+          {
+            id: "m-b",
+            sender: "USER",
+            type: "TEXT",
+            content: "B",
+            createdAt: "2026-01-01T00:02:30Z",
+            ...(b === undefined ? {} : { clientMessageId: b }),
+          },
+          {
+            id: "e-a",
+            sender: "AGENT",
+            type: "ERROR",
+            content: "This message was not sent: the agent box did not come up in time.",
+            createdAt: "2026-01-01T00:03:01Z",
+          },
+          {
+            id: "m-a",
+            sender: "USER",
+            type: "TEXT",
+            content: "A",
+            createdAt: "2026-01-01T00:00:01Z",
+            ...(a === undefined ? {} : { clientMessageId: a }),
+          },
+        ],
+        page: { size: 3, totalElements: 3, totalPages: 1, number: 0 },
+      }
+    })
+    const rejected = vi.fn()
+    second.catch(rejected)
+
+    // The box comes up at minute 4: the Copilot expired A, and the box ran B.
+    await vi.advanceTimersByTimeAsync(90_000)
+    held.boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("stepStart", { text: "B", lifecycle: { turnId: "t2", clientMessageId: b } }, 1)
+    socket.receive("textDelta", { text: "Hi B", lifecycle: { turnId: "t2" } }, 2)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(firstRejected).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "This message was not sent: the agent box did not come up in time.",
+      }),
+    )
+    expect(rejected).not.toHaveBeenCalled()
+    expect(session.status).toBe("streaming")
+    expect(session.content).toBe("Hi B")
+    expect(session.history.filter((item) => item.kind === "user" && item.pending)).toEqual([])
+
+    socket.receive("stepFinish", { reason: "endTurn", lifecycle: { turnId: "t2" } }, 3)
+    await expect(second).resolves.toMatchObject({ content: "Hi B", reason: "endTurn" })
+    session.close()
+  })
+
   it("lets go of an expired message on its deadline when the Copilot's stream took over before it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
     const tasks = boxTasks(async () => null)

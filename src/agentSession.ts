@@ -1714,9 +1714,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (!boxTurn && id === this.openingMessageId && this._status === "streaming") {
         this.emit("error", { error: error.message })
         this.failTurn(error)
-      } else {
-        this.dropPending(id)
-        this.leaveQueue(id)
+        continue
+      }
+      this.dropPending(id)
+      this.leaveQueue(id)
+      // The turn running is the later message's: its answer is not this one's.
+      if (id === this.openingMessageId) {
+        this.openingMessageId = undefined
+        this.activeWaiter?.reject(error)
+        this.activeWaiter = undefined
       }
     }
     this.emit("historyLoaded", { history: this.history })

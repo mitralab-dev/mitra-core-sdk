@@ -61,7 +61,8 @@ on a cold box are refused and `providers()` fails. The production Copilot alread
   until the Copilot's sweep marks it): a message the Copilot expired (its row no longer pending,
   an ERROR row right after it) leaves the pending items and the queue, and its turn or
   `sendAndWait` ends with that error. With a turn the box opened running (the box took a later
-  message), only the expired message leaves; the turn and the history go on. Visible change: the turn
+  message), only the expired message leaves, its `sendAndWait`
+  rejected with the expiry; the turn and the history go on. Visible change: the turn
   is `streaming` from the send, not from the end of the boot, and a session opened by `taskId` is
   `idle` once the history is read, with `connecting` still true. A chat with no box, or a Copilot
   that does not answer `runtime`, waits for its stream as before.
