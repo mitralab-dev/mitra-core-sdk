@@ -29,6 +29,8 @@ const RECONCILE_DELAY_MS = 1_000
 const ENDED_POLLS_BEFORE_NEWEST = 3
 // How long the Copilot keeps a message in its list for a box (its QUEUE_DEADLINE).
 const COPILOT_LIST_DEADLINE_MS = 3 * 60_000
+const EXPIRY_RETRY_MS = 30_000
+const EXPIRY_RETRIES = 4
 const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
   "textDelta",
   "textChunk",
@@ -963,6 +965,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Messages this session handed to the Copilot, so the box gets them from its list. Until the box
   // takes each one, the next message goes the same way, or it would reach the box first.
   private readonly overCopilot = new Map<string, number>()
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null
+  private expiryRetries = 0
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -1287,6 +1291,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.setConnecting(false)
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
     this.cancelTimer = null
+    if (this.expiryTimer) clearTimeout(this.expiryTimer)
+    this.expiryTimer = null
     this.connectionAbort?.abort()
     this.connectionAbort = null
     this.connection?.close()
@@ -1588,13 +1594,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // was before the direct channel. A chat with an agent asks, and the Copilot has the last
     // word: a refusal such as RUNTIME_NOT_T3 is a `channelDeclined` and the same stream.
     const source = this._task?.agentId ? this.dependencies.channel : this.dependencies.eventSource
-    // A box chat whose history has no box sequence yet (a new one, or one whose only rows are still
-    // in the Copilot's list) sends before its channel opens, and the box may take those messages
-    // from the list meanwhile: the box log is read from its beginning, each frame naming its
-    // message by `clientMessageId`.
+    // A box chat with nothing recorded yet (a new one, or one whose only rows are still in the
+    // Copilot's list) sends before its channel opens, and the box may take those messages from the
+    // list meanwhile: the box log is read from its beginning, each frame naming its message by
+    // `clientMessageId`. A history with recorded rows and no box sequence (rows from before the
+    // Copilot numbered them) asks for nothing, as before: the log may hold what those rows hold.
+    const nothingRecorded = this._history.every(
+      (item) => item.kind === "user" && item.pending === true,
+    )
     const historyCursor = this.openingCursorTaken
       ? undefined
-      : (this.openingCursor ?? (this.deliversBeforeTheChannel() ? { sequence: 0 } : undefined))
+      : (this.openingCursor ??
+        (nothingRecorded && this.deliversBeforeTheChannel() ? { sequence: 0 } : undefined))
     this.openingCursor = undefined
     this.openingCursorTaken = true
     const toBox = source === this.dependencies.channel
@@ -1631,14 +1642,36 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // Past the Copilot's deadline a message in its list expires: its row is no longer pending and an
   // ERROR row right after it says it was not sent. No frame says so, and a box that came up late,
-  // or the Copilot's stream when it never did, would leave the message pending, its queue item
-  // held and the turn running for good. So once the channel settles, the newest page is read again
-  // when a message still on its way is past the deadline. Not before: the page would replace the
-  // live pieces of a turn the box runs now that the Copilot has not recorded yet.
+  // or the Copilot's stream, would leave the message pending, its queue item held and the turn
+  // running for good. So the newest page is read again once the oldest message still on its way
+  // is past the deadline, and again when the channel settles. Not before: the page would replace
+  // the live pieces of a turn the box runs now that the Copilot has not recorded yet.
+  private scheduleExpiryCheck(delayMs?: number): void {
+    if (this.expiryTimer || this.isClosed()) return
+    let oldest: number | undefined
+    for (const [id, sentAt] of this.overCopilot) {
+      if (this.awaitsBox(id) && (oldest === undefined || sentAt < oldest)) oldest = sentAt
+    }
+    if (oldest === undefined) return
+    const wait = delayMs ?? Math.max(0, oldest + COPILOT_LIST_DEADLINE_MS - Date.now())
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null
+      void this.releaseExpired().catch((error: unknown) => {
+        this.emitError("Failed to read the Agent history", error)
+      })
+    }, wait)
+  }
+
   private async releaseExpired(): Promise<void> {
-    const waiting = [...this.overCopilot.keys()].filter((id) => this.awaitsBox(id))
     const deadline = Date.now() - COPILOT_LIST_DEADLINE_MS
-    if (!waiting.some((id) => this.overCopilot.get(id)! <= deadline) || !this._taskId) return
+    const waiting = [...this.overCopilot].flatMap(([id, sentAt]) =>
+      sentAt <= deadline && this.awaitsBox(id) ? [id] : [],
+    )
+    if (waiting.length === 0 || !this._taskId) {
+      this.expiryRetries = 0
+      this.scheduleExpiryCheck()
+      return
+    }
     const generation = this.historyGeneration
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: this.historyPageSize,
@@ -1646,7 +1679,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
       kinds: "all",
     })
     if (generation !== this.historyGeneration || this.isClosed()) return
-    this.keepNewestPage(page)
     const rows = [...page.content].reverse()
     const notSent = new Map<string, AgentTaskTurnError>()
     for (const id of waiting) {
@@ -1656,21 +1688,35 @@ class CoreAgentTaskSession implements AgentTaskSession {
       const next = at >= 0 ? rows[at + 1] : undefined
       if (next?.type === "ERROR") notSent.set(id, new AgentTaskTurnError(next.content))
     }
-    // The steers first: failing the turn sends the ones it had not taken to wait for their own.
+    // The Copilot sweeps its list every 30 s or so: a message past the deadline it has not swept
+    // yet is read again a little later, a few times, until the box takes it or it expires.
+    if (notSent.size < waiting.length && this.expiryRetries < EXPIRY_RETRIES) {
+      this.expiryRetries += 1
+      this.scheduleExpiryCheck(EXPIRY_RETRY_MS)
+    } else {
+      this.expiryRetries = 0
+      queueMicrotask(() => this.scheduleExpiryCheck())
+    }
+    // A message that never ran: it leaves, and its own `sendAndWait` ends with the error.
     for (const steered of [...this.steers, ...this.strayedSteers]) {
       const error = notSent.get(steered.clientMessageId)
-      if (!error) continue
+      if (!error || steered.taken) continue
       notSent.delete(steered.clientMessageId)
       this.forgetSteer(steered)
       steered.waiter?.reject(error)
     }
+    // A turn the box opened runs for a message the box did take: the expired one only leaves the
+    // screen, and neither the turn nor the history it is growing are touched.
+    const boxTurn = this.turnIds.size > 0
+    if (!boxTurn) this.keepNewestPage(page)
     for (const [id, error] of notSent) {
       this.overCopilot.delete(id)
-      if (id === this.openingMessageId && this._status === "streaming") {
+      if (!boxTurn && id === this.openingMessageId && this._status === "streaming") {
         this.emit("error", { error: error.message })
         this.failTurn(error)
       } else {
         this.dropPending(id)
+        this.leaveQueue(id)
       }
     }
     this.emit("historyLoaded", { history: this.history })
@@ -1899,24 +1945,32 @@ class CoreAgentTaskSession implements AgentTaskSession {
     await this.dependencies.tasks.sendInput(this._taskId, rest)
     if (input.type === "message" && clientMessageId !== undefined) {
       this.overCopilot.set(clientMessageId, Date.now())
+      this.scheduleExpiryCheck()
     }
     return { admitted: Promise.resolve(true), direct: false }
   }
 
   // A message, or a queue action on a message, behind one the Copilot still holds for the box.
+  // One past the Copilot's deadline is no longer in its list, so it holds nothing back.
   private behindCopilot(input: AgentTaskInput): boolean {
     if (input.type !== "message" && !QUEUE_INPUT_TYPES.has(input.type)) return false
-    for (const id of this.overCopilot.keys()) {
-      if (this.awaitsBox(id)) return true
-      this.overCopilot.delete(id)
+    const deadline = Date.now() - COPILOT_LIST_DEADLINE_MS
+    for (const [id, sentAt] of this.overCopilot) {
+      if (!this.awaitsBox(id)) this.overCopilot.delete(id)
+      else if (sentAt > deadline) return true
     }
     return false
   }
 
-  // Shown as pending, or in the queue with no position the box reported: the box has not taken it.
+  // Shown as pending (by this session, or by the Copilot's list in the history read, as a queued
+  // message promoted to steer while the box is cold), or in the queue with no position the box
+  // reported: the box has not taken it.
   private awaitsBox(id: string): boolean {
     return (
       this.isPending(id) ||
+      this._history.some(
+        (item) => item.kind === "user" && item.pending === true && item.clientMessageId === id,
+      ) ||
       this.queueItems.some((item) => item.id === id && item.position === undefined)
     )
   }
