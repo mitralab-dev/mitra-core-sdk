@@ -171,6 +171,14 @@ interface DirectLink {
   turnId: string | undefined
   /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
   admissions: PendingAdmission[]
+  /** Where this link left the box log, for the next open of the chat to read on from there. */
+  resumeFrom?: () => ResumePoint
+}
+
+interface ResumePoint {
+  readonly cursor: number
+  readonly thread: string | undefined
+  readonly boxLog: number | undefined
 }
 
 let clientMessageSequence = 0
@@ -704,15 +712,33 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
     let box = boxAddress(channel.wsUrl)
     let thread: string | undefined
+    let boxLog = channel.boxLog
+    // A later open of a chat whose channel dropped while idle (the box went away under an open
+    // page) reads on from where the last link left the log, with the redial's rules: another box
+    // log, another thread or a log short of that point is a new log, read from its beginning.
+    // Without it a message sent meanwhile lost what the new box logged before the socket was up,
+    // its `stepStart` and, when the turn was short, the turn's end (dev, 2026-10-24).
+    const prior = historyCursor === undefined ? this.links.get(taskId)?.resumeFrom?.() : undefined
     const otherLog =
       historyCursor?.boxLog !== undefined &&
       channel.boxLog !== undefined &&
       historyCursor.boxLog !== channel.boxLog
+    const priorLog =
+      prior?.boxLog !== undefined && channel.boxLog !== undefined && prior.boxLog !== channel.boxLog
     const historyFrom =
-      historyCursor === undefined ? undefined : otherLog ? 0 : historyCursor.sequence
+      historyCursor !== undefined
+        ? otherLog
+          ? 0
+          : historyCursor.sequence
+        : prior !== undefined
+          ? priorLog
+            ? 0
+            : prior.cursor
+          : undefined
     // The cursor starts where the replay starts, so a drop in the middle of it asks again for
     // what did not arrive, and not from where the box log was when the Copilot answered.
     let cursor = historyFrom ?? channel.lastSequence
+    link.resumeFrom = () => ({ cursor, thread, boxLog })
     const abort = new AbortController()
     const onAbort = () => abort.abort(signal?.reason)
     signal?.addEventListener("abort", onAbort, { once: true })
@@ -766,6 +792,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
             // turn running now with a terminal that names no turn (dev, 2026-10-20).
             const otherBox =
               hello !== undefined && (hello.threadId !== thread || hello.lastSequence < cursor)
+            boxLog = next.boxLog ?? boxLog
             if (nextBox === box && !zeroed && !otherBox) return cursor
             // The box the turn ran on is gone and nothing will ever end that turn. Closed here as interrupted, so the next message
             // opens a turn of its own instead of steering into a dead one. The box may send the same
@@ -800,7 +827,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     // the history ends in. A log short of the history's end is another one, nothing of it is in
     // the history, and it is read from its beginning. HTTP decides before its stream opens.
     const afterHello: ReplayAfterHello = (hello) => {
-      if (hello !== undefined && hello.lastSequence < cursor) cursor = 0
+      const otherThread = prior?.thread !== undefined && hello?.threadId !== prior.thread
+      if (hello !== undefined && (hello.lastSequence < cursor || otherThread)) cursor = 0
       return cursor
     }
     const replay =

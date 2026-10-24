@@ -3856,6 +3856,114 @@ describe("A box chat sends without waiting for the channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  // The page stays open, the box goes away under it while idle, and the next message brings up a
+  // new box whose log starts over.
+  function boxGoneWhileIdle(next: Omit<AgentTaskChannel, "wsUrl">, first: { boxLog?: number }) {
+    let boot!: () => void
+    const booted = new Promise<void>((resolve) => {
+      boot = resolve
+    })
+    let calls = 0
+    const tasks = boxTasks(async () => {
+      calls += 1
+      if (calls === 1) return { wsUrl: BOX_URL, lastSequence: 0, ...first }
+      await booted
+      return { wsUrl: FRESH_BOX_URL, ...next }
+    })
+    return { tasks, boot }
+  }
+
+  async function firstTurnThenDrop(session: AgentTaskSession) {
+    const first = session.send("First")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-1", lastSequence: 0 })
+    socket.receive(
+      "stepStart",
+      { text: "First", lifecycle: { turnId: "t1", clientMessageId: first } },
+      7,
+    )
+    socket.receive("textDelta", { text: "One", lifecycle: { turnId: "t1" } }, 8)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t1" } }, 9)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    socket.drop()
+  }
+
+  it("reads a new box log from its beginning after the box went away while idle, when the Copilot says the log is another, and ends a turn that ran before the socket was up", async () => {
+    const { tasks, boot } = boxGoneWhileIdle({ lastSequence: 12, boxLog: 2 }, { boxLog: 1 })
+    const { session } = open(tasks)
+    await firstTurnThenDrop(session)
+    let id: string | undefined
+    session.on("messagePending", ({ clientMessageId }) => {
+      id = clientMessageId
+    })
+
+    const answer = session.sendAndWait("Second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalled())
+    boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-1", lastSequence: 12 })
+    await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: "replay", fromSequence: 0 }))
+    const now = { turnId: "t2", clientMessageId: id }
+    socket.receive("messageQueued", { position: null, text: "Second", lifecycle: now }, 1)
+    socket.receive("stepStart", { text: "Second", lifecycle: now }, 2)
+    socket.receive("textDelta", { text: "Two", lifecycle: { turnId: "t2" } }, 3)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t2" } }, 4)
+
+    await expect(answer).resolves.toMatchObject({ content: "Two", reason: "stop" })
+    expect(users(session)).toEqual([
+      ["First", false],
+      ["Second", false],
+    ])
+  })
+
+  it("reads a new box log from its beginning after the box went away while idle, when its hello names another thread", async () => {
+    const { tasks, boot } = boxGoneWhileIdle({ lastSequence: 2 }, {})
+    const { session } = open(tasks)
+    await firstTurnThenDrop(session)
+    let id: string | undefined
+    session.on("messagePending", ({ clientMessageId }) => {
+      id = clientMessageId
+    })
+
+    const answer = session.sendAndWait("Second")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalled())
+    boot()
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-2", lastSequence: 2 })
+    await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: "replay", fromSequence: 0 }))
+    const now = { turnId: "t2", clientMessageId: id }
+    socket.receive("messageQueued", { position: null, text: "Second", lifecycle: now }, 1)
+    socket.receive("stepStart", { text: "Second", lifecycle: now }, 2)
+    socket.receive("textDelta", { text: "Two", lifecycle: { turnId: "t2" } }, 3)
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "t2" } }, 5)
+
+    await expect(answer).resolves.toMatchObject({ content: "Two", reason: "stop" })
+    expect(users(session)).toEqual([
+      ["First", false],
+      ["Second", false],
+    ])
+  })
+
+  it("reads on from where it left the same box after its socket dropped while idle", async () => {
+    let calls = 0
+    const tasks = boxTasks(async () => {
+      calls += 1
+      return { wsUrl: calls === 1 ? BOX_URL : FRESH_BOX_URL, lastSequence: calls === 1 ? 0 : 11 }
+    })
+    const { session } = open(tasks)
+    await firstTurnThenDrop(session)
+
+    session.send("Second")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "th-1", lastSequence: 11 })
+
+    await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: "replay", fromSequence: 9 }))
+  })
+
   it("keeps the question of a message sent before the history loaded when the box sends its readings ahead of the replay", async () => {
     const tasks = boxTasks(offer(BOX_URL, 28))
     let loaded!: () => void
