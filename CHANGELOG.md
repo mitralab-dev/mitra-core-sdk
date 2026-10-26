@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.15
 
 - `messenger` manages the current app's account email templates on Messenger's
   `/api/v1/email/templates` and `/api/v1/email/template-types` routes: `listEmailTemplates()`,
