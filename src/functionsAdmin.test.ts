@@ -80,6 +80,14 @@ function definition(): FunctionDefinition {
   }
 }
 
+function redactedDefinition(): FunctionDefinition {
+  const value = definition()
+  return {
+    ...value,
+    currentVersion: { ...value.currentVersion!, code: null, secrets: null },
+  }
+}
+
 function summary(): Omit<FunctionDefinition, "currentVersion"> {
   const { currentVersion, ...value } = definition()
   void currentVersion
@@ -336,6 +344,23 @@ describe("functionsAdmin", () => {
     await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).resolves.toEqual(response)
   })
 
+  it("accepts redacted Function source in successful read and mutation responses", async () => {
+    const redacted = redactedDefinition()
+    const versionPage = {
+      content: [redacted.currentVersion],
+      page: { size: 20, totalElements: 1, totalPages: 1, number: 0 },
+    }
+    const functionsAdmin = createFunctionsAdminModule(
+      new QueueTransport([redacted, redacted, redacted, [redacted], versionPage]),
+    )
+
+    await expect(functionsAdmin.get("function-1")).resolves.toEqual(redacted)
+    await expect(functionsAdmin.create(createInput())).resolves.toEqual(redacted)
+    await expect(functionsAdmin.patch("function-1", {})).resolves.toEqual(redacted)
+    await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).resolves.toEqual([redacted])
+    await expect(functionsAdmin.listVersions("function-1")).resolves.toEqual(versionPage)
+  })
+
   it.each([
     "id",
     "tenantId",
@@ -403,21 +428,24 @@ describe("functionsAdmin", () => {
     },
   )
 
-  it.each([{ secrets: ["ok", 1] }, { inputSchema: [] }, { outputSchema: "{}" }, { status: 1 }])(
-    "rejects invalid nested current version values %#",
-    async (overrides) => {
-      const value = definition()
-      const functionsAdmin = createFunctionsAdminModule(
-        new QueueTransport([
-          [{ ...value, currentVersion: { ...value.currentVersion, ...overrides } }],
-        ]),
-      )
+  it.each([
+    { code: 1 },
+    { secrets: ["ok", 1] },
+    { inputSchema: [] },
+    { outputSchema: "{}" },
+    { status: 1 },
+  ])("rejects invalid nested current version values %#", async (overrides) => {
+    const value = definition()
+    const functionsAdmin = createFunctionsAdminModule(
+      new QueueTransport([
+        [{ ...value, currentVersion: { ...value.currentVersion, ...overrides } }],
+      ]),
+    )
 
-      await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).rejects.toBeInstanceOf(
-        SdkCoreResponseError,
-      )
-    },
-  )
+    await expect(functionsAdmin.bulkCreate([bulkCreateInput()])).rejects.toBeInstanceOf(
+      SdkCoreResponseError,
+    )
+  })
 
   it.each([
     { deleted: "function-1", notFound: [], deletedCount: 1 },
