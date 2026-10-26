@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.2
+
+- A message whose `send` or `sendAndWait` was still on its way when the session closed reaches
+  the Copilot over REST, as one whose session closed before the channel already did. Before, a
+  close while the box channel opened (5 to 10 s on a cold box) dropped it with nothing sent: a
+  page that navigated away right after sending lost the message (conversation 73183). The same
+  holds for a session reopened by task id that closes while it opens, and for a close between the
+  channel opening and the message going out, which used to put the closed session back in
+  `streaming`. It goes once, with the `clientMessageId` `send` returned; the Copilot takes no
+  `mode`. A message the box channel already carried is not sent again.
+
 ## 0.3.1
 
 Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#549.

@@ -264,6 +264,27 @@ describe("Agent task session", () => {
     expect(source.taskIds).toEqual([])
   })
 
+  it("still sends the prompt when a session reopened by task id closes while it opens", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+
+    const id = session.send("hi")
+    session.close()
+    resolveGet(TASK)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hi", clientMessageId: id }],
+    ])
+    expect(source.taskIds).toEqual([])
+  })
+
   it("swallows a REST failure for a prompt sent after close without surfacing it", async () => {
     const tasks = createTasks({
       sendInput: vi.fn(async () => {

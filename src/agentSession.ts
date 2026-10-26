@@ -1146,25 +1146,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
-    if (this.openingPromise && !(await this.openingPromise)) {
+    // A session closed while it opened still has its task; the prompt goes out below.
+    if (this.openingPromise && !(await this.openingPromise) && !this.isClosed()) {
       throw new Error("Agent task session could not be opened.")
     }
     // A waiter that gave up on `timeoutMs` or `signal` only stopped waiting: the message still
     // goes out and the session follows its turn, as it does after the turn started.
-    if (this.isClosed()) return false
+    if (this.isClosed() && !this._taskId) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
-    if (this.isClosed()) {
-      // A prompt whose task exists is never dropped by close; the task outlives the session.
-      // Apps close the creating session inside taskCreated and reopen by task id, so the
-      // input still goes out over REST. No channel, status, or event for a closed session,
-      // and a failure has no listener left to hear it.
-      await this.handOver(input, clientMessageId).catch(() => undefined)
-      return false
-    }
-    await this.ensureChannel()
-    if (this.isClosed()) return false
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
+    // A cold box takes 5 to 10 s to open the channel, and a page that navigates away closes the
+    // session in the meantime (conversation 73183). The close aborts the opening.
+    await this.ensureChannel().catch((error: unknown) => {
+      if (!this.isClosed()) throw error
+    })
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
     await this.captureTurnBaseline()
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1181,6 +1180,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
     return true
+  }
+
+  // A prompt whose task exists is never dropped by close; the task outlives the session. Apps
+  // close the creating session inside taskCreated and reopen by task id, so the input still goes
+  // out over REST. Only a prompt that never reached `handOver` comes here: the Copilot does not
+  // dedupe POST /inputs by `clientMessageId`, and a second copy would run a second turn. No
+  // channel, status, or event for a closed session, and a failure has no listener left to hear it.
+  private async handOverAfterClose(input: AgentTaskInput, clientMessageId: string): Promise<false> {
+    await this.handOver(input, clientMessageId).catch(() => undefined)
+    return false
   }
 
   // A message sent while a turn runs, or is being opened, goes out at once: the box takes it into

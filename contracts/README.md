@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.3.2` is the `0.3.1` parity surface with a fix in the agent session: a message still on its
+  way when the session closes goes to the Copilot over REST. Same parity cases; the version exists
+  so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.3.1` is the `0.3.0` parity surface with `agentCredentials.providers()`, the `before` option of
   `agentTasks.listMessages()`, `session.loadOlder()` and the messenger email templates, which the
   parity cases do not cover. Same
