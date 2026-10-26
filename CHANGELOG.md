@@ -2,8 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.1
 
+Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#549.
+The SDK passes the Copilot's answers through and keeps nothing of its own. It also ships the
+messenger email templates and app sender `main` held as unreleased (the last entries).
+
+- `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, one
+  call to the Copilot's `GET /api/v1/models/providers` (needs `MODEL_READ` and `CREDENTIAL_READ`),
+  returned as it comes: one entry per built-in provider and per custom provider, in the catalog's
+  order, each with `provider`, `providerName`, `models` and `usage`. `usage` is null on a custom
+  provider, before a turn reported a window, on an API key, and when the Copilot could not read
+  the subscription: a failed reading does not fail the list. New type `AgentReadyProvider`.
+- `agentTasks.listMessages(id, { before })`: only the rows recorded before the message `before`
+  names, sent as the `before` query parameter, so the next page back holds still while new rows
+  come. `session.loadOlder()` and `session.hasOlder` sit on it: `loadOlder` reads the page before
+  the oldest row `history` holds, with the size `loadHistory` used, puts it before `history` and
+  emits `historyLoaded`, resolving with the items it added; `hasOlder` is what the last page read
+  said (the Copilot signals more with `totalPages > number + 1`). With nothing older it resolves
+  with none and calls nothing. A `before` of another chat, or one that does not exist, is a 404
+  that rejects the call. A `loadOlder` still reading when `history` is replaced (a `loadHistory`,
+  the turn recovery) resolves with none and adds nothing.
 - `messenger` manages the current app's account email templates on Messenger's
   `/api/v1/email/templates` and `/api/v1/email/template-types` routes: `listEmailTemplates()`,
   `getEmailTemplateType(type)`, `getEmailTemplate(type)`, `upsertEmailTemplate(type, input)`,

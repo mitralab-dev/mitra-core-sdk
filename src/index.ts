@@ -141,6 +141,7 @@ export type {
   AgentMessageListOptions,
   AgentSubagentFrame,
   AgentModel,
+  AgentReadyProvider,
   AgentTask,
   AgentTaskChannel,
   AgentTaskCreateInput,
