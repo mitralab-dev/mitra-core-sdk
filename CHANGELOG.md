@@ -2,8 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.1
 
+Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#548.
+The SDK passes the Copilot's answers through and keeps nothing of its own. It also ships the
+messenger email templates `main` held as unreleased (the last entries).
+
+- `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, one
+  call to the Copilot's `GET /api/v1/models/providers` (needs `MODEL_READ` and `CREDENTIAL_READ`),
+  returned as it comes: one entry per built-in provider and per custom provider, in the catalog's
+  order, each with `provider`, `providerName`, `models` and `usage`. `usage` is null on a custom
+  provider, before a turn reported a window, on an API key, and when the Copilot could not read
+  the subscription: a failed reading does not fail the list. New type `AgentReadyProvider`.
 - `messenger` manages the current app's account email templates on Messenger's
   `/api/v1/email/templates` and `/api/v1/email/template-types` routes: `listEmailTemplates()`,
   `getEmailTemplateType(type)`, `getEmailTemplate(type)`, `upsertEmailTemplate(type, input)`,

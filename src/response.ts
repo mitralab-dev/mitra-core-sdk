@@ -6,6 +6,7 @@ import type {
   AgentDefinition,
   AgentMessage,
   AgentModel,
+  AgentReadyProvider,
   AgentTask,
   AgentTaskChannel,
   AgentTurnUsage,
@@ -1557,6 +1558,19 @@ export function expectCredentialUsage(
     }
   }
   return usage as unknown as CredentialUsage
+}
+
+export function expectAgentReadyProvider(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): AgentReadyProvider {
+  const entry = expectObject<JsonObject>(value, context, errors)
+  if (typeof entry.provider !== "string") invalidField(context, "provider", errors)
+  if (!isNullableString(entry.providerName)) invalidField(context, "providerName", errors)
+  expectObjectArray(entry.models, `${context} models`, errors, expectAgentModel)
+  if (entry.usage !== null) expectCredentialUsage(entry.usage, `${context} usage`, errors)
+  return entry as unknown as AgentReadyProvider
 }
 
 const CREDENTIAL_USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"

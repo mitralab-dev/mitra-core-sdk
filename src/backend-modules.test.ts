@@ -1841,6 +1841,72 @@ describe("subscription usage", () => {
   })
 })
 
+describe("the providers the next turn can run on", () => {
+  const usage = {
+    harness: "claude",
+    observedAt: "2026-09-26T12:00:00Z",
+    status: "allowed",
+    windows: [{ kind: "FIVE_HOUR", usedPercent: 42, resetsAt: null, windowSeconds: null }],
+  }
+  const model = (provider: string, agentType: string, providerName?: string | null) => ({
+    model: agentType.toLowerCase(),
+    name: agentType,
+    provider,
+    agentType,
+    reasoningOptions: [],
+    ...(providerName !== undefined ? { providerName } : {}),
+  })
+
+  it("reads the list the Copilot assembles in one call and returns it as is", async () => {
+    // The Copilot answers a reading it could not get with usage null, not with a failure.
+    const ready = [
+      { provider: "ANTHROPIC", providerName: null, models: [model("ANTHROPIC", "OPUS")], usage },
+      {
+        provider: "CUSTOM",
+        providerName: "Groq",
+        models: [model("CUSTOM", "CUSTOM_AI", "Groq")],
+        usage: null,
+      },
+      {
+        provider: "OPENAI",
+        providerName: null,
+        models: [model("OPENAI", "GPT", null)],
+        usage: null,
+      },
+    ]
+    const transport = new QueueTransport([ready])
+
+    await expect(
+      createAgentCredentialsModule(transport).providers("agent-1", { scope: "ACCOUNT" }),
+    ).resolves.toEqual(ready)
+    expect(transport.requests).toStrictEqual([
+      {
+        path: "/api/v1/models/providers",
+        options: { method: "GET", params: { agentId: "agent-1", scope: "ACCOUNT" } },
+      },
+    ])
+  })
+
+  it("rethrows the Copilot's failure", async () => {
+    const failure = Object.assign(new Error("Forbidden"), { status: 403 })
+    const transport: Transport = {
+      request: () => Promise.reject(failure),
+    }
+
+    await expect(createAgentCredentialsModule(transport).providers()).rejects.toBe(failure)
+  })
+
+  it("rejects an entry whose reading is not a reading", async () => {
+    const transport = new QueueTransport([
+      [{ provider: "ANTHROPIC", providerName: null, models: [], usage: { harness: "claude" } }],
+    ])
+
+    await expect(createAgentCredentialsModule(transport).providers()).rejects.toThrow(
+      "Ready provider response item 0 usage has an invalid observedAt field",
+    )
+  })
+})
+
 describe("turn usage on Agent messages", () => {
   const closing = {
     id: "message-2",
