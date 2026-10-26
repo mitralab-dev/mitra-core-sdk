@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#549.
 The SDK passes the Copilot's answers through and keeps nothing of its own. It also ships the
-messenger email templates `main` held as unreleased (the last entries).
+messenger email templates and app sender `main` held as unreleased (the last entries).
 
 - `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, one
   call to the Copilot's `GET /api/v1/models/providers` (needs `MODEL_READ` and `CREDENTIAL_READ`),
