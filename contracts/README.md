@@ -24,6 +24,12 @@ publishes.
 
 ## Versions
 
+- `0.3.1` is the `0.3.0` parity surface with `agentCredentials.providers()`, the `before` option of
+  `agentTasks.listMessages()`, `session.loadOlder()` and the messenger email templates, which the
+  parity cases do not cover. Same
+  parity cases; the version exists so a consumer pinning the package can pin a corpus with the same
+  number.
+
 - `0.3.0` is the stable release of the `0.3.0-beta.2` surface with the agent session that follows
   T3: the live `history`, the queue mirrored from the box, `steerQueueItem`, `resumeQueue` and
   `backgroundTasks`, which the parity cases do not cover. Same parity cases; the version exists so a
