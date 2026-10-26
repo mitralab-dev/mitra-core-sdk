@@ -2,11 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.14
+## Unreleased
 
 - `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
   successful administrative response. Missing or structurally invalid code remains an invalid
   response, and `null` is not treated as empty source.
+
+## 0.2.14
+
 - `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
   Messenger's `POST /api/v1/messages/send` as a `RAW` payload on the `EMAIL` channel and resolves
   with the `messageId` of the accepted message. There is no `from`: Messenger sends with the
