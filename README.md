@@ -70,6 +70,8 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - `messenger`: `notify` avisa o usuário autenticado e `sendEmail` manda e-mail com o remetente do app.
 - `resolveApiKeyToken`, `readTokenAppId` e `tokenAuthorizesApp`: contrato da troca de API key por token, para o SDK que autentica por chave.
 
+Em `functionsAdmin`, `FunctionVersion.code` pode ser `null` quando o token permite ler a Function, mas não seu source. Nesse caso, `secrets` também é `null`; isoladamente, porém, `secrets: null` pode apenas indicar que a Function não usa secrets. O campo ausente continua sendo uma resposta inválida. Trate `code: null` como source redigido, não como código vazio nem como falha da operação.
+
 ## Configuração
 
 | Opção                                                        | Obrigatória | Uso                                                                                                                                                                                                                                          |
