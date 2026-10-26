@@ -1515,6 +1515,69 @@ export interface SendEmailInput {
   text?: string
 }
 
+/**
+ * The account emails an app may rewrite with its own token. Messenger sends them from the app's
+ * sender settings or the brand, so a template never picks its sender.
+ */
+export type EmailTemplateType =
+  "SIGN_IN" | "SSO_GUIDANCE" | "APP_USER_INVITED" | "APP_ACCESS_REQUIRED"
+
+export interface EmailTemplate {
+  id: string
+  /**
+   * An `EmailTemplateType` with an app token. Kept as a string because a console token also
+   * lists the platform's other types, and a type Messenger opens later must not break the list.
+   */
+  type: string
+  /** Always null for these types: their sender comes from the app settings or the brand. */
+  senderIdentityId: string | null
+  subject: string
+  htmlBody: string
+  textBody: string | null
+  /** True on a platform row. The list returns it next to the app's own row when the app rewrote the type. */
+  platformDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EmailTemplateVariable {
+  /** Referenced in a template as `$name`. */
+  name: string
+  /** A required variable must appear in the subject or the HTML body. */
+  required: boolean
+  description: string | null
+  /** Sample value used to render the preview. */
+  preview: string | null
+}
+
+export interface EmailTemplateTypeCatalog {
+  type: string
+  variables: EmailTemplateVariable[]
+}
+
+/** Replaces the app's version of the template as a whole. */
+export interface EmailTemplateInput {
+  subject: string
+  htmlBody: string
+  /** Left out, the plain-text version saved before is cleared. */
+  textBody?: string
+}
+
+/** The template rendered with the preview values of its variables. */
+export interface EmailTemplatePreview {
+  subject: string
+  htmlBody: string
+  textBody: string | null
+}
+
+export interface EmailTemplateUpsertResult {
+  template: EmailTemplate
+  /** Null when only the preview failed; the template is saved all the same. */
+  preview: EmailTemplatePreview | null
+  /** The transport or response error of the preview, unchanged, when `preview` is null. */
+  previewError?: unknown
+}
+
 export interface AppContext {
   appId: string
   app: AppDefinition
