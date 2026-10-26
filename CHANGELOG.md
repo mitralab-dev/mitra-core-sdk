@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## 0.3.2
 
+- `providerUsage` carries `provider` when the box sends it: the provider the reading is of, with
+  the same value `agentCredentials.providers()` gives in `AgentReadyProvider.provider` (such as
+  `ANTHROPIC` or `OPENAI`), passed as it comes, an unknown one included. A box that does not send
+  it leaves it absent. New optional field `AgentProviderUsage.provider`.
 - A message whose `send` or `sendAndWait` was still on its way when the session closed reaches
   the Copilot over REST, as one whose session closed before the channel already did. Before, a
   close while the box channel opened (5 to 10 s on a cold box) dropped it with nothing sent: a

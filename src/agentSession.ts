@@ -16,6 +16,7 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
   AgentTurnUsage,
+  CopilotProvider,
   CredentialUsage,
   Page,
 } from "./types"
@@ -347,7 +348,13 @@ export interface AgentTaskSessionEventMap {
 }
 
 /** The same shape `agentCredentials.usage` answers with. */
-export type AgentProviderUsage = CredentialUsage
+export type AgentProviderUsage = CredentialUsage & {
+  /**
+   * The provider the reading is of, as `agentCredentials.providers()` names it in
+   * `AgentReadyProvider.provider`. Absent from a box that does not send it.
+   */
+  provider?: CopilotProvider
+}
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -459,7 +466,9 @@ function providerUsageOf(payload: Record<string, unknown> | null): AgentProvider
   if (!payload) return null
   try {
     const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
-    return { harness, observedAt, status, windows }
+    const provider =
+      typeof payload.provider === "string" && payload.provider ? payload.provider : null
+    return { harness, observedAt, status, windows, ...(provider ? { provider } : {}) }
   } catch {
     return null
   }

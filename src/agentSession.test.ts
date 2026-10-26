@@ -354,6 +354,34 @@ describe("Agent task session", () => {
     expect(readings).toEqual([reading])
   })
 
+  it("passes the provider the box names on the subscription reading, as it comes", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const readings: unknown[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    const result = session.sendAndWait("quanto falta?", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    const reading = {
+      harness: "codex",
+      observedAt: "2026-10-26T12:00:00.000Z",
+      status: "allowed",
+      windows: [{ kind: "FIVE_HOUR", usedPercent: 10, resetsAt: null, windowSeconds: 18_000 }],
+    }
+    source.emit(event("providerUsage", { ...reading, provider: "OPENAI" }))
+    source.emit(event("providerUsage", reading))
+    source.emit(event("providerUsage", { ...reading, provider: "NEW_PROVIDER" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn" })
+    expect(readings).toStrictEqual([
+      { ...reading, provider: "OPENAI" },
+      reading,
+      { ...reading, provider: "NEW_PROVIDER" },
+    ])
+  })
+
   it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
