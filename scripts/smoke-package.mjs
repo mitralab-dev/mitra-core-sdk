@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentTaskEventSource, type AgentTurnUsage, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -77,6 +77,15 @@ const agentTasks = withAgentTaskSessions(
   createAgentTaskSessionManager({ tasks: core.agentTasks, eventSource }),
 )
 void agentTasks.session
+const readProviders = (): Promise<AgentReadyProvider[]> =>
+  core.agentCredentials.providers("agent-1", { scope: "ACCOUNT" })
+const readOlderMessages = (): Promise<Page<AgentMessage>> =>
+  core.agentTasks.listMessages("task-1", { before: "message-1", size: 50 })
+const readOlder = (session: AgentTaskSession): Promise<readonly AgentTimelineItem[]> =>
+  session.hasOlder ? session.loadOlder() : Promise.resolve([])
+void readProviders
+void readOlderMessages
+void readOlder
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -134,6 +143,15 @@ const agentTasks = core.withAgentTaskSessions(
   core.createAgentTaskSessionManager({ tasks: client.agentTasks, eventSource }),
 )
 void agentTasks.session
+const readProviders = (): Promise<core.AgentReadyProvider[]> =>
+  client.agentCredentials.providers("agent-1", { scope: "ACCOUNT" })
+const readOlderMessages = (): Promise<core.Page<core.AgentMessage>> =>
+  client.agentTasks.listMessages("task-1", { before: "message-1", size: 50 })
+const readOlder = (session: core.AgentTaskSession): Promise<readonly core.AgentTimelineItem[]> =>
+  session.hasOlder ? session.loadOlder() : Promise.resolve([])
+void readProviders
+void readOlderMessages
+void readOlder
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client
