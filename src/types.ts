@@ -576,6 +576,8 @@ export interface AgentMessageListOptions extends PageOptions {
    * and `TOOL_USE` rows of the chat itself, as before.
    */
   kinds?: "all"
+  /** Id of a message: only the rows recorded before it, so the next page back holds still. */
+  before?: string
 }
 
 export type AppColor =

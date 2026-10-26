@@ -17,6 +17,7 @@ import type {
   AgentTaskRuntime,
   AgentTurnUsage,
   CredentialUsage,
+  Page,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -378,6 +379,18 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
+  /**
+   * Whether the Copilot has rows older than the oldest row `history` holds, as the last page read
+   * said. False until a history was loaded.
+   */
+  readonly hasOlder: boolean
+  /**
+   * Reads the page before the oldest row `history` holds, with the size `loadHistory` used, and
+   * puts it before `history`, in the box's order. Resolves with the items it added (none when
+   * there is nothing older) and emits `historyLoaded`. A read still running when `history` is
+   * replaced resolves with nothing.
+   */
+  loadOlder(): Promise<readonly AgentTimelineItem[]>
   /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
   /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
@@ -571,6 +584,12 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
     }
   }
   return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
+}
+
+// The Copilot counts the rows before the cursor (or all of them, on the newest page), so a page
+// after this one means older rows (mitra-copilot#549).
+function hasOlderRows(page: Page<AgentMessage>): boolean {
+  return page.page.totalPages > page.page.number + 1
 }
 
 // A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
@@ -794,6 +813,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private readonly acceptedIds: string[] = []
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
+  private historyLimit: number | undefined
+  private _hasOlder = false
+  // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
+  private historyGeneration = 0
+  private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
+    null
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -926,10 +951,50 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.historyLimit = options.limit
+    this.replaceHistory(page)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
+  }
+
+  get hasOlder(): boolean {
+    return this._hasOlder
+  }
+
+  loadOlder(): Promise<readonly AgentTimelineItem[]> {
+    if (this.olderRead?.generation !== this.historyGeneration) {
+      const generation = this.historyGeneration
+      const promise = this.readOlder(generation).finally(() => {
+        if (this.olderRead?.promise === promise) this.olderRead = null
+      })
+      this.olderRead = { generation, promise }
+    }
+    return this.olderRead.promise
+  }
+
+  private async readOlder(generation: number): Promise<readonly AgentTimelineItem[]> {
+    // Live items carry no message id the Copilot knows; they only ever sit after the rows.
+    const oldest = this._history.find((item) => !item.id.startsWith("live:"))
+    if (!this._taskId || !this._hasOlder || !oldest) return []
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      before: oldest.id,
+      ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    if (generation !== this.historyGeneration || this.isClosed()) return []
+    const older = [...page.content].reverse().map(toAgentTimelineItem)
+    this._hasOlder = hasOlderRows(page)
+    this._history = [...older, ...this._history]
+    this.emit("historyLoaded", { history: this.history })
+    return older
+  }
+
+  private replaceHistory(page: Page<AgentMessage>): void {
+    this.historyGeneration += 1
+    this._hasOlder = hasOlderRows(page)
+    this._history = [...page.content].reverse().map(toAgentTimelineItem)
   }
 
   editQueueItem(id: string, text: string): void {
@@ -1375,7 +1440,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.replaceHistory(page)
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the

@@ -1129,6 +1129,106 @@ describe("Agent task session", () => {
   })
 })
 
+describe("Agent older history", () => {
+  // Newest first, as the Copilot answers: `older` is how many rows the query matched beyond it.
+  function olderPage(content: AgentMessage[], older = 0): Page<AgentMessage> {
+    const result = page(content)
+    const totalPages = older > 0 ? 2 : result.page.totalPages
+    return {
+      ...result,
+      page: { ...result.page, totalElements: content.length + older, totalPages },
+    }
+  }
+
+  function openSession(tasks: ReturnType<typeof createTasks>): AgentTaskSession {
+    return createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() }).session({
+      taskId: "task-1",
+      transport: "http",
+    })
+  }
+
+  const rows = ["m1", "m2", "m3", "m4", "m5", "m6"].map((id) => message(id, "AGENT", id))
+  const newestFirst = (from: number, to: number) => rows.slice(from, to).reverse()
+
+  it("puts the page before the oldest row in front of history, in order, until the first row", async () => {
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockResolvedValueOnce(olderPage(newestFirst(2, 4), 2))
+      .mockResolvedValueOnce(olderPage(newestFirst(0, 2)))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    expect(session.hasOlder).toBe(true)
+    const loaded = vi.fn()
+    session.on("historyLoaded", loaded)
+
+    const first = await session.loadOlder()
+    const second = await session.loadOlder()
+
+    expect(tasks.listMessages).toHaveBeenNthCalledWith(3, "task-1", {
+      before: "m5",
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    expect(tasks.listMessages).toHaveBeenNthCalledWith(4, "task-1", {
+      before: "m3",
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    expect(first.map((item) => item.id)).toEqual(["m3", "m4"])
+    expect(second.map((item) => item.id)).toEqual(["m1", "m2"])
+    expect(session.history.map((item) => item.id)).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"])
+    expect(session.hasOlder).toBe(false)
+    expect(loaded).toHaveBeenCalledTimes(2)
+
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(tasks.listMessages).toHaveBeenCalledTimes(4)
+  })
+
+  it("drops a page read while history was replaced", async () => {
+    let answerOlder: (value: Page<AgentMessage>) => void = () => undefined
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerOlder = resolve
+          }),
+      )
+      .mockResolvedValueOnce(olderPage(newestFirst(3, 6), 3))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const reading = session.loadOlder()
+    await vi.waitFor(() => expect(tasks.listMessages).toHaveBeenCalledTimes(2))
+    await session.loadHistory()
+    answerOlder(olderPage(newestFirst(2, 4), 2))
+
+    await expect(reading).resolves.toEqual([])
+    expect(session.history.map((item) => item.id)).toEqual(["m4", "m5", "m6"])
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("asks nothing when history holds every row or no row of the Copilot", async () => {
+    const tasks = createTasks({ listMessages: vi.fn(async () => olderPage(newestFirst(0, 2))) })
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(session.hasOlder).toBe(false)
+    expect(tasks.listMessages).toHaveBeenCalledTimes(1)
+
+    const fresh = createSession()
+    await expect(fresh.session.loadOlder()).resolves.toEqual([])
+    expect(fresh.tasks.listMessages).not.toHaveBeenCalled()
+  })
+})
+
 describe("Agent turn usage", () => {
   const usage = {
     inputTokens: 1_200,

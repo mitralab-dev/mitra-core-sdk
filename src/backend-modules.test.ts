@@ -876,7 +876,12 @@ describe("agent and workflow modules", () => {
     await tasks.archive("task/1")
     await tasks.sendInput("task/1", { type: "message", content: "Hello" })
     await tasks.listMessages("task/1")
-    await tasks.listMessages("task/1", { sort: "createdAt,desc", kinds: "all" })
+    await tasks.listMessages("task/1", {
+      size: 50,
+      sort: "createdAt,desc",
+      kinds: "all",
+      before: "message-1",
+    })
     // Without `kinds` the Copilot answers the rows 0.2.13 read; `all` asks for every row.
     expect(taskTransport.requests[7]?.options.params).toEqual({
       page: undefined,
@@ -886,9 +891,10 @@ describe("agent and workflow modules", () => {
     })
     expect(taskTransport.requests[8]?.options.params).toEqual({
       page: undefined,
-      size: undefined,
+      size: 50,
       sort: "createdAt,desc",
       kinds: "all",
+      before: "message-1",
     })
     expect(taskTransport.requests[3]?.options.body).toEqual({
       agentType: "CODEX",
