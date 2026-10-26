@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- `messenger` manages the current app's account email templates on Messenger's
+  `/api/v1/email/templates` and `/api/v1/email/template-types` routes: `listEmailTemplates()`,
+  `getEmailTemplateType(type)`, `getEmailTemplate(type)`, `upsertEmailTemplate(type, input)`,
+  `previewEmailTemplate(type)` and `deleteEmailTemplate(type)`. `EmailTemplateType` is the four
+  types an app token may edit: `SIGN_IN`, `SSO_GUIDANCE`, `APP_USER_INVITED` and
+  `APP_ACCESS_REQUIRED`.
+- The `appId` comes from `getAppId`, now passed to the messenger module too, never from the
+  caller; without it the app calls fail with `SdkCoreConfigurationError` before any request. The
+  `PUT` body is built field by field, so an untyped `appId` or `senderIdentityId` is dropped, and
+  `textBody` is left out when absent, which clears the saved one.
+- `upsertEmailTemplate` saves and then renders the preview. A preview failure after a successful
+  save resolves with `preview: null` and the error in `previewError` instead of rejecting.
+- Messenger refusals (`400` `TEMPLATE_MISSING_VARIABLE` or `VALIDATION_FAILED` for a blank
+  subject or HTML body, `403` `ACCESS_DENIED` for another app, no edit access or a type outside the
+  four, `404` on a delete without an app row) come from the transport unchanged.
+- In responses `type` is a string, not `EmailTemplateType`: a console token also lists the
+  platform's other types, and a type Messenger opens later must not break the list.
+
 ## 0.2.14
 
 - `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
