@@ -1214,6 +1214,32 @@ describe("Agent older history", () => {
     expect(session.hasOlder).toBe(true)
   })
 
+  it("drops the failure of a read whose history was replaced and keeps the current one's", async () => {
+    let failOlder: (error: Error) => void = () => undefined
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failOlder = reject
+          }),
+      )
+      .mockResolvedValueOnce(olderPage(newestFirst(3, 6), 3))
+      .mockRejectedValueOnce(new Error("current read failed"))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const stale = session.loadOlder()
+    await vi.waitFor(() => expect(tasks.listMessages).toHaveBeenCalledTimes(2))
+    await session.loadHistory()
+    failOlder(new Error("stale read failed"))
+
+    await expect(stale).resolves.toEqual([])
+    await expect(session.loadOlder()).rejects.toThrow("current read failed")
+    expect(session.history.map((item) => item.id)).toEqual(["m4", "m5", "m6"])
+  })
+
   it("asks nothing when history holds every row or no row of the Copilot", async () => {
     const tasks = createTasks({ listMessages: vi.fn(async () => olderPage(newestFirst(0, 2))) })
     const session = openSession(tasks)

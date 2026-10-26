@@ -977,12 +977,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // Live items carry no message id the Copilot knows; they only ever sit after the rows.
     const oldest = this._history.find((item) => !item.id.startsWith("live:"))
     if (!this._taskId || !this._hasOlder || !oldest) return []
-    const page = await this.dependencies.tasks.listMessages(this._taskId, {
-      before: oldest.id,
-      ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
-      sort: "createdAt,desc",
-      kinds: "all",
-    })
+    let page: Page<AgentMessage>
+    try {
+      page = await this.dependencies.tasks.listMessages(this._taskId, {
+        before: oldest.id,
+        ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
+        sort: "createdAt,desc",
+        kinds: "all",
+      })
+    } catch (error) {
+      // A read of a history since replaced resolves with nothing, as its success would.
+      if (generation !== this.historyGeneration || this.isClosed()) return []
+      throw error
+    }
     if (generation !== this.historyGeneration || this.isClosed()) return []
     const older = [...page.content].reverse().map(toAgentTimelineItem)
     this._hasOlder = hasOlderRows(page)
