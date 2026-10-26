@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
+  successful administrative response. Missing or structurally invalid code remains an invalid
+  response, and `null` is not treated as empty source.
+
 ## 0.3.0
 
 This release consolidates the work published to npm as `0.3.0-beta.1` and `0.3.0-beta.2` (below)
@@ -105,9 +111,6 @@ this release the new functions (queue, steer, background tasks) find nothing to 
 
 ## 0.3.0-beta.2
 
-- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
-  successful administrative response. Missing or structurally invalid code remains an invalid
-  response, and `null` is not treated as empty source.
 - `messenger.sendEmail({ to, subject, html, text?, cc?, bcc?, replyTo? })` sends an email through
   Messenger's `POST /api/v1/messages/send` as a `RAW` payload on the `EMAIL` channel and resolves
   with the `messageId` of the accepted message. There is no `from`: Messenger sends with the
