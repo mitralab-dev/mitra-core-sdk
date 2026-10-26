@@ -6,6 +6,8 @@ import {
   createSdkCore,
 } from "./index"
 import type {
+  EmailSenderInput,
+  EmailSettingsInput,
   EmailTemplateInput,
   EmailTemplateType,
   SendEmailInput,
@@ -283,6 +285,10 @@ describe("messenger email templates", () => {
     await expect(messenger.deleteEmailTemplate("SIGN_IN")).rejects.toBeInstanceOf(
       SdkCoreConfigurationError,
     )
+    await expect(messenger.getEmailSettings()).rejects.toBeInstanceOf(SdkCoreConfigurationError)
+    await expect(messenger.updateEmailSettings({})).rejects.toBeInstanceOf(
+      SdkCoreConfigurationError,
+    )
     expect(transport.requests).toHaveLength(0)
   })
 
@@ -329,6 +335,206 @@ describe("messenger email templates", () => {
 
     await expect(
       createMessengerModule(new QueueTransport([catalog])).getEmailTemplateType("SIGN_IN"),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+})
+
+const senderId = "44444444-4444-4444-4444-444444444444"
+
+const pendingSender = {
+  id: senderId,
+  email: "contato@loja.com",
+  displayName: "Loja X",
+  status: "PENDING",
+  sharedWithCurrentWorkspace: true,
+  ownerConfirmationPending: true,
+  createdAt: "2026-10-26T10:00:00Z",
+  updatedAt: "2026-10-26T10:00:00Z",
+}
+
+const appSenderSettings = {
+  appId,
+  senderIdentityId: senderId,
+  displayName: "Loja X",
+  replyTo: "suporte@loja.com",
+  effectiveSender: {
+    email: "contato@loja.com",
+    displayName: "Loja X",
+    source: "APP_SENDER",
+    reason: null,
+  },
+  ownTemplateSendsFromBrand: false,
+}
+
+describe("messenger email senders", () => {
+  it("lists the workspace senders without an app, a status unknown to the SDK included", async () => {
+    const quarantined = { ...pendingSender, id: "sender-2", status: "QUARANTINED" }
+    const transport = new QueueTransport([[pendingSender, quarantined]])
+
+    await expect(createMessengerModule(transport).listEmailSenders()).resolves.toEqual([
+      pendingSender,
+      quarantined,
+    ])
+    expect(transport.requests).toStrictEqual([
+      { path: "/api/v1/email/identities/workspace", options: { method: "GET" } },
+    ])
+  })
+
+  it("registers with only the email and display name an untyped caller passes", async () => {
+    const transport = new QueueTransport([pendingSender])
+
+    await expect(
+      createMessengerModule(transport).registerEmailSender({
+        email: "contato@loja.com",
+        displayName: "Loja X",
+        tenantId: "55555555-5555-5555-5555-555555555555",
+        appId: "22222222-2222-2222-2222-222222222222",
+      } as EmailSenderInput),
+    ).resolves.toEqual(pendingSender)
+    expect(transport.requests).toStrictEqual([
+      {
+        path: "/api/v1/email/identities",
+        options: {
+          method: "POST",
+          body: { email: "contato@loja.com", displayName: "Loja X" },
+        },
+      },
+    ])
+  })
+
+  it("resends the verification of one sender", async () => {
+    const transport = new QueueTransport([pendingSender])
+
+    await expect(
+      createMessengerModule(transport).resendEmailSenderVerification(senderId),
+    ).resolves.toEqual(pendingSender)
+    expect(transport.requests).toStrictEqual([
+      {
+        path: `/api/v1/email/identities/${senderId}/resend-verification`,
+        options: { method: "POST" },
+      },
+    ])
+  })
+
+  it("confirms the code the person typed", async () => {
+    const verified = { ...pendingSender, status: "VERIFIED", ownerConfirmationPending: false }
+    const transport = new QueueTransport([verified])
+
+    await expect(
+      createMessengerModule(transport).confirmEmailSender(senderId, "123456"),
+    ).resolves.toEqual(verified)
+    expect(transport.requests).toStrictEqual([
+      {
+        path: `/api/v1/email/identities/${senderId}/confirm`,
+        options: { method: "POST", body: { code: "123456" } },
+      },
+    ])
+  })
+
+  it("refuses a dot segment as the sender id before any request", async () => {
+    const transport = new QueueTransport()
+    const messenger = createMessengerModule(transport)
+
+    await expect(messenger.resendEmailSenderVerification("..")).rejects.toBeInstanceOf(
+      SdkCoreConfigurationError,
+    )
+    await expect(messenger.confirmEmailSender(".", "123456")).rejects.toBeInstanceOf(
+      SdkCoreConfigurationError,
+    )
+    expect(transport.requests).toHaveLength(0)
+  })
+
+  it.each([
+    [
+      "a missing ownerConfirmationPending",
+      { ...pendingSender, ownerConfirmationPending: undefined },
+    ],
+    ["an empty status", { ...pendingSender, status: "" }],
+  ])("rejects a sender with %s", async (_case, sender) => {
+    await expect(
+      createMessengerModule(new QueueTransport([[sender]])).listEmailSenders(),
+    ).rejects.toBeInstanceOf(SdkCoreResponseError)
+  })
+})
+
+describe("messenger email settings", () => {
+  it("gets the settings of the current app, a brand fallback included", async () => {
+    const brandFallback = {
+      appId,
+      senderIdentityId: null,
+      displayName: null,
+      replyTo: null,
+      effectiveSender: {
+        email: "no-reply@infusion.cloud",
+        displayName: null,
+        source: "BRAND_DEFAULT",
+        reason: "NO_SETTINGS",
+      },
+      ownTemplateSendsFromBrand: true,
+    }
+    const transport = new QueueTransport([brandFallback])
+
+    await expect(messengerFor(transport).getEmailSettings()).resolves.toEqual(brandFallback)
+    expect(transport.requests).toStrictEqual([
+      { path: `/api/v1/email/apps/${appId}/settings`, options: { method: "GET" } },
+    ])
+  })
+
+  it("replaces the settings of the current app with every field", async () => {
+    const transport = new QueueTransport([appSenderSettings])
+
+    await expect(
+      messengerFor(transport).updateEmailSettings({
+        senderIdentityId: senderId,
+        displayName: "Loja X",
+        replyTo: "suporte@loja.com",
+      }),
+    ).resolves.toEqual(appSenderSettings)
+    expect(transport.requests).toStrictEqual([
+      {
+        path: `/api/v1/email/apps/${appId}/settings`,
+        options: {
+          method: "PUT",
+          body: { senderIdentityId: senderId, displayName: "Loja X", replyTo: "suporte@loja.com" },
+        },
+      },
+    ])
+  })
+
+  it("sends null, leaves absent fields out and drops the appId an untyped caller passes", async () => {
+    const transport = new QueueTransport([appSenderSettings, appSenderSettings])
+
+    await messengerFor(transport).updateEmailSettings({
+      senderIdentityId: null,
+      replyTo: "suporte@loja.com",
+      appId: "22222222-2222-2222-2222-222222222222",
+    } as EmailSettingsInput)
+
+    await messengerFor(transport).updateEmailSettings({ displayName: "Loja X" })
+
+    expect(transport.requests.map((request) => request.options?.body)).toStrictEqual([
+      { senderIdentityId: null, replyTo: "suporte@loja.com" },
+      { displayName: "Loja X" },
+    ])
+    expect(transport.requests[0]?.path).toBe(`/api/v1/email/apps/${appId}/settings`)
+  })
+
+  it.each([
+    ["no effectiveSender", { ...appSenderSettings, effectiveSender: undefined }],
+    [
+      "an effectiveSender without source",
+      {
+        ...appSenderSettings,
+        effectiveSender: { ...appSenderSettings.effectiveSender, source: "" },
+      },
+    ],
+    [
+      "a missing ownTemplateSendsFromBrand",
+      { ...appSenderSettings, ownTemplateSendsFromBrand: null },
+    ],
+  ])("rejects settings with %s", async (_case, settings) => {
+    await expect(
+      messengerFor(new QueueTransport([settings])).getEmailSettings(),
     ).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 })

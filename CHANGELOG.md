@@ -21,6 +21,19 @@ All notable changes to this project are documented in this file.
   four, `404` on a delete without an app row) come from the transport unchanged.
 - In responses `type` is a string, not `EmailTemplateType`: a console token also lists the
   platform's other types, and a type Messenger opens later must not break the list.
+- `messenger` manages the current app's sender on the routes Messenger opens to an app token whose
+  person is OWNER or ADMIN of the app's workspace: `listEmailSenders()`
+  (`GET /api/v1/email/identities/workspace`), `registerEmailSender({ email, displayName })`,
+  `resendEmailSenderVerification(id)`, `confirmEmailSender(id, code)`, `getEmailSettings()` and
+  `updateEmailSettings(input)` (`GET` and `PUT /api/v1/email/apps/{appId}/settings`, with the app
+  from `getAppId`). Bodies are built field by field; `updateEmailSettings` replaces the whole
+  setting, so a field left out or `null` is cleared.
+- `registerEmailSender` does not tell a new address (`201`) from one the person already owned
+  (`200`), since the transport does not expose the HTTP status; the returned `status` and
+  `ownerConfirmationPending` say whether the code still has to be confirmed.
+- In sender responses `status`, `effectiveSender.source` and `effectiveSender.reason` are strings,
+  so a value Messenger adds later does not break the read. The routes an app token may not use
+  (the person's full list, rename, delete, sharing with workspaces) stay out of the SDK.
 
 ## 0.3.0
 
