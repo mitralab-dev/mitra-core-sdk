@@ -1444,7 +1444,7 @@ export interface EmailTemplate {
   subject: string
   htmlBody: string
   textBody: string | null
-  /** True when the app has no version of its own and this is the platform text. */
+  /** True on a platform row. The list returns it next to the app's own row when the app rewrote the type. */
   platformDefault: boolean
   createdAt: string
   updatedAt: string

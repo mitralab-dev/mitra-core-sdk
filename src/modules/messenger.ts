@@ -42,7 +42,10 @@ export interface MessengerModule {
     type: EmailTemplateType,
     input: EmailTemplateInput,
   ): Promise<EmailTemplateUpsertResult>
-  /** Renders the template the current app sends for a type with the preview values. */
+  /**
+   * Renders the app's saved template, or the platform one, with the catalog's sample values. It
+   * does not prove which HTML goes out: the sender and the brand policy decide that at send time.
+   */
   previewEmailTemplate(type: EmailTemplateType): Promise<EmailTemplatePreview>
   /** Deletes the current app's version of a template, so the platform text applies again. */
   deleteEmailTemplate(type: EmailTemplateType): Promise<void>
