@@ -444,11 +444,17 @@ describe("messenger email senders", () => {
     expect(transport.requests).toHaveLength(0)
   })
 
-  it.each([
-    [
-      "a missing ownerConfirmationPending",
-      { ...pendingSender, ownerConfirmationPending: undefined },
-    ],
+  it.each<[string, unknown]>([
+    ...[
+      "id",
+      "email",
+      "displayName",
+      "status",
+      "sharedWithCurrentWorkspace",
+      "ownerConfirmationPending",
+      "createdAt",
+      "updatedAt",
+    ].map((field): [string, unknown] => [`no ${field}`, { ...pendingSender, [field]: undefined }]),
     ["an empty status", { ...pendingSender, status: "" }],
   ])("rejects a sender with %s", async (_case, sender) => {
     await expect(
@@ -519,7 +525,23 @@ describe("messenger email settings", () => {
     expect(transport.requests[0]?.path).toBe(`/api/v1/email/apps/${appId}/settings`)
   })
 
-  it.each([
+  it.each<[string, unknown]>([
+    ...["appId", "senderIdentityId", "displayName", "replyTo", "ownTemplateSendsFromBrand"].map(
+      (field): [string, unknown] => [`no ${field}`, { ...appSenderSettings, [field]: undefined }],
+    ),
+    ...(
+      [
+        ["email", undefined],
+        ["displayName", 1],
+        ["reason", 1],
+      ] as const
+    ).map(([field, value]): [string, unknown] => [
+      `an effectiveSender with ${field} ${String(value)}`,
+      {
+        ...appSenderSettings,
+        effectiveSender: { ...appSenderSettings.effectiveSender, [field]: value },
+      },
+    ]),
     ["no effectiveSender", { ...appSenderSettings, effectiveSender: undefined }],
     [
       "an effectiveSender without source",

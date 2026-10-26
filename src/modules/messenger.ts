@@ -63,7 +63,10 @@ export interface MessengerModule {
    * Messenger mails a verification link and a 6-digit code to the address.
    */
   registerEmailSender(input: EmailSenderInput): Promise<EmailSender>
-  /** Mails a new code, and the AWS link while the address is not verified there. */
+  /**
+   * Mails the AWS link again while AWS has not verified the address, and a new code only while
+   * the person has not confirmed one yet.
+   */
   resendEmailSenderVerification(senderId: string): Promise<EmailSender>
   /** Confirms the 6-digit code the person read in the mailbox of the address. */
   confirmEmailSender(senderId: string, code: string): Promise<EmailSender>
