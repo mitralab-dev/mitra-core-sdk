@@ -98,7 +98,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish stable
-        if: ${{ !contains(inputs.version, '-beta.') }}
+        if: ${{ !contains(inputs.version, '-beta.') && github.ref_name == 'main' }}
         run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm moves latest to whatever publishes without --tag, so a maintenance line would take latest
+      # away from the newer minor that main published.
+      - name: Publish maintenance
+        if: ${{ !contains(inputs.version, '-beta.') && startsWith(github.ref_name, 'release/') }}
+        run: npm publish --access public --tag "${GITHUB_REF_NAME//\//-}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
