@@ -1586,9 +1586,9 @@ describe("Agent direct channel lifecycle", () => {
     await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    // The Copilot takes no `mode`; the id is the one `send` returned.
+    // The id is the one `send` returned, and the mode the one it was sent with.
     expect(tasks.sendInput.mock.calls).toEqual([
-      ["task-1", { type: "message", content: "hello", clientMessageId: id }],
+      ["task-1", { type: "message", content: "hello", mode: "queue", clientMessageId: id }],
     ])
     expect(FakeWebSocket.instances.flatMap((socket) => socket.sent)).toEqual([])
   })
@@ -1610,6 +1610,20 @@ describe("Agent direct channel lifecycle", () => {
     expect(FakeWebSocket.last().sent).toEqual([])
   })
 
+  it("rejects a sendAndWait whose session closes while the box socket handshakes, after handing it over", async () => {
+    FakeWebSocket.handshake = "hang"
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    session.close()
+
+    await expect(result).rejects.toThrow("Agent task session is closed.")
+    expect(tasks.sendInput).toHaveBeenCalledOnce()
+    expect(tasks.sendInput.mock.calls[0]?.[1]).toMatchObject({ type: "message", content: "hello" })
+  })
+
   it("hands the message to the Copilot when the session closes after the channel opened, before the message went out", async () => {
     let readBaseline: (value: Page<never>) => void = () => undefined
     const tasks = createTasks(offer())
@@ -1627,7 +1641,7 @@ describe("Agent direct channel lifecycle", () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(tasks.sendInput.mock.calls).toEqual([
-      ["task-1", { type: "message", content: "hello", clientMessageId: id }],
+      ["task-1", { type: "message", content: "hello", mode: "steer", clientMessageId: id }],
     ])
     expect(FakeWebSocket.last().sent).toEqual([])
     expect(session.status).toBe("closed")

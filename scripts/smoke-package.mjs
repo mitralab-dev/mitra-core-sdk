@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -86,6 +86,17 @@ const readOlder = (session: AgentTaskSession): Promise<readonly AgentTimelineIte
 void readProviders
 void readOlderMessages
 void readOlder
+const usageOfProvider: AgentProviderUsage = {
+  harness: "codex",
+  observedAt: "2026-10-26T12:00:00.000Z",
+  status: null,
+  windows: [],
+  provider: "OPENAI",
+}
+const usageOfFutureProvider: AgentProviderUsage = { ...usageOfProvider, provider: "NEW_PROVIDER" }
+const usageOfOlderBox: AgentProviderUsage = { harness: "claude", observedAt: "2026-10-26T12:00:00.000Z", status: null, windows: [] }
+void usageOfFutureProvider
+void usageOfOlderBox
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -152,6 +163,17 @@ const readOlder = (session: core.AgentTaskSession): Promise<readonly core.AgentT
 void readProviders
 void readOlderMessages
 void readOlder
+const usageOfProvider: core.AgentProviderUsage = {
+  harness: "codex",
+  observedAt: "2026-10-26T12:00:00.000Z",
+  status: null,
+  windows: [],
+  provider: "OPENAI",
+}
+const usageOfFutureProvider: core.AgentProviderUsage = { ...usageOfProvider, provider: "NEW_PROVIDER" }
+const usageOfOlderBox: core.AgentProviderUsage = { harness: "claude", observedAt: "2026-10-26T12:00:00.000Z", status: null, windows: [] }
+void usageOfFutureProvider
+void usageOfOlderBox
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

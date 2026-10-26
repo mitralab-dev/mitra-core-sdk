@@ -285,6 +285,27 @@ describe("Agent task session", () => {
     expect(source.taskIds).toEqual([])
   })
 
+  it("rejects a sendAndWait whose session reopened by task id closes while it opens, after handing it over", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({ taskId: "task-1" })
+
+    const result = session.sendAndWait("hi", { mode: "queue" })
+    session.close()
+    resolveGet(TASK)
+
+    await expect(result).rejects.toThrow("Agent task session is closed.")
+    expect(tasks.sendInput.mock.calls).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "hi", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+    ])
+  })
+
   it("swallows a REST failure for a prompt sent after close without surfacing it", async () => {
     const tasks = createTasks({
       sendInput: vi.fn(async () => {
@@ -400,6 +421,27 @@ describe("Agent task session", () => {
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult).toMatchObject({ content: "both answers", reason: "stop" })
     expect(secondResult).toBe(firstResult)
+  })
+
+  it("keeps the mode of a message typed during a turn when it goes to the Copilot", async () => {
+    // The Copilot passes `mode` to the box and steers a message sent without one.
+    const { session, tasks } = createSession()
+    session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    session.send("queued", { mode: "queue", agentType: "CODEX" })
+    session.send("steered", { mode: "steer" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+
+    expect(tasks.sendInput.mock.calls.slice(1)).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "queued", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+      [
+        "task-1",
+        { type: "message", content: "steered", mode: "steer", clientMessageId: expect.any(String) },
+      ],
+    ])
   })
 
   it("rejects every message of a turn the producer fails with its typed error", async () => {

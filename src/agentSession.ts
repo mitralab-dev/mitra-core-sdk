@@ -1164,15 +1164,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.isClosed() && !this._taskId) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
-    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     // A cold box takes 5 to 10 s to open the channel, and a page that navigates away closes the
     // session in the meantime (conversation 73183). The close aborts the opening.
     await this.ensureChannel().catch((error: unknown) => {
       if (!this.isClosed()) throw error
     })
-    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     await this.captureTurnBaseline()
-    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId)
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1196,8 +1196,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // out over REST. Only a prompt that never reached `handOver` comes here: the Copilot does not
   // dedupe POST /inputs by `clientMessageId`, and a second copy would run a second turn. No
   // channel, status, or event for a closed session, and a failure has no listener left to hear it.
-  private async handOverAfterClose(input: AgentTaskInput, clientMessageId: string): Promise<false> {
+  // `close()` rejects only the waiter of a turn already open; this one has none yet.
+  private async handOverAfterClose(
+    input: AgentTaskInput,
+    clientMessageId: string,
+    waiter?: TurnWaiter,
+  ): Promise<false> {
     await this.handOver(input, clientMessageId).catch(() => undefined)
+    waiter?.reject(new Error("Agent task session is closed."))
     return false
   }
 
@@ -1542,19 +1548,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
-    // echoes it as on the direct channel.
+    // The Copilot keeps the `clientMessageId` and hands it to the box, which echoes it as on the
+    // direct channel. It passes `mode` to the box too, and steers a message sent without one.
     const id = clientMessageId === undefined ? {} : { clientMessageId }
+    const mode = input.type === "message" && input.mode ? { mode: input.mode } : {}
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content, ...id }
+          ? { type: "message", content: input.content, ...mode, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...mode,
               ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.
