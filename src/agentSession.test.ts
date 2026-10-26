@@ -264,6 +264,48 @@ describe("Agent task session", () => {
     expect(source.taskIds).toEqual([])
   })
 
+  it("still sends the prompt when a session reopened by task id closes while it opens", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+
+    const id = session.send("hi")
+    session.close()
+    resolveGet(TASK)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hi", clientMessageId: id }],
+    ])
+    expect(source.taskIds).toEqual([])
+  })
+
+  it("rejects a sendAndWait whose session reopened by task id closes while it opens, after handing it over", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({ taskId: "task-1" })
+
+    const result = session.sendAndWait("hi", { mode: "queue" })
+    session.close()
+    resolveGet(TASK)
+
+    await expect(result).rejects.toThrow("Agent task session is closed.")
+    expect(tasks.sendInput.mock.calls).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "hi", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+    ])
+  })
+
   it("swallows a REST failure for a prompt sent after close without surfacing it", async () => {
     const tasks = createTasks({
       sendInput: vi.fn(async () => {
@@ -333,6 +375,34 @@ describe("Agent task session", () => {
     expect(readings).toEqual([reading])
   })
 
+  it("passes the provider the box names on the subscription reading, as it comes", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const readings: unknown[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    const result = session.sendAndWait("quanto falta?", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    const reading = {
+      harness: "codex",
+      observedAt: "2026-10-26T12:00:00.000Z",
+      status: "allowed",
+      windows: [{ kind: "FIVE_HOUR", usedPercent: 10, resetsAt: null, windowSeconds: 18_000 }],
+    }
+    source.emit(event("providerUsage", { ...reading, provider: "OPENAI" }))
+    source.emit(event("providerUsage", reading))
+    source.emit(event("providerUsage", { ...reading, provider: "NEW_PROVIDER" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn" })
+    expect(readings).toStrictEqual([
+      { ...reading, provider: "OPENAI" },
+      reading,
+      { ...reading, provider: "NEW_PROVIDER" },
+    ])
+  })
+
   it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
@@ -351,6 +421,27 @@ describe("Agent task session", () => {
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult).toMatchObject({ content: "both answers", reason: "stop" })
     expect(secondResult).toBe(firstResult)
+  })
+
+  it("keeps the mode of a message typed during a turn when it goes to the Copilot", async () => {
+    // The Copilot passes `mode` to the box and steers a message sent without one.
+    const { session, tasks } = createSession()
+    session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    session.send("queued", { mode: "queue", agentType: "CODEX" })
+    session.send("steered", { mode: "steer" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+
+    expect(tasks.sendInput.mock.calls.slice(1)).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "queued", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+      [
+        "task-1",
+        { type: "message", content: "steered", mode: "steer", clientMessageId: expect.any(String) },
+      ],
+    ])
   })
 
   it("rejects every message of a turn the producer fails with its typed error", async () => {

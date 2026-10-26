@@ -16,6 +16,7 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
   AgentTurnUsage,
+  CopilotProvider,
   CredentialUsage,
   Page,
 } from "./types"
@@ -347,7 +348,13 @@ export interface AgentTaskSessionEventMap {
 }
 
 /** The same shape `agentCredentials.usage` answers with. */
-export type AgentProviderUsage = CredentialUsage
+export type AgentProviderUsage = CredentialUsage & {
+  /**
+   * The provider the reading is of, as `agentCredentials.providers()` names it in
+   * `AgentReadyProvider.provider`. Absent from a box that does not send it.
+   */
+  provider?: CopilotProvider
+}
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -459,7 +466,9 @@ function providerUsageOf(payload: Record<string, unknown> | null): AgentProvider
   if (!payload) return null
   try {
     const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
-    return { harness, observedAt, status, windows }
+    const provider =
+      typeof payload.provider === "string" && payload.provider ? payload.provider : null
+    return { harness, observedAt, status, windows, ...(provider ? { provider } : {}) }
   } catch {
     return null
   }
@@ -1146,25 +1155,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
-    if (this.openingPromise && !(await this.openingPromise)) {
+    // A session closed while it opened still has its task; the prompt goes out below.
+    if (this.openingPromise && !(await this.openingPromise) && !this.isClosed()) {
       throw new Error("Agent task session could not be opened.")
     }
     // A waiter that gave up on `timeoutMs` or `signal` only stopped waiting: the message still
     // goes out and the session follows its turn, as it does after the turn started.
-    if (this.isClosed()) return false
+    if (this.isClosed() && !this._taskId) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
-    if (this.isClosed()) {
-      // A prompt whose task exists is never dropped by close; the task outlives the session.
-      // Apps close the creating session inside taskCreated and reopen by task id, so the
-      // input still goes out over REST. No channel, status, or event for a closed session,
-      // and a failure has no listener left to hear it.
-      await this.handOver(input, clientMessageId).catch(() => undefined)
-      return false
-    }
-    await this.ensureChannel()
-    if (this.isClosed()) return false
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
+    // A cold box takes 5 to 10 s to open the channel, and a page that navigates away closes the
+    // session in the meantime (conversation 73183). The close aborts the opening.
+    await this.ensureChannel().catch((error: unknown) => {
+      if (!this.isClosed()) throw error
+    })
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     await this.captureTurnBaseline()
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1181,6 +1189,22 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
     return true
+  }
+
+  // A prompt whose task exists is never dropped by close; the task outlives the session. Apps
+  // close the creating session inside taskCreated and reopen by task id, so the input still goes
+  // out over REST. Only a prompt that never reached `handOver` comes here: the Copilot does not
+  // dedupe POST /inputs by `clientMessageId`, and a second copy would run a second turn. No
+  // channel, status, or event for a closed session, and a failure has no listener left to hear it.
+  // `close()` rejects only the waiter of a turn already open; this one has none yet.
+  private async handOverAfterClose(
+    input: AgentTaskInput,
+    clientMessageId: string,
+    waiter?: TurnWaiter,
+  ): Promise<false> {
+    await this.handOver(input, clientMessageId).catch(() => undefined)
+    waiter?.reject(new Error("Agent task session is closed."))
+    return false
   }
 
   // A message sent while a turn runs, or is being opened, goes out at once: the box takes it into
@@ -1524,19 +1548,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
-    // echoes it as on the direct channel.
+    // The Copilot keeps the `clientMessageId` and hands it to the box, which echoes it as on the
+    // direct channel. It passes `mode` to the box too, and steers a message sent without one.
     const id = clientMessageId === undefined ? {} : { clientMessageId }
+    const mode = input.type === "message" && input.mode ? { mode: input.mode } : {}
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content, ...id }
+          ? { type: "message", content: input.content, ...mode, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...mode,
               ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.

@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.2
+
+- `providerUsage` carries `provider` when the box sends it: the provider the reading is of, with
+  the same value `agentCredentials.providers()` gives in `AgentReadyProvider.provider` (such as
+  `ANTHROPIC` or `OPENAI`), passed as it comes, an unknown one included. A box that does not send
+  it leaves it absent. New optional field `AgentProviderUsage.provider`.
+- A message whose `send` or `sendAndWait` was still on its way when the session closed reaches
+  the Copilot over REST, as one whose session closed before the channel already did. Before, a
+  close while the box channel opened (5 to 10 s on a cold box) dropped it with nothing sent: a
+  page that navigated away right after sending lost the message (conversation 73183). The same
+  holds for a session reopened by task id that closes while it opens, and for a close between the
+  channel opening and the message going out, which used to put the closed session back in
+  `streaming`. It goes once, with the `clientMessageId` `send` returned and its `mode`, and the
+  `sendAndWait` of it rejects with the session closed instead of waiting forever. A message the box
+  channel already carried is not sent again: the Copilot does not dedupe by `clientMessageId`.
+- A message that goes to the Copilot over REST keeps its `mode`, a steer typed during a turn
+  included. The Copilot passes it to the box and steers a message sent without one, so a `queue`
+  message no longer went into the running turn.
+
 ## 0.3.1
 
 Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#549.
