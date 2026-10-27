@@ -15,7 +15,7 @@ import type {
 } from "./agentSession"
 import { createAgentTasksModule, type AgentTasksModule } from "./modules/agentTasks"
 import type { Transport } from "./transport"
-import type { AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
+import type { AgentMessage, AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
 
 const AGENT_ID = "agent-1"
 
@@ -3150,6 +3150,63 @@ describe("Agent direct channel on a second tab of a chat with a turn running", (
     socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
     await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
     expect(session.status).toBe("idle")
+    session.close()
+  })
+})
+
+// mitra-core-sdk#140: a page of the history that starts after the running turn's question, read
+// again while that turn runs. The box sends the turn's `stepStart` again on connecting.
+describe("Agent direct channel with a history page that starts after the running turn", () => {
+  const row = (id: string, sequence: number): AgentMessage => ({
+    id,
+    sender: "AGENT",
+    type: "REASONING",
+    content: id,
+    createdAt: `2026-01-01T00:00:0${sequence}Z`,
+    sequence,
+    boxLog: 0,
+  })
+  const newestPage: Page<AgentMessage> = {
+    content: [row("r3", 4), row("r2", 3), row("r1", 2)],
+    page: { size: 3, totalElements: 4, totalPages: 2, number: 0 },
+  }
+
+  async function openOn(boxLog: number) {
+    const tasks = createTasks(async () => ({ wsUrl: BOX_URL, lastSequence: 6, boxLog }))
+    tasks.listMessages.mockResolvedValue(newestPage)
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "thread-1", lastSequence: 6 })
+    return { session, socket }
+  }
+
+  it("keeps the running turn's question of the rows' log out of the end", async () => {
+    const { session, socket } = await openOn(0)
+    socket.receive(
+      "stepStart",
+      { text: "q", lifecycle: { turnId: "t1", clientMessageId: "cm-q" } },
+      1,
+    )
+
+    expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3"])
+    session.close()
+  })
+
+  it("shows a question the box logged in another log than the rows'", async () => {
+    const { session, socket } = await openOn(1)
+    socket.receive(
+      "stepStart",
+      { text: "n", lifecycle: { turnId: "t2", clientMessageId: "cm-n" } },
+      1,
+    )
+
+    expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3", "live:user:cm-n"])
     session.close()
   })
 })

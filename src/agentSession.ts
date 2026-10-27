@@ -879,7 +879,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
   private historyGeneration = 0
   // Whether the box the channel follows counts in the log of the history's rows. A box whose hello
-  // reports a log shorter than the history's is another one, whose sequences start over.
+  // names another log, or reports a log shorter than the history's, has sequences that start over.
   private rowsInChannelLog = true
   private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
     null
@@ -1793,11 +1793,17 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "hello": {
         const lastSequence = payload?.lastSequence
-        const historyEnd = historyCursorOf(this._history)?.sequence
+        const history = historyCursorOf(this._history)
+        const rowsLog = [...this._history]
+          .reverse()
+          .find((item) => item.boxLog !== undefined)?.boxLog
         if (
-          typeof lastSequence === "number" &&
-          historyEnd !== undefined &&
-          lastSequence < historyEnd
+          (typeof payload?.boxLog === "number" &&
+            rowsLog !== undefined &&
+            payload.boxLog !== rowsLog) ||
+          (typeof lastSequence === "number" &&
+            history !== undefined &&
+            lastSequence < history.sequence)
         ) {
           this.rowsInChannelLog = false
         }

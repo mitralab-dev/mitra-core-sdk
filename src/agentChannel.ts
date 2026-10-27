@@ -713,13 +713,20 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     // The cursor starts where the replay starts, so a drop in the middle of it asks again for
     // what did not arrive, and not from where the box log was when the Copilot answered.
     let cursor = historyFrom ?? channel.lastSequence
+    // The log the Copilot says the box writes, handed to the session on the box's hello so it
+    // knows whether the history's sequences count in it.
+    let boxLog = channel.boxLog
     const abort = new AbortController()
     const onAbort = () => abort.abort(signal?.reason)
     signal?.addEventListener("abort", onAbort, { once: true })
 
-    const onFrame = (event: AgentTaskEvent) => {
-      const hello = helloOf(event)
+    const onFrame = (frame: AgentTaskEvent) => {
+      const hello = helloOf(frame)
       if (hello) thread = hello.threadId
+      const event =
+        hello && boxLog !== undefined
+          ? { ...frame, payload: { ...asObject(frame.payload), boxLog } }
+          : frame
       if (typeof event.sequence === "number" && event.sequence > cursor) cursor = event.sequence
       // A subagent's own thread: its `stepStart` and `stepFinish` are not the chat's turn, and
       // must neither admit a message nor end the turn the redial would resume.
@@ -755,6 +762,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         onFrame,
         onLost,
         replayFrom: (next) => {
+          boxLog = next.boxLog
           const decide = (hello: BoxHello | undefined) => {
             const nextBox = boxAddress(next.wsUrl)
             // A box back with an empty log is a new box behind the same address. Only an empty
