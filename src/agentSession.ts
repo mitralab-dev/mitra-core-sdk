@@ -185,8 +185,8 @@ export interface AgentPieceIdentity {
 }
 
 /**
- * Background work that ended, as T3 reports it: what it was (`source.kind`: `command`, `subagent`,
- * `monitor`, `background_task`...), how it ended (`outcome`: `completed`, `failed`, `cancelled`,
+ * Background work that ended, as T3 reports it: what it was (`source.kind` as T3 sends it:
+ * `background_command`, `background_task` with `work: "subagent"`, `monitor`...), how it ended (`outcome`: `completed`, `failed`, `cancelled`,
  * `updated` or `unknown`), the line T3 shows (`summary`) and, when T3 has it, `detail`. Values are
  * passed as they come, an unknown one included.
  */
