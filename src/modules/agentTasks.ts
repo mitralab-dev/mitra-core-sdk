@@ -112,6 +112,7 @@ export function createAgentTasksModule(
             size: options.size,
             sort: options.sort,
             kinds: options.kinds,
+            include: options.include,
             before: options.before,
           },
         }),

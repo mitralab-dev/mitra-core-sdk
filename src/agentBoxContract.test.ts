@@ -399,6 +399,60 @@ describe("Agent box queue and steer, as T3's composer", () => {
     await expect(first).rejects.toThrow("Agent task session is closed.")
   })
 
+  it("passes the turn's list of steps as T3's plan, each update replacing its history item in place", async () => {
+    const { session, first, socket } = await runningTurn()
+    const seen: unknown[] = []
+    session.on("plan", (plan) => seen.push(plan))
+    const list = {
+      itemId: "p-1",
+      planId: "plan-1",
+      status: "completed",
+      lifecycle: { turnId: "turn-1" },
+    }
+    const started = {
+      ...list,
+      explanation: "Two steps",
+      steps: [
+        { id: "step-1", text: "Read the schema", status: "running" },
+        { id: "step-2", text: "Write the migration", status: "pending" },
+      ],
+    }
+    const advanced = {
+      ...list,
+      steps: [
+        { id: "step-1", text: "Read the schema", status: "completed", durationMs: 1200 },
+        { id: "step-2", text: "Write the migration", status: "running" },
+      ],
+    }
+    frame(socket, "plan", started, 2)
+    frame(
+      socket,
+      "textDelta",
+      { text: "Reading", itemId: "a-1", lifecycle: { turnId: "turn-1" } },
+      3,
+    )
+    frame(socket, "plan", advanced, 4)
+    await vi.waitFor(() => expect(seen).toHaveLength(2))
+    expect(seen[1]).toEqual({ ...advanced, sequence: 4, turnId: "turn-1" })
+    const plans = session.history.filter((item) => item.kind === "plan")
+    expect(plans).toEqual([
+      expect.objectContaining({
+        kind: "plan",
+        payload: advanced,
+        planId: "plan-1",
+        steps: advanced.steps,
+        status: "completed",
+        itemId: "p-1",
+        sequence: 2,
+        lastSequence: 4,
+      }),
+    ])
+    expect(plans[0]).not.toHaveProperty("explanation")
+    expect(session.history.map((item) => item.kind).slice(-2)).toEqual(["plan", "agent"])
+    session.close()
+    await expect(first).rejects.toThrow("Agent task session is closed.")
+  })
+
   it("gives the notification item the event's fields on top, the same live and from the Copilot's row", async () => {
     const { session, first, socket } = await runningTurn()
     const seen: Record<string, unknown>[] = []
