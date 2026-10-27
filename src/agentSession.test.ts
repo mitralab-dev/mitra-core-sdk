@@ -1344,6 +1344,65 @@ describe("Agent older history", () => {
     await expect(fresh.session.loadOlder()).resolves.toEqual([])
     expect(fresh.tasks.listMessages).not.toHaveBeenCalled()
   })
+
+  // mitra-core-sdk#140: a long turn with 121 rows after its question, reopened with a page of
+  // 100. The box sends the running turn's `stepStart` again on the new connection.
+  describe("a turn whose question is older than the loaded page", () => {
+    const boxRow = (id: string, sequence: number, extra: Partial<AgentMessage> = {}) => ({
+      ...message(id, "AGENT", id, "REASONING"),
+      sequence,
+      boxLog: 0,
+      ...extra,
+    })
+    const question = boxRow("q", 45, { sender: "USER", type: "TEXT", clientMessageId: "cm-q" })
+    const turnRows = [boxRow("r1", 46), boxRow("r2", 47), boxRow("r3", 48)]
+    const runningStart = {
+      ...event("stepStart", {
+        text: "q",
+        lifecycle: { turnId: "turn-q", clientMessageId: "cm-q" },
+      }),
+      sequence: 45,
+    }
+
+    function openLongTurn(): { session: AgentTaskSession; source: FakeEventSource } {
+      const tasks = createTasks()
+      tasks.listMessages.mockImplementation(async (_taskId, query) =>
+        query?.before ? olderPage([question]) : olderPage([...turnRows].reverse(), 1),
+      )
+      const source = new FakeEventSource()
+      const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
+        taskId: "task-1",
+        transport: "http",
+      })
+      return { session, source }
+    }
+
+    it("keeps the question out of the end and in its place once the older rows load", async () => {
+      const { session, source } = openLongTurn()
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({ ...event("hello", { threadId: "thread-1", lastSequence: 48 }) })
+      source.emit(runningStart)
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3"])
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["q", "r1", "r2", "r3"])
+    })
+
+    it("still shows the question of a box whose log started over", async () => {
+      const { session, source } = openLongTurn()
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({ ...event("hello", { threadId: "thread-2", lastSequence: 3 }) })
+      source.emit({
+        ...event("stepStart", {
+          text: "new",
+          lifecycle: { turnId: "t2", clientMessageId: "cm-n" },
+        }),
+        sequence: 2,
+      })
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3", "live:user:cm-n"])
+    })
+  })
 })
 
 describe("Agent turn usage", () => {

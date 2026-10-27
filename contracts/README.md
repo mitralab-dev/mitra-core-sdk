@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.6` is the `0.3.5` parity surface with a fix in the agent session: the question of a turn
+  that runs while the history loads no longer comes back at the end of a page that starts after it.
+  Same parity cases; the version exists so a consumer pinning the package can pin a corpus with the
+  same number.
+
 - `0.3.5` is the `0.3.4` parity surface with a fix in the agent session: a tab that sends to the
   queue of a chat whose turn runs ends that turn, and `FunctionVersion.code` accepts `null` when the
   Functions API redacts source. Same parity cases; the version exists so a
