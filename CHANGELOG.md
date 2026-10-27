@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.3
+
+- Tool events and `tool` history items carry `title` when the box sends it: on a subagent's call,
+  its name as T3 shows it (the subagent's description), which the history row already had and the
+  item left out. New optional field `AgentToolEvent.title`.
+- README: a `send` without `mode` while a turn runs goes into that turn (steer); the queue is only
+  for `mode: "queue"`. Also documented: `backgroundTasks`, the running turn the box sends again
+  after the replay (mitra-sandbox#781), and `reason: "interrupted"` on the history row a Stop
+  closed (mitra-copilot#551). Neither needs a change in the SDK.
+
 ## 0.3.2
 
 - `providerUsage` carries `provider` when the box sends it: the provider the reading is of, with

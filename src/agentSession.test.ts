@@ -1553,7 +1553,12 @@ describe("Agent history item identity", () => {
           parentToolId: "tool-9",
         },
         {
-          ...message("sp", "AGENT", '{"name":"Task","toolId":"tool-9"}', "TOOL_USE"),
+          ...message(
+            "sp",
+            "AGENT",
+            '{"name":"subagent","title":"Find the config","toolId":"tool-9"}',
+            "TOOL_USE",
+          ),
           sequence: 4,
           boxLog: 2,
           itemId: "tool-9",
@@ -1615,7 +1620,8 @@ describe("Agent history item identity", () => {
       {
         id: "sp",
         kind: "tool",
-        tool: { tool: "Task", toolId: "tool-9", phase: "call" },
+        // The subagent's name, which the tool row keeps as its title.
+        tool: { tool: "subagent", title: "Find the config", toolId: "tool-9", phase: "call" },
         at: "2026-01-01T00:00:02Z",
         sequence: 4,
         boxLog: 2,

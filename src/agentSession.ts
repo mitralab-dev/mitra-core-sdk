@@ -186,6 +186,8 @@ export interface AgentPieceIdentity {
 
 export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
+  /** The title the box gave the tool: a subagent's own name (its description), as T3 shows it. */
+  title?: string
   toolId?: string
   /** On a tool a subagent called: the `toolId` of the tool call that spawned the subagent. */
   parentToolId?: string
@@ -554,6 +556,7 @@ function toolEventOf(
 ): AgentToolEvent {
   return {
     tool: typeof payload?.name === "string" ? payload.name : "",
+    ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
     phase,
     timestamp: event.timestamp,
     ...pieceIdentityOf(event, payload),
@@ -659,6 +662,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           kind: "tool",
           tool: {
             tool: typeof payload.name === "string" ? payload.name : "",
+            ...(typeof payload.title === "string" ? { title: payload.title } : {}),
             ...(typeof payload.toolId === "string" ? { toolId: payload.toolId } : {}),
             ...parentToolIdOf(payload.parentToolId ?? message.parentToolId),
             ...(payload.input !== undefined ? { input: payload.input } : {}),

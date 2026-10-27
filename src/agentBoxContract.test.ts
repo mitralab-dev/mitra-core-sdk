@@ -607,7 +607,12 @@ describe("Agent box piece identity", () => {
     await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
     const owner = { lifecycle: { turnId: "turn-1" } }
     frame(socket, "textDelta", { text: "Lions", itemId: "item-a", ...owner }, 2)
-    frame(socket, "toolCall", { name: "Task", toolId: "tool-9", itemId: "tool-9", ...owner }, 3)
+    frame(
+      socket,
+      "toolCall",
+      { name: "subagent", title: "Count the lions", toolId: "tool-9", itemId: "tool-9", ...owner },
+      3,
+    )
     frame(
       socket,
       "textDelta",
@@ -632,7 +637,8 @@ describe("Agent box piece identity", () => {
       [
         "tool",
         {
-          tool: "Task",
+          tool: "subagent",
+          title: "Count the lions",
           phase: "call",
           timestamp: 1,
           sequence: 3,
