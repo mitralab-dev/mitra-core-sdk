@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.6
+
+- A session that loads the history while a turn runs, with a page that starts after that turn's
+  question, no longer adds the question again at the end of `history` when the box sends the
+  running turn's `stepStart` on connecting. The question is one of the older rows, and `loadOlder`
+  brings it in its place, once. Before, it showed at the end in the middle of the turn and, after
+  `loadOlder`, twice (mitra-core-sdk#140).
+
 ## 0.3.5
 
 - A tab that sends a message to the queue of a chat whose turn runs, before its socket said a turn

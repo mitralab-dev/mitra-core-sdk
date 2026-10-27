@@ -878,6 +878,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private _hasOlder = false
   // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
   private historyGeneration = 0
+  // Whether the box the channel follows counts in the log of the history's rows. A box whose hello
+  // names another log, or reports a log shorter than the history's, has sequences that start over.
+  private rowsInChannelLog = true
   private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
     null
 
@@ -1061,6 +1064,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private replaceHistory(page: Page<AgentMessage>): void {
     this.historyGeneration += 1
+    this.rowsInChannelLog = true
     this._hasOlder = hasOlderRows(page)
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
   }
@@ -1787,6 +1791,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
             : {}),
         })
         break
+      case "hello": {
+        const lastSequence = payload?.lastSequence
+        const history = historyCursorOf(this._history)
+        const rowsLog = [...this._history]
+          .reverse()
+          .find((item) => item.boxLog !== undefined)?.boxLog
+        if (
+          (typeof payload?.boxLog === "number" &&
+            rowsLog !== undefined &&
+            payload.boxLog !== rowsLog) ||
+          (typeof lastSequence === "number" &&
+            history !== undefined &&
+            lastSequence < history.sequence)
+        ) {
+          this.rowsInChannelLog = false
+        }
+        break
+      }
       case "backgroundTasks":
         this._backgroundTasks = backgroundTasksOf(payload?.tasks)
         this.emit("backgroundTasks", { tasks: this._backgroundTasks })
@@ -2125,6 +2147,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
     if (typeof text !== "string" || !text) return
     const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if ((id === undefined || !this.sentTexts.has(id)) && this.beforeLoadedRows(sequence)) return
     this.livePiece(
       (item) =>
         item.kind === "user" &&
@@ -2140,6 +2163,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       }),
       (item) => item,
     )
+  }
+
+  // Every connection to the box brings the running turn's `stepStart` again, and a history loaded
+  // while that turn ran can start after its question (mitra-core-sdk#140: 121 rows after it, a
+  // page of 100). Before the oldest row the history holds, with older rows still on the server,
+  // the question is one of those rows, and `loadOlder` brings it in its place.
+  private beforeLoadedRows(sequence: number | undefined): boolean {
+    if (sequence === undefined || !this._hasOlder || !this.rowsInChannelLog) return false
+    const rows = this._history.filter(
+      (item) => !item.id.startsWith("live:") && typeof item.sequence === "number",
+    )
+    const oldest = rows[0]
+    const newest = rows[rows.length - 1]
+    if (oldest?.sequence === undefined || oldest.boxLog !== newest?.boxLog) return false
+    return sequence < oldest.sequence
   }
 
   private liveText(
