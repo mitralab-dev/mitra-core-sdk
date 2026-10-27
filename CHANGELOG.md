@@ -9,7 +9,9 @@ All notable changes to this project are documented in this file.
   moves its own message to wait for the turn the box opens for it, as a queued steer does. The
   frames and the terminal of the running turn are no longer taken for a finished turn's and
   dropped, the `sendAndWait` of the queued message resolves only with its own turn, and taking it
-  out of the queue rejects only it. Before, that tab never emitted the `turnEnd` of the running
+  out of the queue rejects only it. A message whose turn started on the box while it was still on
+  its way (the replay of a chat another tab runs) goes behind that turn the same way, with no
+  second `turnStart`. Before, that tab never emitted the `turnEnd` of the running
   turn, and a Stop from it failed with "Agent turn cancellation was not acknowledged before the
   safety timeout" (mitra-core-sdk#136).
 

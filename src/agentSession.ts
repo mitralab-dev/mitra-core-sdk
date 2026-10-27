@@ -1225,6 +1225,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     await this.captureTurnBaseline()
     if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
+    // A box turn started while the channel opened (the replay of a chat another tab runs): the
+    // message goes behind it, as one typed during it does, and that turn was announced already.
+    if (this._status === "streaming" || this._status === "cancelled") {
+      return this.sendBehindRunningTurn(input, clientMessageId, handedOver, waiter)
+    }
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1239,6 +1244,44 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!direct) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
+    this.acceptOnce(clientMessageId)
+    return true
+  }
+
+  private async sendBehindRunningTurn(
+    input: AgentTaskInput,
+    clientMessageId: string,
+    handedOver: () => void,
+    waiter?: TurnWaiter,
+  ): Promise<boolean> {
+    const steered: SteeredMessage = {
+      clientMessageId,
+      ...(waiter ? { waiter } : {}),
+      taken: false,
+    }
+    this.steers.push(steered)
+    // Failing this message leaves the running turn, which is not its own, alone.
+    const fail = (error: unknown) => {
+      this.forgetSteer(steered)
+      waiter?.reject(error)
+      return false
+    }
+    let taken: boolean
+    try {
+      const { admitted } = await this.handOver(input, clientMessageId, true)
+      handedOver()
+      taken = await admitted
+    } catch (error) {
+      handedOver()
+      this.emitError("Failed to send Agent prompt", error)
+      return fail(error)
+    }
+    if (!taken) {
+      return fail(
+        steered.refusal ?? new AgentTaskTurnError("The Agent box did not take the message."),
+      )
+    }
+    if (!steered.queued) this.steerTaken(steered)
     this.acceptOnce(clientMessageId)
     return true
   }
