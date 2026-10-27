@@ -35,6 +35,9 @@ const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
   "toolResult",
   "stepFinish",
 ])
+// The box's state as it is now, which it also sends first on a redial at the log's current
+// sequence: not a piece of the turn, so it neither moves nor meets the turn's replay mark.
+const STATE_FRAME_TYPES: ReadonlySet<string> = new Set(["providerUsage", "backgroundTasks"])
 const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
   "interrupt",
@@ -1967,6 +1970,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     lifecycle: Record<string, unknown> | null,
   ): boolean {
     if (this._status !== "streaming" && this._status !== "cancelled") return false
+    if (STATE_FRAME_TYPES.has(event.type)) return false
     const turnId = lifecycle?.turnId
     if (typeof turnId !== "string") return false
     if (typeof event.sequence === "number") {
