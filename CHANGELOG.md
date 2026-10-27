@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.17-beta.1
 
 - `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
   successful administrative response. Missing or structurally invalid code remains an invalid
