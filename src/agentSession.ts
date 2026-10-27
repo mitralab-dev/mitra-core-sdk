@@ -274,14 +274,15 @@ export type AgentTimelineItem =
       id: string
       /**
        * Background work that ended (a command, a subagent, a monitor), the item T3 puts in the turn
-       * the provider opens for it (`NOTIFICATION` row): the box's `notification` frame as it came,
-       * with `source`, `outcome`, `summary` and `detail`.
+       * the provider opens for it (`NOTIFICATION` row): `source`, `outcome`, `summary` and `detail`
+       * as the live `notification` event carries them, and the box's frame as it came in `payload`.
        */
       kind: "notification"
       payload: Record<string, unknown>
       at: string
       parentToolId?: string
-    } & AgentTimelineItemIdentity)
+    } & Pick<AgentNotification, "source" | "outcome" | "summary" | "detail"> &
+      AgentTimelineItemIdentity)
   | ({
       id: string
       kind: "tool"
@@ -651,6 +652,15 @@ const REQUEST_ROW_KINDS: Record<
   NOTIFICATION: "notification",
 }
 
+// The fields the live `notification` event carries on top, so the history item reads the same
+// live and after a reload. They pass as they came, as on the event.
+function notificationFieldsOf(
+  payload: Record<string, unknown>,
+): Pick<AgentNotification, "source" | "outcome" | "summary" | "detail"> {
+  const { source, outcome, summary, detail } = payload as AgentNotification
+  return { source, outcome, summary, ...(detail !== undefined ? { detail } : {}) }
+}
+
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text)
@@ -676,14 +686,16 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   if (requestKind) {
     const payload = asObject(parseJson(message.content))
     if (payload) {
-      return {
+      const item = {
         id: message.id,
-        kind: requestKind,
         payload,
         at: message.createdAt,
         ...timelineIdentityOf(message),
         ...parentToolIdOf(message.parentToolId),
       }
+      return requestKind === "notification"
+        ? { ...item, kind: requestKind, ...notificationFieldsOf(payload) }
+        : { ...item, kind: requestKind }
     }
   }
   if (message.type === "TOOL_USE") {
@@ -2144,15 +2156,19 @@ class CoreAgentTaskSession implements AgentTaskSession {
       (item) =>
         item.kind === kind &&
         (itemId !== undefined ? item.itemId === itemId : item.sequence === sequence),
-      () => ({
-        id: `live:${kind}:${itemId ?? sequence}`,
-        kind,
-        payload,
-        at: liveAtOf(event),
-        ...(sequence === undefined ? {} : { sequence }),
-        ...(itemId === undefined ? {} : { itemId }),
-        ...parentToolIdOf(parentToolId),
-      }),
+      () => {
+        const item = {
+          id: `live:${kind}:${itemId ?? sequence}`,
+          payload,
+          at: liveAtOf(event),
+          ...(sequence === undefined ? {} : { sequence }),
+          ...(itemId === undefined ? {} : { itemId }),
+          ...parentToolIdOf(parentToolId),
+        }
+        return kind === "notification"
+          ? { ...item, kind, ...notificationFieldsOf(payload) }
+          : { ...item, kind }
+      },
       (item) => item,
     )
   }

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.4
+
+- The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as
+  the live `notification` event does, so a screen reads `item.summary` live and after a reload
+  (#125). The item is the same built from the box's frame and from the Copilot's `NOTIFICATION`
+  row. `payload` stays on the item, as in 0.3.3.
+
 ## 0.3.3
 
 Needs the box and the Copilot that send and record it (mitra-sandbox#782, mitra-copilot#552), and

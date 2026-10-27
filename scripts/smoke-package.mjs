@@ -102,9 +102,11 @@ const onNotification = (session: AgentTaskSession): void => {
   session.on("notification", (notification) => { const outcome: string = notification.outcome; void outcome })
 }
 const notificationOf = (item: AgentTimelineItem): Record<string, unknown> | undefined => (item.kind === "notification" ? item.payload : undefined)
+const notificationSummaryOf = (item: AgentTimelineItem): string | undefined => (item.kind === "notification" ? item.summary : undefined)
 void endedWork
 void onNotification
 void notificationOf
+void notificationSummaryOf
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -187,9 +189,11 @@ const onNotification = (session: core.AgentTaskSession): void => {
   session.on("notification", (notification) => { const outcome: string = notification.outcome; void outcome })
 }
 const notificationOf = (item: core.AgentTimelineItem): Record<string, unknown> | undefined => (item.kind === "notification" ? item.payload : undefined)
+const notificationSummaryOf = (item: core.AgentTimelineItem): string | undefined => (item.kind === "notification" ? item.summary : undefined)
 void endedWork
 void onNotification
 void notificationOf
+void notificationSummaryOf
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "current": "0.3.3",
+  "current": "0.3.4",
   "versions": [
     {
       "version": "0.1.0",
@@ -150,6 +150,11 @@
       "version": "0.3.3",
       "path": "v0.3.3/sdk-parity.json",
       "sha256": "784919ec6dae6893c6c2807b0893963a9db6c8380081841159f263e188452597"
+    },
+    {
+      "version": "0.3.4",
+      "path": "v0.3.4/sdk-parity.json",
+      "sha256": "fb240cef81908f5ba26a065359374d17ca18c21f790c98d1a942e8060fbde3ea"
     }
   ]
 }
