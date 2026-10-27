@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.2.16-beta.0` is the `0.2.15` parity surface republished with the app sender methods of `messenger`
+  (`listEmailSenders`, `registerEmailSender`, `resendEmailSenderVerification`, `confirmEmailSender`,
+  `getEmailSettings` and `updateEmailSettings`), which the parity cases do not cover. Same parity
+  cases; the version exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.15` is the `0.2.14` parity surface republished with the app email template methods of
   `messenger` (`listEmailTemplates`, `getEmailTemplate`, `getEmailTemplateType`, `upsertEmailTemplate`,
   `previewEmailTemplate` and `deleteEmailTemplate`), which the parity cases do not cover. Same parity

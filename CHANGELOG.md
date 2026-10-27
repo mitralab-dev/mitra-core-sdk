@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file.
 - `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
   successful administrative response. Missing or structurally invalid code remains an invalid
   response, and `null` is not treated as empty source.
+
+## 0.2.16-beta.0
+
 - `messenger` manages the current app's sender on the routes Messenger opens to an app token whose
   person is OWNER or ADMIN of the app's workspace: `listEmailSenders()`
   (`GET /api/v1/email/identities/workspace`), `registerEmailSender({ email, displayName })`,
