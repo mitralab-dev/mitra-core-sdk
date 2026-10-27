@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.3
+
+Needs the box and the Copilot that send and record it (mitra-sandbox#782, mitra-copilot#552), and
+goes out before them: 0.3.0 to 0.3.2 read a `NOTIFICATION` row as the agent's text.
+
+- Background work that ended (a command, a subagent, a monitor left running past the turn) reaches
+  the session as T3 reports it: a `notification` event (`AgentNotification`: `source`, `outcome`,
+  `summary`, `detail`, with `itemId`, `sequence` and `turnId`) and a `notification` item in
+  `history`, live from the box's `notification` frame and reloaded from the Copilot's
+  `NOTIFICATION` row. Values pass as they come; `source.kind` is what T3 sends on the wire
+  (`background_command`, or `background_task` with `work: "subagent"`). `AgentTimelineItem` gains
+  the `kind: "notification"` member, with `payload` and no `text`: TypeScript code that reads
+  `text` in a catch-all branch has to handle it.
+- Tool events and `tool` history items carry `title` when the box sends it: on a subagent's call,
+  its name as T3 shows it, which the history row already had and the item left out. New optional
+  field `AgentToolEvent.title`.
+- README: a `send` without `mode` while a turn runs goes into that turn (steer); the queue is only
+  for `mode: "queue"`. Also documented: `backgroundTasks`, the running turn the box sends again
+  after the replay (mitra-sandbox#782), and `reason: "interrupted"` on the history row a Stop
+  closed (mitra-copilot#552).
+
 ## 0.3.2
 
 - `providerUsage` carries `provider` when the box sends it: the provider the reading is of, with

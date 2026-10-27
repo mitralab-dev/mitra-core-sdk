@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -97,6 +97,14 @@ const usageOfFutureProvider: AgentProviderUsage = { ...usageOfProvider, provider
 const usageOfOlderBox: AgentProviderUsage = { harness: "claude", observedAt: "2026-10-26T12:00:00.000Z", status: null, windows: [] }
 void usageOfFutureProvider
 void usageOfOlderBox
+const endedWork: AgentNotification = { source: { kind: "background_command" }, outcome: "failed", summary: "Command failed" }
+const onNotification = (session: AgentTaskSession): void => {
+  session.on("notification", (notification) => { const outcome: string = notification.outcome; void outcome })
+}
+const notificationOf = (item: AgentTimelineItem): Record<string, unknown> | undefined => (item.kind === "notification" ? item.payload : undefined)
+void endedWork
+void onNotification
+void notificationOf
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -174,6 +182,14 @@ const usageOfFutureProvider: core.AgentProviderUsage = { ...usageOfProvider, pro
 const usageOfOlderBox: core.AgentProviderUsage = { harness: "claude", observedAt: "2026-10-26T12:00:00.000Z", status: null, windows: [] }
 void usageOfFutureProvider
 void usageOfOlderBox
+const endedWork: core.AgentNotification = { source: { kind: "background_command" }, outcome: "failed", summary: "Command failed" }
+const onNotification = (session: core.AgentTaskSession): void => {
+  session.on("notification", (notification) => { const outcome: string = notification.outcome; void outcome })
+}
+const notificationOf = (item: core.AgentTimelineItem): Record<string, unknown> | undefined => (item.kind === "notification" ? item.payload : undefined)
+void endedWork
+void onNotification
+void notificationOf
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

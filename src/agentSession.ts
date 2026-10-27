@@ -184,8 +184,25 @@ export interface AgentPieceIdentity {
   turnId?: string
 }
 
+/**
+ * Background work that ended, as T3 reports it: what it was (`source.kind` as T3 sends it:
+ * `background_command`, `background_task` with `work: "subagent"`, `monitor`...), how it ended (`outcome`: `completed`, `failed`, `cancelled`,
+ * `updated` or `unknown`), the line T3 shows (`summary`) and, when T3 has it, `detail`. Values are
+ * passed as they come, an unknown one included.
+ */
+export interface AgentNotification {
+  source: { kind: string } & Record<string, unknown>
+  outcome: string
+  summary: string
+  detail?: unknown
+  itemId?: string
+  [field: string]: unknown
+}
+
 export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
+  /** The title the box gave the tool: a subagent's own name (its description), as T3 shows it. */
+  title?: string
   toolId?: string
   /** On a tool a subagent called: the `toolId` of the tool call that spawned the subagent. */
   parentToolId?: string
@@ -255,6 +272,18 @@ export type AgentTimelineItem =
     } & AgentTimelineItemIdentity)
   | ({
       id: string
+      /**
+       * Background work that ended (a command, a subagent, a monitor), the item T3 puts in the turn
+       * the provider opens for it (`NOTIFICATION` row): the box's `notification` frame as it came,
+       * with `source`, `outcome`, `summary` and `detail`.
+       */
+      kind: "notification"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & AgentTimelineItemIdentity)
+  | ({
+      id: string
       kind: "tool"
       tool: AgentToolEvent
       at: string
@@ -309,6 +338,8 @@ export interface AgentTaskSessionEventMap {
   queueChange: { queue: readonly AgentQueueItem[] }
   /** The provider's background work changed: the roster as T3 shows it waiting. */
   backgroundTasks: { tasks: readonly AgentBackgroundTask[] }
+  /** Background work ended: what it was, how it ended and T3's line for it. */
+  notification: AgentNotification & AgentPieceIdentity
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
@@ -554,6 +585,7 @@ function toolEventOf(
 ): AgentToolEvent {
   return {
     tool: typeof payload?.name === "string" ? payload.name : "",
+    ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
     phase,
     timestamp: event.timestamp,
     ...pieceIdentityOf(event, payload),
@@ -610,9 +642,13 @@ function isChatRow(message: AgentMessage): boolean {
   )
 }
 
-const REQUEST_ROW_KINDS: Record<string, "approval" | "userInputRequest" | undefined> = {
+const REQUEST_ROW_KINDS: Record<
+  string,
+  "approval" | "userInputRequest" | "notification" | undefined
+> = {
   APPROVAL: "approval",
   USER_INPUT_REQUEST: "userInputRequest",
+  NOTIFICATION: "notification",
 }
 
 function parseJson(text: string): unknown {
@@ -659,6 +695,7 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
           kind: "tool",
           tool: {
             tool: typeof payload.name === "string" ? payload.name : "",
+            ...(typeof payload.title === "string" ? { title: payload.title } : {}),
             ...(typeof payload.toolId === "string" ? { toolId: payload.toolId } : {}),
             ...parentToolIdOf(payload.parentToolId ?? message.parentToolId),
             ...(payload.input !== undefined ? { input: payload.input } : {}),
@@ -1765,6 +1802,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "user_input_request":
         this.liveRequest(event, payload)
         break
+      case "notification":
+        this.liveRequest(event, payload)
+        if (payload) {
+          this.emit("notification", {
+            ...(payload as AgentNotification),
+            ...pieceIdentityOf(event, payload),
+          })
+        }
+        break
       default:
         break
     }
@@ -2085,7 +2131,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     parentToolId?: string,
   ): void {
     if (!payload) return
-    const kind = event.type === "approval" ? "approval" : "userInputRequest"
+    const kind =
+      event.type === "approval"
+        ? "approval"
+        : event.type === "notification"
+          ? "notification"
+          : "userInputRequest"
     const itemId = typeof payload.itemId === "string" ? payload.itemId : undefined
     const sequence = typeof event.sequence === "number" ? event.sequence : undefined
     if (itemId === undefined && sequence === undefined) return
