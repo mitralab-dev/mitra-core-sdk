@@ -37,7 +37,11 @@ const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
 ])
 // The box's state as it is now, which it also sends first on a redial at the log's current
 // sequence: not a piece of the turn, so it neither moves nor meets the turn's replay mark.
-const STATE_FRAME_TYPES: ReadonlySet<string> = new Set(["providerUsage", "backgroundTasks"])
+const STATE_FRAME_TYPES: ReadonlySet<string> = new Set([
+  "providerUsage",
+  "backgroundTasks",
+  "contextUsage",
+])
 const COPILOT_INPUT_TYPES: ReadonlySet<string> = new Set([
   "message",
   "interrupt",

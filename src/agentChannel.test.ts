@@ -397,6 +397,38 @@ describe("Agent direct channel", () => {
     expect(session.status).toBe("idle")
   })
 
+  it("keeps the text of a turn that ended before the redial when the box sends its context first", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const text: string[] = []
+    session.on("delta", (event) => text.push(event.delta))
+    const idOf = (frame: unknown) => (frame as { clientMessageId?: string }).clientMessageId
+
+    const result = session.sendAndWait("Survive the drop")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const id = idOf(FakeWebSocket.last().sent[0])
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // The turn ended on the box while the socket was down: its context reading, at a sequence
+    // past the text, comes before the replay.
+    const redialed = FakeWebSocket.last()
+    const turn = { turnId: "turn-1", clientMessageId: id }
+    const context = { usedTokens: 1200, lifecycle: { turnId: "turn-1" } }
+    redialed.receive("contextUsage", context, 6)
+    redialed.receive("messageQueued", { text: "Survive the drop", lifecycle: turn }, 1)
+    redialed.receive("stepStart", { lifecycle: turn }, 4)
+    redialed.receive("textDelta", { text: "Alive", lifecycle: { turnId: "turn-1" } }, 5)
+    redialed.receive("contextUsage", context, 6)
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 7)
+
+    await vi.waitFor(() => expect(text.join("")).toBe("Alive"))
+    await expect(result).resolves.toMatchObject({ content: "Alive", reason: "stop" })
+    expect(session.status).toBe("idle")
+  })
+
   it("redials for a steer the box had not answered when the turn ended and the socket dropped", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer(BOX_URL, 3))

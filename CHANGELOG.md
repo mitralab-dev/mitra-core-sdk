@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.5
+
+- The box's `contextUsage` reading, which the box sends before the replay on a redial at the
+  log's current sequence (mitra-sandbox#766), no longer hides the replayed turn (#128). 0.3.4 left
+  it out of the state frames, so a redial after the turn ended took its sequence as the turn's
+  mark, dropped the replayed text and closed the turn with an empty `content`.
+
 ## 0.3.4
 
 - The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as
