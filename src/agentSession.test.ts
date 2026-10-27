@@ -1508,6 +1508,42 @@ describe("Agent turn usage", () => {
 })
 
 describe("Agent history item identity", () => {
+  it("reads a NOTIFICATION row as the notification item T3 shows, with its payload as it came", async () => {
+    const payload = {
+      itemId: "n-1",
+      source: { kind: "subagent" },
+      outcome: "completed",
+      summary: 'Subagent "Analisar o banco" finished',
+    }
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("n", "AGENT", JSON.stringify(payload), "NOTIFICATION"),
+          sequence: 5,
+          boxLog: 0,
+          itemId: "n-1",
+        },
+      ]),
+    )
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages }),
+      eventSource: new FakeEventSource(),
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.history).toEqual([
+      {
+        id: "n",
+        kind: "notification",
+        payload,
+        at: "2026-01-01T00:00:01Z",
+        sequence: 5,
+        boxLog: 0,
+        itemId: "n-1",
+      },
+    ])
+  })
+
   it("asks for every row and maps each one to its own item, as the Copilot recorded it", async () => {
     const listMessages = vi.fn(async () =>
       page([

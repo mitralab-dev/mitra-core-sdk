@@ -377,6 +377,27 @@ describe("Agent box queue and steer, as T3's composer", () => {
     session.close()
     await expect(first).rejects.toThrow("Agent task session is closed.")
   })
+
+  it("passes background work that ended as T3's notification, event and history item", async () => {
+    const { session, first, socket } = await runningTurn()
+    const seen: unknown[] = []
+    session.on("notification", (notification) => seen.push(notification))
+    const payload = {
+      itemId: "n-1",
+      source: { kind: "command" },
+      outcome: "failed",
+      summary: 'Command "npm run build" failed (exit 1)',
+      lifecycle: { turnId: "turn-1" },
+    }
+    frame(socket, "notification", payload, 2)
+    await vi.waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0]).toEqual({ ...payload, sequence: 2, turnId: "turn-1" })
+    expect(session.history.filter((item) => item.kind === "notification")).toEqual([
+      expect.objectContaining({ kind: "notification", payload, itemId: "n-1", sequence: 2 }),
+    ])
+    session.close()
+    await expect(first).rejects.toThrow("Agent task session is closed.")
+  })
 })
 
 describe("Agent box late steer", () => {
