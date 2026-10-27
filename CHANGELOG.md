@@ -6,13 +6,12 @@ All notable changes to this project are documented in this file.
 
 - A tab that sends a message to the queue of a chat whose turn runs, before its socket said a turn
   was running, now ends that turn: the running turn's `stepStart`, which names another message,
-  stops the session from waiting for its own message's turn, so the frames and the terminal of the
-  running turn are not taken for a finished turn's and dropped. Before, that tab never emitted the
-  `turnEnd` of the running turn, and a Stop from it failed with "Agent turn cancellation was not
-  acknowledged before the safety timeout" (mitra-core-sdk#136).
-- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
-  successful administrative response. Missing or structurally invalid code remains an invalid
-  response, and `null` is not treated as empty source.
+  moves its own message to wait for the turn the box opens for it, as a queued steer does. The
+  frames and the terminal of the running turn are no longer taken for a finished turn's and
+  dropped, the `sendAndWait` of the queued message resolves only with its own turn, and taking it
+  out of the queue rejects only it. Before, that tab never emitted the `turnEnd` of the running
+  turn, and a Stop from it failed with "Agent turn cancellation was not acknowledged before the
+  safety timeout" (mitra-core-sdk#136).
 
 ## 0.3.4
 

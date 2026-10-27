@@ -1354,6 +1354,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.strayedSteers.push(steered)
   }
 
+  // Another message's turn started while ours waited for its own: one runs ahead of ours (a tab
+  // that sent to the queue before its socket said a turn was running). Its frames are the running
+  // turn's, not a finished one's, or its terminal is dropped and the turn never ends here. Ours
+  // waits for the turn the box opens for it, as a queued steer does, so that turn answers it.
+  private openingQueuedBehind(): void {
+    const id = this.openingMessageId
+    this.openingAwaitsStart = false
+    this.openingMessageId = undefined
+    if (id === undefined) return
+    this.strayedSteers.push({
+      clientMessageId: id,
+      ...(this.activeWaiter ? { waiter: this.activeWaiter } : {}),
+      taken: false,
+      queued: true,
+    })
+    this.activeWaiter = undefined
+  }
+
   private forgetSteer(steered: SteeredMessage): void {
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers = this.strayedSteers.filter((pending) => pending !== steered)
@@ -1648,11 +1666,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
         this.openingAwaitsStart = false
         this.forgetFinishedTurn(lifecycle)
-      } else if (event.type === "stepStart") {
-        // Another message's turn starting means one runs ahead of ours (a tab that sent to the
-        // queue before its socket said a turn was running): its frames are the running turn's,
-        // not a finished one's, or its terminal is dropped and the turn never ends here.
-        this.openingAwaitsStart = false
+      } else if (event.type === "stepStart" && this.openingAwaitsStart) {
+        this.openingQueuedBehind()
       }
     } else if (
       this.openingAwaitsStart &&
