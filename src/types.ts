@@ -647,6 +647,43 @@ export interface AppUpdateInput {
    * rejects `true` while the app inherits the platform login.
    */
   passwordLoginEnabled?: boolean
+  /**
+   * Where users type the password. Omission preserves the current value. Code Studio rejects
+   * `APP_FORM` unless password login is on, in this update or already saved, and turning password
+   * login off sets the mode back to `POPUP`.
+   */
+  passwordLoginMode?: PasswordLoginMode
+  /**
+   * Replaces the login theme whole: a field left out is cleared. `null`, or a theme without any
+   * field, clears it, and omission preserves it. Code Studio rejects a key it does not know, so a
+   * misspelled field cannot wipe the theme.
+   */
+  loginTheme?: Partial<AppLoginTheme> | null
+}
+
+/**
+ * Where an app user types the password. `POPUP` keeps it on the Mitra origin; `APP_FORM` lets the
+ * app draw its own form, so the password passes through app code.
+ */
+export type PasswordLoginMode = "POPUP" | "APP_FORM"
+
+/**
+ * Theme the Mitra password popup applies. A null or blank field falls back to the app name and the
+ * brand defaults. Code Studio checks the rules and rejects a value outside them.
+ */
+export interface AppLoginTheme {
+  /** An https URL with a host, at most 2048 characters. */
+  logoUrl: string | null
+  /** `#rgb` or `#rrggbb`. */
+  backgroundColor: string | null
+  /** `light`, `dark` or `system`. */
+  colorScheme: string | null
+  /** Plain text without `<`, `>` or control characters, at most 80 characters. */
+  title: string | null
+  /** Plain text without `<`, `>` or control characters, at most 160 characters. */
+  subtitle: string | null
+  /** `auto`, `pt-BR` or `en`. */
+  language: string | null
 }
 
 export interface AppDomain {
@@ -674,6 +711,13 @@ export interface AppSummary {
   emailLoginEnabled?: boolean
   /** Absent on a Code Studio that predates password login. */
   passwordLoginEnabled?: boolean
+  /**
+   * `POPUP` or `APP_FORM`, as a string so a mode Code Studio adds later does not break the read.
+   * Absent on a Code Studio that predates the password login mode.
+   */
+  passwordLoginMode?: string
+  /** Null when the app has no theme. Absent on a Code Studio that predates the login theme. */
+  loginTheme?: AppLoginTheme | null
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -699,6 +743,13 @@ export interface AppDefinition {
   emailLoginEnabled?: boolean
   /** Absent on a Code Studio that predates password login. */
   passwordLoginEnabled?: boolean
+  /**
+   * `POPUP` or `APP_FORM`, as a string so a mode Code Studio adds later does not break the read.
+   * Absent on a Code Studio that predates the password login mode.
+   */
+  passwordLoginMode?: string
+  /** Null when the app has no theme. Absent on a Code Studio that predates the login theme. */
+  loginTheme?: AppLoginTheme | null
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -1539,7 +1590,13 @@ export interface SendEmailInput {
  * sender settings or the brand, so a template never picks its sender.
  */
 export type EmailTemplateType =
-  "SIGN_IN" | "SSO_GUIDANCE" | "APP_USER_INVITED" | "APP_ACCESS_REQUIRED"
+  | "SIGN_IN"
+  | "SSO_GUIDANCE"
+  | "APP_USER_INVITED"
+  | "APP_ACCESS_REQUIRED"
+  | "PASSWORD_RESET"
+  | "PASSWORD_CHANGED"
+  | "ACCOUNT_LOCKED"
 
 export interface EmailTemplate {
   id: string

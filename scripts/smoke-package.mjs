@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type AppDefinition, type AppUpdateInput, type EmailTemplateType, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -107,6 +107,14 @@ void endedWork
 void onNotification
 void notificationOf
 void notificationSummaryOf
+const passwordLogin: AppUpdateInput = { passwordLoginEnabled: true, passwordLoginMode: "APP_FORM", loginTheme: { title: "Loja X", colorScheme: "dark" } }
+const clearedTheme: AppUpdateInput = { loginTheme: null }
+const keptThemeTitle = (app: AppDefinition): AppUpdateInput => ({ loginTheme: { ...app.loginTheme, title: "Loja X" } })
+const passwordEmail: EmailTemplateType = "PASSWORD_RESET"
+void passwordLogin
+void clearedTheme
+void keptThemeTitle
+void passwordEmail
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -194,6 +202,14 @@ void endedWork
 void onNotification
 void notificationOf
 void notificationSummaryOf
+const passwordLogin: core.AppUpdateInput = { passwordLoginEnabled: true, passwordLoginMode: "APP_FORM", loginTheme: { title: "Loja X", colorScheme: "dark" } }
+const clearedTheme: core.AppUpdateInput = { loginTheme: null }
+const keptThemeTitle = (app: core.AppDefinition): core.AppUpdateInput => ({ loginTheme: { ...app.loginTheme, title: "Loja X" } })
+const passwordEmail: core.EmailTemplateType = "PASSWORD_RESET"
+void passwordLogin
+void clearedTheme
+void keptThemeTitle
+void passwordEmail
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

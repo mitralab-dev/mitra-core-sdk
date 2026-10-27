@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.5-beta.0
+
+- `apps.update()` takes `passwordLoginMode` (`"POPUP" | "APP_FORM"`, the new `PasswordLoginMode`)
+  and `loginTheme` (`Partial<AppLoginTheme> | null`), sent on Code Studio's
+  `PATCH /api/v1/apps/{id}` only when supplied (#130). The theme replaces the stored one whole;
+  `loginTheme: null`, or a theme without any field, clears it, and omission keeps it. Code Studio's
+  refusals come from the transport unchanged: `400` `INVALID_LOGIN_THEME` with the `field` for a
+  value outside the rules or an unknown key, and `400` `PASSWORD_LOGIN_MODE_REQUIRES_PASSWORD_LOGIN`
+  for `APP_FORM` without password login.
+- `AppDefinition` and `AppSummary` carry `passwordLoginMode` and `loginTheme` when Code Studio
+  returns them. The response validator accepts their absence, as a Code Studio that predates them
+  sends, keeps `passwordLoginMode` a string so a mode added later still reads, and rejects a theme
+  that is not null or an object with the six fields as strings or null.
+- `EmailTemplateType` gains `PASSWORD_RESET`, `PASSWORD_CHANGED` and `ACCOUNT_LOCKED`, the password
+  login emails Messenger opens to the app. The README documents the `$auth` block that
+  `PASSWORD_RESET` writes in place of the reset link, as the sign-in and invite types do, and the
+  `422` `TEMPLATE_AUTH_BLOCK_INVALID` Messenger answers when the block breaks the rule.
+
 ## 0.3.4
 
 - The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as

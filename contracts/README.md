@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.5-beta.0` is the `0.3.4` parity surface with `passwordLoginMode` and `loginTheme` on
+  `apps.update()` and the app reads, and the `PASSWORD_RESET`, `PASSWORD_CHANGED` and
+  `ACCOUNT_LOCKED` email template types, which the parity cases do not cover. Same parity cases;
+  the version exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.3.4` is the `0.3.3` parity surface with the `notification` history item carrying `source`,
   `outcome`, `summary` and `detail` on top, as the live event does, and a fix in the agent
   session: a redial the box opens with its state no longer hides the replay. Same parity cases; the version

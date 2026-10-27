@@ -13,6 +13,7 @@ import type {
   AgentTurnUsageRequest,
   AppMember,
   AppDefinition,
+  AppLoginTheme,
   AppDeploy,
   AppSummary,
   AppVersion,
@@ -644,6 +645,15 @@ export function expectAppSummary(
   return app as unknown as AppSummary
 }
 
+const LOGIN_THEME_FIELDS = [
+  "logoUrl",
+  "backgroundColor",
+  "colorScheme",
+  "title",
+  "subtitle",
+  "language",
+] as const satisfies readonly (keyof AppLoginTheme)[]
+
 function expectAppFields(app: JsonObject, context: string, errors: SdkCoreErrorFactory): void {
   for (const field of ["id", "shortId", "subdomain", "brand", "name", "planId"] as const) {
     if (typeof app[field] !== "string") invalidField(context, field, errors)
@@ -655,6 +665,15 @@ function expectAppFields(app: JsonObject, context: string, errors: SdkCoreErrorF
   if (typeof app.allowSignup !== "boolean") invalidField(context, "allowSignup", errors)
   for (const field of ["emailLoginEnabled", "passwordLoginEnabled"] as const) {
     if (field in app && typeof app[field] !== "boolean") invalidField(context, field, errors)
+  }
+  if ("passwordLoginMode" in app && typeof app.passwordLoginMode !== "string") {
+    invalidField(context, "passwordLoginMode", errors)
+  }
+  if ("loginTheme" in app && app.loginTheme !== null) {
+    const theme = expectObject<JsonObject>(app.loginTheme, `${context} loginTheme`, errors)
+    for (const field of LOGIN_THEME_FIELDS) {
+      if (!isNullableString(theme[field])) invalidField(`${context} loginTheme`, field, errors)
+    }
   }
   if (typeof app.externalAccessEnabled !== "boolean") {
     invalidField(context, "externalAccessEnabled", errors)
