@@ -1329,7 +1329,7 @@ export interface AgentMessage {
   sender: string
   /**
    * `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING`, `SUBAGENT_TEXT`,
-   * `APPROVAL` and `USER_INPUT_REQUEST`.
+   * `APPROVAL`, `USER_INPUT_REQUEST` and `NOTIFICATION`.
    */
   type: string
   content: string

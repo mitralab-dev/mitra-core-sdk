@@ -1535,6 +1535,9 @@ describe("Agent history item identity", () => {
       {
         id: "n",
         kind: "notification",
+        source: { kind: "subagent" },
+        outcome: "completed",
+        summary: 'Subagent "Analisar o banco" finished',
         payload,
         at: "2026-01-01T00:00:01Z",
         sequence: 5,

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.4
+
+- The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as
+  the live `notification` event does, so a screen reads `item.summary` live and after a reload
+  (#125). The item is the same built from the box's frame and from the Copilot's `NOTIFICATION`
+  row. `payload` stays on the item, as in 0.3.3.
+- A redial that the box opens with its state (`providerUsage`, `backgroundTasks`) at the log's
+  current sequence no longer hides the replay: 0.3.3 took that sequence as the running turn's mark
+  and dropped the replayed `stepStart` and the frames before it, so the session stayed `streaming`
+  with no `delta` and no `turnEnd`. State frames neither move nor meet that mark.
+
 ## 0.3.3
 
 Needs the box and the Copilot that send and record it (mitra-sandbox#782, mitra-copilot#552), and

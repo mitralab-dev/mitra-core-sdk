@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { AgentWebSocketConstructor } from "./agentChannel"
-import { createAgentTaskSessionManager } from "./agentSession"
+import { createAgentTaskSessionManager, toAgentTimelineItem } from "./agentSession"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentTask, Page } from "./types"
 
@@ -395,6 +395,44 @@ describe("Agent box queue and steer, as T3's composer", () => {
     expect(session.history.filter((item) => item.kind === "notification")).toEqual([
       expect.objectContaining({ kind: "notification", payload, itemId: "n-1", sequence: 2 }),
     ])
+    session.close()
+    await expect(first).rejects.toThrow("Agent task session is closed.")
+  })
+
+  it("gives the notification item the event's fields on top, the same live and from the Copilot's row", async () => {
+    const { session, first, socket } = await runningTurn()
+    const seen: Record<string, unknown>[] = []
+    session.on("notification", (notification) => seen.push(notification))
+    const payload = {
+      itemId: "n-2",
+      source: { kind: "background_task", work: "subagent" },
+      // An outcome the SDK does not know passes as it came.
+      outcome: "timed_out",
+      summary: 'Subagent "Count the lions" timed out',
+      detail: { exitCode: 124 },
+      lifecycle: { turnId: "turn-1" },
+    }
+    frame(socket, "notification", payload, 2)
+    await vi.waitFor(() => expect(seen).toHaveLength(1))
+    const live = session.history.find((item) => item.kind === "notification")
+    const reloaded = toAgentTimelineItem({
+      id: "n",
+      sender: "AGENT",
+      type: "NOTIFICATION",
+      content: JSON.stringify(payload),
+      createdAt: "2026-01-01T00:00:01Z",
+      sequence: 2,
+      itemId: "n-2",
+    })
+    const event = seen[0]!
+    const onTop = {
+      source: event.source,
+      outcome: "timed_out",
+      summary: event.summary,
+      detail: event.detail,
+    }
+    expect(live).toEqual(expect.objectContaining({ ...onTop, payload, itemId: event.itemId }))
+    expect(reloaded).toEqual(expect.objectContaining({ ...onTop, payload, itemId: event.itemId }))
     session.close()
     await expect(first).rejects.toThrow("Agent task session is closed.")
   })
