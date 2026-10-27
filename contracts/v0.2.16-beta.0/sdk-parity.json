@@ -1,6 +1,6 @@
 {
   "contract": "SDK-PARITY-001",
-  "version": "0.2.16",
+  "version": "0.2.16-beta.0",
   "description": "Canonical semantic and HTTP contract fixtures for the Mitra runtime SDKs.",
   "sources": {
     "mcp": {

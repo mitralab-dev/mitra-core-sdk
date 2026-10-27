@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.2.16
+## 0.2.16-beta.0
 
 - `messenger` manages the current app's sender on the routes Messenger opens to an app token whose
   person is OWNER or ADMIN of the app's workspace: `listEmailSenders()`
