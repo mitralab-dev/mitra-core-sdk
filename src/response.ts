@@ -6,6 +6,7 @@ import type {
   AgentDefinition,
   AgentMessage,
   AgentModel,
+  AgentReadyProvider,
   AgentTask,
   AgentTaskChannel,
   AgentTurnUsage,
@@ -25,6 +26,8 @@ import type {
   DataSourceBulkResult,
   DataSourceDefinition,
   DeviceAuthorization,
+  EmailSender,
+  EmailSettings,
   EmailTemplate,
   EmailTemplatePreview,
   EmailTemplateTypeCatalog,
@@ -1007,6 +1010,51 @@ export function expectEmailTemplatePreview(
   return preview as unknown as EmailTemplatePreview
 }
 
+export function expectEmailSender(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): EmailSender {
+  const sender = expectObject<JsonObject>(value, context, errors)
+  if (typeof sender.id !== "string") invalidField(context, "id", errors)
+  if (typeof sender.email !== "string") invalidField(context, "email", errors)
+  if (typeof sender.displayName !== "string") invalidField(context, "displayName", errors)
+  if (!isNonEmptyString(sender.status)) invalidField(context, "status", errors)
+  if (typeof sender.sharedWithCurrentWorkspace !== "boolean") {
+    invalidField(context, "sharedWithCurrentWorkspace", errors)
+  }
+  if (typeof sender.ownerConfirmationPending !== "boolean") {
+    invalidField(context, "ownerConfirmationPending", errors)
+  }
+  if (typeof sender.createdAt !== "string") invalidField(context, "createdAt", errors)
+  if (typeof sender.updatedAt !== "string") invalidField(context, "updatedAt", errors)
+  return sender as unknown as EmailSender
+}
+
+export function expectEmailSettings(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): EmailSettings {
+  const settings = expectObject<JsonObject>(value, context, errors)
+  if (typeof settings.appId !== "string") invalidField(context, "appId", errors)
+  if (!isNullableString(settings.senderIdentityId)) {
+    invalidField(context, "senderIdentityId", errors)
+  }
+  if (!isNullableString(settings.displayName)) invalidField(context, "displayName", errors)
+  if (!isNullableString(settings.replyTo)) invalidField(context, "replyTo", errors)
+  if (typeof settings.ownTemplateSendsFromBrand !== "boolean") {
+    invalidField(context, "ownTemplateSendsFromBrand", errors)
+  }
+  const senderContext = `${context} effectiveSender`
+  const sender = expectObject<JsonObject>(settings.effectiveSender, senderContext, errors)
+  if (typeof sender.email !== "string") invalidField(senderContext, "email", errors)
+  if (!isNullableString(sender.displayName)) invalidField(senderContext, "displayName", errors)
+  if (!isNonEmptyString(sender.source)) invalidField(senderContext, "source", errors)
+  if (!isNullableString(sender.reason)) invalidField(senderContext, "reason", errors)
+  return settings as unknown as EmailSettings
+}
+
 export function expectAgentDefinition(
   value: unknown,
   context: string,
@@ -1510,6 +1558,19 @@ export function expectCredentialUsage(
     }
   }
   return usage as unknown as CredentialUsage
+}
+
+export function expectAgentReadyProvider(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): AgentReadyProvider {
+  const entry = expectObject<JsonObject>(value, context, errors)
+  if (typeof entry.provider !== "string") invalidField(context, "provider", errors)
+  if (!isNullableString(entry.providerName)) invalidField(context, "providerName", errors)
+  expectObjectArray(entry.models, `${context} models`, errors, expectAgentModel)
+  if (entry.usage !== null) expectCredentialUsage(entry.usage, `${context} usage`, errors)
+  return entry as unknown as AgentReadyProvider
 }
 
 const CREDENTIAL_USAGE_NOT_FOUND = "CREDENTIAL_USAGE_NOT_FOUND"

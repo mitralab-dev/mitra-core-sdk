@@ -576,6 +576,8 @@ export interface AgentMessageListOptions extends PageOptions {
    * and `TOOL_USE` rows of the chat itself, as before.
    */
   kinds?: "all"
+  /** Id of a message: only the rows recorded before it, so the next page back holds still. */
+  before?: string
 }
 
 export type AppColor =
@@ -1209,8 +1211,8 @@ export type AgentTaskInput =
       reasoningEffort?: string
       /**
        * With a turn running, as T3's composer: `queue` puts the message in T3's queue behind it and
-       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot does
-       * not take the field.
+       * `steer` takes it into the running turn. A box given none lets T3 decide. The Copilot passes
+       * it to the box and steers a message sent without one.
        */
       mode?: "queue" | "steer"
       /**
@@ -1379,6 +1381,23 @@ export interface AgentModel {
   reasoningOptions: string[]
   /** Name the person chose for a custom provider; null on built-in models. Absent on an older Copilot. */
   providerName?: string | null
+}
+
+/**
+ * A provider the next turn can run on, with the models the catalog offers on it and the last
+ * subscription reading of the person's login.
+ */
+export interface AgentReadyProvider {
+  provider: CopilotProvider
+  /** Name the person chose for a custom provider; null on a built-in one. */
+  providerName: string | null
+  /** The catalog's models of this provider, in the catalog's order. */
+  models: AgentModel[]
+  /**
+   * The same reading `usage(provider)` answers; null on an API key, before a turn reported a
+   * window, on a custom provider, which has no subscription, and when the Copilot could not read it.
+   */
+  usage: CredentialUsage | null
 }
 
 export interface CredentialStatus {
@@ -1576,6 +1595,58 @@ export interface EmailTemplateUpsertResult {
   preview: EmailTemplatePreview | null
   /** The transport or response error of the preview, unchanged, when `preview` is null. */
   previewError?: unknown
+}
+
+/** An address of a person, available as a sender in the app's workspace. */
+export interface EmailSender {
+  id: string
+  email: string
+  displayName: string
+  /**
+   * `PENDING`, `VERIFIED` or `FAILED`. Kept as a string so a status Messenger adds later does not
+   * break the list. Only a `VERIFIED` address signs the app's emails.
+   */
+  status: string
+  sharedWithCurrentWorkspace: boolean
+  /** True until the person confirms the 6-digit code Messenger sent to the address. */
+  ownerConfirmationPending: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EmailSenderInput {
+  email: string
+  /** Name of the address; the app settings may override it in the From header. */
+  displayName: string
+}
+
+/** The From the app's emails use now, which falls back to the brand while the app sender cannot sign. */
+export interface EffectiveEmailSender {
+  email: string
+  displayName: string | null
+  /** `APP_SENDER` or `BRAND_DEFAULT`, as a string for the same reason as `EmailSender.status`. */
+  source: string
+  /** Why the brand signs: `NO_SETTINGS`, `IDENTITY_NOT_VERIFIED` or `IDENTITY_NOT_SHARED`. */
+  reason: string | null
+}
+
+export interface EmailSettings {
+  appId: string
+  senderIdentityId: string | null
+  displayName: string | null
+  replyTo: string | null
+  effectiveSender: EffectiveEmailSender
+  /** True when the app's own templates go out even while the brand signs. */
+  ownTemplateSendsFromBrand: boolean
+}
+
+/** Replaces the app's settings as a whole: a field left out or null is cleared. */
+export interface EmailSettingsInput {
+  /** An `EmailSender.id` from `listEmailSenders`; without it the app sends from the brand. */
+  senderIdentityId?: string | null
+  /** Single line, shown in the From header. */
+  displayName?: string | null
+  replyTo?: string | null
 }
 
 export interface AppContext {

@@ -7,6 +7,47 @@ All notable changes to this project are documented in this file.
 - `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
   successful administrative response. Missing or structurally invalid code remains an invalid
   response, and `null` is not treated as empty source.
+
+## 0.3.2
+
+- `providerUsage` carries `provider` when the box sends it: the provider the reading is of, with
+  the same value `agentCredentials.providers()` gives in `AgentReadyProvider.provider` (such as
+  `ANTHROPIC` or `OPENAI`), passed as it comes, an unknown one included. A box that does not send
+  it leaves it absent. New optional field `AgentProviderUsage.provider`.
+- A message whose `send` or `sendAndWait` was still on its way when the session closed reaches
+  the Copilot over REST, as one whose session closed before the channel already did. Before, a
+  close while the box channel opened (5 to 10 s on a cold box) dropped it with nothing sent: a
+  page that navigated away right after sending lost the message (conversation 73183). The same
+  holds for a session reopened by task id that closes while it opens, and for a close between the
+  channel opening and the message going out, which used to put the closed session back in
+  `streaming`. It goes once, with the `clientMessageId` `send` returned and its `mode`, and the
+  `sendAndWait` of it rejects with the session closed instead of waiting forever. A message the box
+  channel already carried is not sent again: the Copilot does not dedupe by `clientMessageId`.
+- A message that goes to the Copilot over REST keeps its `mode`, a steer typed during a turn
+  included. The Copilot passes it to the box and steers a message sent without one, so a `queue`
+  message no longer went into the running turn.
+
+## 0.3.1
+
+Two additions over endpoints of the Copilot, which both need the Copilot with mitra-copilot#549.
+The SDK passes the Copilot's answers through and keeps nothing of its own. It also ships the
+messenger email templates and app sender `main` held as unreleased (the last entries).
+
+- `agentCredentials.providers(agentId?, options?)`: the providers the next turn can run on, one
+  call to the Copilot's `GET /api/v1/models/providers` (needs `MODEL_READ` and `CREDENTIAL_READ`),
+  returned as it comes: one entry per built-in provider and per custom provider, in the catalog's
+  order, each with `provider`, `providerName`, `models` and `usage`. `usage` is null on a custom
+  provider, before a turn reported a window, on an API key, and when the Copilot could not read
+  the subscription: a failed reading does not fail the list. New type `AgentReadyProvider`.
+- `agentTasks.listMessages(id, { before })`: only the rows recorded before the message `before`
+  names, sent as the `before` query parameter, so the next page back holds still while new rows
+  come. `session.loadOlder()` and `session.hasOlder` sit on it: `loadOlder` reads the page before
+  the oldest row `history` holds, with the size `loadHistory` used, puts it before `history` and
+  emits `historyLoaded`, resolving with the items it added; `hasOlder` is what the last page read
+  said (the Copilot signals more with `totalPages > number + 1`). With nothing older it resolves
+  with none and calls nothing. A `before` of another chat, or one that does not exist, is a 404
+  that rejects the call. A `loadOlder` still reading when `history` is replaced (a `loadHistory`,
+  the turn recovery) resolves with none and adds nothing.
 - `messenger` manages the current app's account email templates on Messenger's
   `/api/v1/email/templates` and `/api/v1/email/template-types` routes: `listEmailTemplates()`,
   `getEmailTemplateType(type)`, `getEmailTemplate(type)`, `upsertEmailTemplate(type, input)`,
@@ -24,6 +65,19 @@ All notable changes to this project are documented in this file.
   four, `404` on a delete without an app row) come from the transport unchanged.
 - In responses `type` is a string, not `EmailTemplateType`: a console token also lists the
   platform's other types, and a type Messenger opens later must not break the list.
+- `messenger` manages the current app's sender on the routes Messenger opens to an app token whose
+  person is OWNER or ADMIN of the app's workspace: `listEmailSenders()`
+  (`GET /api/v1/email/identities/workspace`), `registerEmailSender({ email, displayName })`,
+  `resendEmailSenderVerification(id)`, `confirmEmailSender(id, code)`, `getEmailSettings()` and
+  `updateEmailSettings(input)` (`GET` and `PUT /api/v1/email/apps/{appId}/settings`, with the app
+  from `getAppId`). Bodies are built field by field; `updateEmailSettings` replaces the whole
+  setting, so a field left out or `null` is cleared.
+- `registerEmailSender` does not tell a new address (`201`) from one the person already owned
+  (`200`), since the transport does not expose the HTTP status; the returned `status` and
+  `ownerConfirmationPending` say whether the code still has to be confirmed.
+- In sender responses `status`, `effectiveSender.source` and `effectiveSender.reason` are strings,
+  so a value Messenger adds later does not break the read. The routes an app token may not use
+  (the person's full list, rename, delete, sharing with workspaces) stay out of the SDK.
 
 ## 0.3.0
 

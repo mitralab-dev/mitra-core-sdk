@@ -16,7 +16,9 @@ import type {
   AgentTaskInput,
   AgentTaskRuntime,
   AgentTurnUsage,
+  CopilotProvider,
   CredentialUsage,
+  Page,
 } from "./types"
 
 export { AgentTaskTurnError }
@@ -346,7 +348,13 @@ export interface AgentTaskSessionEventMap {
 }
 
 /** The same shape `agentCredentials.usage` answers with. */
-export type AgentProviderUsage = CredentialUsage
+export type AgentProviderUsage = CredentialUsage & {
+  /**
+   * The provider the reading is of, as `agentCredentials.providers()` names it in
+   * `AgentReadyProvider.provider`. Absent from a box that does not send it.
+   */
+  provider?: CopilotProvider
+}
 
 export interface AgentTaskSession {
   readonly taskId: string | null
@@ -378,6 +386,18 @@ export interface AgentTaskSession {
     attachmentsByQuestionId?: Record<string, unknown>,
   ): void
   loadHistory(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
+  /**
+   * Whether the Copilot has rows older than the oldest row `history` holds, as the last page read
+   * said. False until a history was loaded.
+   */
+  readonly hasOlder: boolean
+  /**
+   * Reads the page before the oldest row `history` holds, with the size `loadHistory` used, and
+   * puts it before `history`, in the box's order. Resolves with the items it added (none when
+   * there is nothing older) and emits `historyLoaded`. A read still running when `history` is
+   * replaced resolves with nothing.
+   */
+  loadOlder(): Promise<readonly AgentTimelineItem[]>
   /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
   /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
@@ -446,7 +466,9 @@ function providerUsageOf(payload: Record<string, unknown> | null): AgentProvider
   if (!payload) return null
   try {
     const { harness, observedAt, status, windows } = expectCredentialUsage(payload, "providerUsage")
-    return { harness, observedAt, status, windows }
+    const provider =
+      typeof payload.provider === "string" && payload.provider ? payload.provider : null
+    return { harness, observedAt, status, windows, ...(provider ? { provider } : {}) }
   } catch {
     return null
   }
@@ -571,6 +593,12 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
     }
   }
   return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
+}
+
+// The Copilot counts the rows before the cursor (or all of them, on the newest page), so a page
+// after this one means older rows (mitra-copilot#549).
+function hasOlderRows(page: Page<AgentMessage>): boolean {
+  return page.page.totalPages > page.page.number + 1
 }
 
 // A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
@@ -794,6 +822,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private readonly acceptedIds: string[] = []
   // Taken by the first channel of `session({ taskId })`; no later channel asks for a replay.
   private openingCursor: AgentHistoryCursor | undefined
+  private historyLimit: number | undefined
+  private _hasOlder = false
+  // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
+  private historyGeneration = 0
+  private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
+    null
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -926,10 +960,57 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.historyLimit = options.limit
+    this.replaceHistory(page)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
+  }
+
+  get hasOlder(): boolean {
+    return this._hasOlder
+  }
+
+  loadOlder(): Promise<readonly AgentTimelineItem[]> {
+    if (this.olderRead?.generation !== this.historyGeneration) {
+      const generation = this.historyGeneration
+      const promise = this.readOlder(generation).finally(() => {
+        if (this.olderRead?.promise === promise) this.olderRead = null
+      })
+      this.olderRead = { generation, promise }
+    }
+    return this.olderRead.promise
+  }
+
+  private async readOlder(generation: number): Promise<readonly AgentTimelineItem[]> {
+    // Live items carry no message id the Copilot knows; they only ever sit after the rows.
+    const oldest = this._history.find((item) => !item.id.startsWith("live:"))
+    if (!this._taskId || !this._hasOlder || !oldest) return []
+    let page: Page<AgentMessage>
+    try {
+      page = await this.dependencies.tasks.listMessages(this._taskId, {
+        before: oldest.id,
+        ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
+        sort: "createdAt,desc",
+        kinds: "all",
+      })
+    } catch (error) {
+      // A read of a history since replaced resolves with nothing, as its success would.
+      if (generation !== this.historyGeneration || this.isClosed()) return []
+      throw error
+    }
+    if (generation !== this.historyGeneration || this.isClosed()) return []
+    const older = [...page.content].reverse().map(toAgentTimelineItem)
+    this._hasOlder = hasOlderRows(page)
+    this._history = [...older, ...this._history]
+    this.emit("historyLoaded", { history: this.history })
+    return older
+  }
+
+  private replaceHistory(page: Page<AgentMessage>): void {
+    this.historyGeneration += 1
+    this._hasOlder = hasOlderRows(page)
+    this._history = [...page.content].reverse().map(toAgentTimelineItem)
   }
 
   editQueueItem(id: string, text: string): void {
@@ -1074,25 +1155,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     handedOver: () => void,
     waiter?: TurnWaiter,
   ): Promise<boolean> {
-    if (this.openingPromise && !(await this.openingPromise)) {
+    // A session closed while it opened still has its task; the prompt goes out below.
+    if (this.openingPromise && !(await this.openingPromise) && !this.isClosed()) {
       throw new Error("Agent task session could not be opened.")
     }
     // A waiter that gave up on `timeoutMs` or `signal` only stopped waiting: the message still
     // goes out and the session follows its turn, as it does after the turn started.
-    if (this.isClosed()) return false
+    if (this.isClosed() && !this._taskId) return false
     await this.ensureTask()
     const input = messageInput(prompt, options)
-    if (this.isClosed()) {
-      // A prompt whose task exists is never dropped by close; the task outlives the session.
-      // Apps close the creating session inside taskCreated and reopen by task id, so the
-      // input still goes out over REST. No channel, status, or event for a closed session,
-      // and a failure has no listener left to hear it.
-      await this.handOver(input, clientMessageId).catch(() => undefined)
-      return false
-    }
-    await this.ensureChannel()
-    if (this.isClosed()) return false
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
+    // A cold box takes 5 to 10 s to open the channel, and a page that navigates away closes the
+    // session in the meantime (conversation 73183). The close aborts the opening.
+    await this.ensureChannel().catch((error: unknown) => {
+      if (!this.isClosed()) throw error
+    })
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     await this.captureTurnBaseline()
+    if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1109,6 +1189,22 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!(await admitted)) return false
     this.acceptOnce(clientMessageId)
     return true
+  }
+
+  // A prompt whose task exists is never dropped by close; the task outlives the session. Apps
+  // close the creating session inside taskCreated and reopen by task id, so the input still goes
+  // out over REST. Only a prompt that never reached `handOver` comes here: the Copilot does not
+  // dedupe POST /inputs by `clientMessageId`, and a second copy would run a second turn. No
+  // channel, status, or event for a closed session, and a failure has no listener left to hear it.
+  // `close()` rejects only the waiter of a turn already open; this one has none yet.
+  private async handOverAfterClose(
+    input: AgentTaskInput,
+    clientMessageId: string,
+    waiter?: TurnWaiter,
+  ): Promise<false> {
+    await this.handOver(input, clientMessageId).catch(() => undefined)
+    waiter?.reject(new Error("Agent task session is closed."))
+    return false
   }
 
   // A message sent while a turn runs, or is being opened, goes out at once: the box takes it into
@@ -1375,7 +1471,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       sort: "createdAt,desc",
       kinds: "all",
     })
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    this.replaceHistory(page)
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the
@@ -1452,19 +1548,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
     }
     const turnRunning = this._status === "streaming" || this._status === "cancelled"
-    // The Copilot takes no `mode`. It keeps the `clientMessageId` and hands it to the box, which
-    // echoes it as on the direct channel.
+    // The Copilot keeps the `clientMessageId` and hands it to the box, which echoes it as on the
+    // direct channel. It passes `mode` to the box too, and steers a message sent without one.
     const id = clientMessageId === undefined ? {} : { clientMessageId }
+    const mode = input.type === "message" && input.mode ? { mode: input.mode } : {}
     const rest: AgentTaskInput =
       input.type !== "message"
         ? input
         : steering && turnRunning
-          ? { type: "message", content: input.content, ...id }
+          ? { type: "message", content: input.content, ...mode, ...id }
           : {
               type: "message",
               content: input.content,
               ...(input.agentType ? { agentType: input.agentType } : {}),
               ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+              ...mode,
               ...id,
             }
     // A refusal the Copilot answers with an error status rejects here, and the caller reports it.

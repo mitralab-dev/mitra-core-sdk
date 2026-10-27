@@ -1569,6 +1569,96 @@ describe("Agent direct channel lifecycle", () => {
     }
     session.close()
   })
+
+  // Conversation 73183: the page navigated away while a cold box opened the channel, and the
+  // message reached neither the box nor the Copilot.
+  it("hands the message to the Copilot when the session closes while the Copilot offers the channel", async () => {
+    let offerChannel: (value: AgentTaskChannel | null) => void = () => undefined
+    const tasks = createTasks(
+      () => new Promise<AgentTaskChannel | null>((resolve) => (offerChannel = resolve)),
+    )
+    const { session } = open(tasks)
+
+    const id = session.send("hello", { mode: "queue" })
+    await vi.waitFor(() => expect(tasks.channel).toHaveBeenCalledOnce())
+    session.close()
+    offerChannel({ wsUrl: BOX_URL, lastSequence: 0 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // The id is the one `send` returned, and the mode the one it was sent with.
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hello", mode: "queue", clientMessageId: id }],
+    ])
+    expect(FakeWebSocket.instances.flatMap((socket) => socket.sent)).toEqual([])
+  })
+
+  it("hands the message to the Copilot when the session closes while the box socket handshakes", async () => {
+    FakeWebSocket.handshake = "hang"
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const id = session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    session.close()
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hello", clientMessageId: id }],
+    ])
+    expect(FakeWebSocket.last().sent).toEqual([])
+  })
+
+  it("rejects a sendAndWait whose session closes while the box socket handshakes, after handing it over", async () => {
+    FakeWebSocket.handshake = "hang"
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    const result = session.sendAndWait("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    session.close()
+
+    await expect(result).rejects.toThrow("Agent task session is closed.")
+    expect(tasks.sendInput).toHaveBeenCalledOnce()
+    expect(tasks.sendInput.mock.calls[0]?.[1]).toMatchObject({ type: "message", content: "hello" })
+  })
+
+  it("hands the message to the Copilot when the session closes after the channel opened, before the message went out", async () => {
+    let readBaseline: (value: Page<never>) => void = () => undefined
+    const tasks = createTasks(offer())
+    tasks.listMessages.mockImplementationOnce(
+      () => new Promise<Page<never>>((resolve) => (readBaseline = resolve)),
+    )
+    const { session } = open(tasks)
+
+    const id = session.send("hello", { mode: "steer" })
+    await vi.waitFor(() => expect(tasks.listMessages).toHaveBeenCalledOnce())
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    session.close()
+    readBaseline(EMPTY_PAGE)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hello", mode: "steer", clientMessageId: id }],
+    ])
+    expect(FakeWebSocket.last().sent).toEqual([])
+    expect(session.status).toBe("closed")
+  })
+
+  it("does not hand a message the box socket already carried to the Copilot when the session closes", async () => {
+    // The Copilot does not dedupe POST /inputs by clientMessageId: a second copy is a second turn.
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+
+    session.send("hello")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    session.close()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+  })
 })
 
 describe("Agent box HTTP routes", () => {

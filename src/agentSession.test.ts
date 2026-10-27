@@ -264,6 +264,48 @@ describe("Agent task session", () => {
     expect(source.taskIds).toEqual([])
   })
 
+  it("still sends the prompt when a session reopened by task id closes while it opens", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: source })
+    const session = manager.session({ taskId: "task-1" })
+
+    const id = session.send("hi")
+    session.close()
+    resolveGet(TASK)
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(tasks.sendInput.mock.calls).toEqual([
+      ["task-1", { type: "message", content: "hi", clientMessageId: id }],
+    ])
+    expect(source.taskIds).toEqual([])
+  })
+
+  it("rejects a sendAndWait whose session reopened by task id closes while it opens, after handing it over", async () => {
+    let resolveGet: (task: AgentTask) => void = () => undefined
+    const tasks = createTasks({
+      get: vi.fn(() => new Promise<AgentTask>((resolve) => (resolveGet = resolve))),
+    })
+    const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
+    const session = manager.session({ taskId: "task-1" })
+
+    const result = session.sendAndWait("hi", { mode: "queue" })
+    session.close()
+    resolveGet(TASK)
+
+    await expect(result).rejects.toThrow("Agent task session is closed.")
+    expect(tasks.sendInput.mock.calls).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "hi", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+    ])
+  })
+
   it("swallows a REST failure for a prompt sent after close without surfacing it", async () => {
     const tasks = createTasks({
       sendInput: vi.fn(async () => {
@@ -333,6 +375,34 @@ describe("Agent task session", () => {
     expect(readings).toEqual([reading])
   })
 
+  it("passes the provider the box names on the subscription reading, as it comes", async () => {
+    const tasks = createTasks()
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const readings: unknown[] = []
+    session.on("providerUsage", (reading) => readings.push(reading))
+    const result = session.sendAndWait("quanto falta?", { timeoutMs: 2_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    const reading = {
+      harness: "codex",
+      observedAt: "2026-10-26T12:00:00.000Z",
+      status: "allowed",
+      windows: [{ kind: "FIVE_HOUR", usedPercent: 10, resetsAt: null, windowSeconds: 18_000 }],
+    }
+    source.emit(event("providerUsage", { ...reading, provider: "OPENAI" }))
+    source.emit(event("providerUsage", reading))
+    source.emit(event("providerUsage", { ...reading, provider: "NEW_PROVIDER" }))
+    source.emit(event("stepFinish", { reason: "endTurn" }))
+
+    await expect(result).resolves.toMatchObject({ reason: "endTurn" })
+    expect(readings).toStrictEqual([
+      { ...reading, provider: "OPENAI" },
+      reading,
+      { ...reading, provider: "NEW_PROVIDER" },
+    ])
+  })
+
   it("sends a message typed during a turn on the Copilot stream at once and settles both with it", async () => {
     const { session, source, tasks } = createSession()
     const first = session.sendAndWait("first")
@@ -351,6 +421,27 @@ describe("Agent task session", () => {
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult).toMatchObject({ content: "both answers", reason: "stop" })
     expect(secondResult).toBe(firstResult)
+  })
+
+  it("keeps the mode of a message typed during a turn when it goes to the Copilot", async () => {
+    // The Copilot passes `mode` to the box and steers a message sent without one.
+    const { session, tasks } = createSession()
+    session.send("first")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(1))
+    session.send("queued", { mode: "queue", agentType: "CODEX" })
+    session.send("steered", { mode: "steer" })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledTimes(3))
+
+    expect(tasks.sendInput.mock.calls.slice(1)).toEqual([
+      [
+        "task-1",
+        { type: "message", content: "queued", mode: "queue", clientMessageId: expect.any(String) },
+      ],
+      [
+        "task-1",
+        { type: "message", content: "steered", mode: "steer", clientMessageId: expect.any(String) },
+      ],
+    ])
   })
 
   it("rejects every message of a turn the producer fails with its typed error", async () => {
@@ -1126,6 +1217,132 @@ describe("Agent task session", () => {
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
     expect(session.history[99]).toMatchObject({ text: "message-150" })
+  })
+})
+
+describe("Agent older history", () => {
+  // Newest first, as the Copilot answers: `older` is how many rows the query matched beyond it.
+  function olderPage(content: AgentMessage[], older = 0): Page<AgentMessage> {
+    const result = page(content)
+    const totalPages = older > 0 ? 2 : result.page.totalPages
+    return {
+      ...result,
+      page: { ...result.page, totalElements: content.length + older, totalPages },
+    }
+  }
+
+  function openSession(tasks: ReturnType<typeof createTasks>): AgentTaskSession {
+    return createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() }).session({
+      taskId: "task-1",
+      transport: "http",
+    })
+  }
+
+  const rows = ["m1", "m2", "m3", "m4", "m5", "m6"].map((id) => message(id, "AGENT", id))
+  const newestFirst = (from: number, to: number) => rows.slice(from, to).reverse()
+
+  it("puts the page before the oldest row in front of history, in order, until the first row", async () => {
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockResolvedValueOnce(olderPage(newestFirst(2, 4), 2))
+      .mockResolvedValueOnce(olderPage(newestFirst(0, 2)))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    await session.loadHistory({ limit: 2 })
+    expect(session.hasOlder).toBe(true)
+    const loaded = vi.fn()
+    session.on("historyLoaded", loaded)
+
+    const first = await session.loadOlder()
+    const second = await session.loadOlder()
+
+    expect(tasks.listMessages).toHaveBeenNthCalledWith(3, "task-1", {
+      before: "m5",
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    expect(tasks.listMessages).toHaveBeenNthCalledWith(4, "task-1", {
+      before: "m3",
+      size: 2,
+      sort: "createdAt,desc",
+      kinds: "all",
+    })
+    expect(first.map((item) => item.id)).toEqual(["m3", "m4"])
+    expect(second.map((item) => item.id)).toEqual(["m1", "m2"])
+    expect(session.history.map((item) => item.id)).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"])
+    expect(session.hasOlder).toBe(false)
+    expect(loaded).toHaveBeenCalledTimes(2)
+
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(tasks.listMessages).toHaveBeenCalledTimes(4)
+  })
+
+  it("drops a page read while history was replaced", async () => {
+    let answerOlder: (value: Page<AgentMessage>) => void = () => undefined
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answerOlder = resolve
+          }),
+      )
+      .mockResolvedValueOnce(olderPage(newestFirst(3, 6), 3))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const reading = session.loadOlder()
+    await vi.waitFor(() => expect(tasks.listMessages).toHaveBeenCalledTimes(2))
+    await session.loadHistory()
+    answerOlder(olderPage(newestFirst(2, 4), 2))
+
+    await expect(reading).resolves.toEqual([])
+    expect(session.history.map((item) => item.id)).toEqual(["m4", "m5", "m6"])
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("drops the failure of a read whose history was replaced and keeps the current one's", async () => {
+    let failOlder: (error: Error) => void = () => undefined
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(olderPage(newestFirst(4, 6), 4))
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failOlder = reject
+          }),
+      )
+      .mockResolvedValueOnce(olderPage(newestFirst(3, 6), 3))
+      .mockRejectedValueOnce(new Error("current read failed"))
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const stale = session.loadOlder()
+    await vi.waitFor(() => expect(tasks.listMessages).toHaveBeenCalledTimes(2))
+    await session.loadHistory()
+    failOlder(new Error("stale read failed"))
+
+    await expect(stale).resolves.toEqual([])
+    await expect(session.loadOlder()).rejects.toThrow("current read failed")
+    expect(session.history.map((item) => item.id)).toEqual(["m4", "m5", "m6"])
+  })
+
+  it("asks nothing when history holds every row or no row of the Copilot", async () => {
+    const tasks = createTasks({ listMessages: vi.fn(async () => olderPage(newestFirst(0, 2))) })
+    const session = openSession(tasks)
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    await expect(session.loadOlder()).resolves.toEqual([])
+    expect(session.hasOlder).toBe(false)
+    expect(tasks.listMessages).toHaveBeenCalledTimes(1)
+
+    const fresh = createSession()
+    await expect(fresh.session.loadOlder()).resolves.toEqual([])
+    expect(fresh.tasks.listMessages).not.toHaveBeenCalled()
   })
 })
 
