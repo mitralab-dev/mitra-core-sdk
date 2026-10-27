@@ -154,17 +154,6 @@ const appDefinition = {
   planId: "plan-1",
   template: "react-vite-shadcn",
   allowSignup: true,
-  emailLoginEnabled: true,
-  passwordLoginEnabled: true,
-  passwordLoginMode: "APP_FORM",
-  loginTheme: {
-    logoUrl: "https://cdn.example.com/logo.png",
-    backgroundColor: "#101010",
-    colorScheme: "dark",
-    title: "Loja X",
-    subtitle: null,
-    language: "pt-BR",
-  },
   externalAccessEnabled: false,
   currentVersion: appVersion,
   createdAt: "2026-01-01T00:00:00Z",
@@ -185,10 +174,6 @@ const appSummary = {
   template: appDefinition.template,
   planId: appDefinition.planId,
   allowSignup: appDefinition.allowSignup,
-  emailLoginEnabled: appDefinition.emailLoginEnabled,
-  passwordLoginEnabled: appDefinition.passwordLoginEnabled,
-  passwordLoginMode: appDefinition.passwordLoginMode,
-  loginTheme: null,
   externalAccessEnabled: appDefinition.externalAccessEnabled,
   currentVersion: appDefinition.currentVersion,
   createdAt: appDefinition.createdAt,
@@ -520,71 +505,6 @@ describe("apps and public Functions", () => {
       "status,asc",
       "status,desc",
     ])
-  })
-
-  it("sends the login fields on update, a null loginTheme included, and leaves the omitted ones out", async () => {
-    const transport = new QueueTransport([appDefinition, appDefinition])
-    const apps = createAppsModule(transport)
-    const loginChange = {
-      emailLoginEnabled: true,
-      passwordLoginEnabled: false,
-      passwordLoginMode: "POPUP",
-      loginTheme: null,
-    } as const
-
-    await expect(apps.update("app-1", loginChange)).resolves.toEqual(appDefinition)
-    await apps.update("app-1", { emailLoginEnabled: false })
-
-    expect(transport.requests[0]?.options).toStrictEqual({ method: "PATCH", body: loginChange })
-    expect(transport.requests[1]?.options.body).toStrictEqual({ emailLoginEnabled: false })
-  })
-
-  it("accepts apps without login fields from an older Code Studio", async () => {
-    const loginFields = [
-      "emailLoginEnabled",
-      "passwordLoginEnabled",
-      "passwordLoginMode",
-      "loginTheme",
-    ] as const
-    const olderDetail: Record<string, unknown> = { ...appDefinition }
-    const olderSummary: Record<string, unknown> = { ...appSummary }
-    for (const field of loginFields) {
-      delete olderDetail[field]
-      delete olderSummary[field]
-    }
-    const apps = createAppsModule(new QueueTransport([olderDetail, springPage([olderSummary])]))
-
-    await expect(apps.get("app-1")).resolves.toEqual(olderDetail)
-    await expect(apps.list()).resolves.toMatchObject({ content: [olderSummary] })
-  })
-
-  it.each(["emailLoginEnabled", "passwordLoginEnabled"])(
-    "rejects an app whose %s is not a boolean",
-    async (field) => {
-      const apps = createAppsModule(new QueueTransport([{ ...appDefinition, [field]: null }]))
-
-      await expect(apps.get("app-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
-    },
-  )
-
-  it("reads a passwordLoginMode this Core does not know", async () => {
-    const futureMode = { ...appDefinition, passwordLoginMode: "FUTURE_MODE" }
-    const apps = createAppsModule(new QueueTransport([futureMode]))
-
-    await expect(apps.get("app-1")).resolves.toEqual(futureMode)
-  })
-
-  it.each([
-    ["a passwordLoginMode that is not a string", { passwordLoginMode: null }],
-    [
-      "a loginTheme field that is not a string",
-      { loginTheme: { ...appDefinition.loginTheme, title: 1 } },
-    ],
-    ["a loginTheme without one of its fields", { loginTheme: { title: "Loja X" } }],
-  ])("rejects an app with %s", async (_, override) => {
-    const apps = createAppsModule(new QueueTransport([{ ...appDefinition, ...override }]))
-
-    await expect(apps.get("app-1")).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 
   it("uses only the explicit anonymous public transport", async () => {

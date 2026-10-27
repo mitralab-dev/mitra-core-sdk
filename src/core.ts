@@ -54,7 +54,7 @@ export interface SdkCoreTransports {
   codeStudio?: Transport
   /** Copilot transport for tasks, credentials, models, and app connections. */
   copilot?: Transport
-  /** Messenger transport for current-user notifications, app emails, and their templates. */
+  /** Messenger transport for current-user notifications. */
   messenger?: Transport
   /**
    * Anonymous Functions transport. It must not add Authorization or X-App-Id headers.
@@ -141,7 +141,7 @@ export function createSdkCore(options: SdkCoreOptions): SdkCore {
     integrationResources: createIntegrationResourcesModule(options.transports.integration, errors),
     integrationTemplates: createIntegrationTemplatesModule(options.transports.integration, errors),
     members,
-    messenger: createMessengerModule(messengerTransport, errors, options.getAppId),
+    messenger: createMessengerModule(messengerTransport, errors),
     publicFunctions: createPublicFunctionsModule(options.transports.publicFunctions, errors),
     queries: createQueriesModule(options.transports.dataManager, errors),
     sql: createSqlModule(options.transports.dataManager, errors),
