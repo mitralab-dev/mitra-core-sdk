@@ -159,7 +159,11 @@ function draw(session: AgentTaskSession) {
     for (const item of history) {
       if (item.kind === "tool") {
         tool(item.tool.toolId ?? item.id, item.tool.phase, item.tool.content, item.sequence)
-      } else if (item.kind === "approval" || item.kind === "userInputRequest") {
+      } else if (
+        item.kind === "approval" ||
+        item.kind === "userInputRequest" ||
+        item.kind === "notification"
+      ) {
         add({ key: `${item.kind}:${item.itemId}`, text: "", result: item.payload })
       } else if (item.kind === "reasoning") {
         text(pieceKey("reasoning", item.itemId, item.parentToolId), item.text, item.sequence)

@@ -360,6 +360,43 @@ describe("Agent direct channel", () => {
     await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce())
   })
 
+  it("reads the replay whole when the box sends its state before it on the redial", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer())
+    const { session } = open(tasks)
+    const deltas = vi.fn()
+    session.on("delta", deltas)
+    const idOf = (frame: unknown) => (frame as { clientMessageId?: string }).clientMessageId
+
+    const result = session.sendAndWait("Survive the drop")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const id = idOf(FakeWebSocket.last().sent[0])
+    FakeWebSocket.last().drop()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+
+    // The box greets a redial with its state at the log's current sequence, then replays the log.
+    const redialed = FakeWebSocket.last()
+    const turn = { turnId: "turn-1", clientMessageId: id }
+    const usage = {
+      harness: "claude",
+      observedAt: "2026-10-27T00:00:00Z",
+      status: null,
+      windows: [],
+    }
+    redialed.receive("providerUsage", { ...usage, lifecycle: { turnId: "turn-1" } }, 3)
+    redialed.receive("backgroundTasks", { tasks: [], lifecycle: { turnId: "turn-1" } }, 3)
+    redialed.receive("messageQueued", { text: "Survive the drop", lifecycle: turn }, 1)
+    redialed.receive("stepStart", { lifecycle: turn }, 2)
+    redialed.receive("providerUsage", { ...usage, lifecycle: { turnId: "turn-1" } }, 3)
+    redialed.receive("textDelta", { text: "Alive", lifecycle: { turnId: "turn-1" } }, 4)
+    redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+
+    await expect(result).resolves.toMatchObject({ content: "Alive", reason: "stop" })
+    expect(deltas).toHaveBeenCalledOnce()
+    expect(session.status).toBe("idle")
+  })
+
   it("redials for a steer the box had not answered when the turn ended and the socket dropped", async () => {
     vi.useFakeTimers()
     const tasks = createTasks(offer(BOX_URL, 3))
