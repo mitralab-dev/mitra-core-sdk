@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.5` is the `0.3.4` parity surface with a fix in the agent session: a tab that sends to the
+  queue of a chat whose turn runs ends that turn, and `FunctionVersion.code` accepts `null` when the
+  Functions API redacts source. Same parity cases; the version exists so a
+  consumer pinning the package can pin a corpus with the same number.
+
 - `0.3.4` is the `0.3.3` parity surface with the `notification` history item carrying `source`,
   `outcome`, `summary` and `detail` on top, as the live event does, and a fix in the agent
   session: a redial the box opens with its state no longer hides the replay. Same parity cases; the version

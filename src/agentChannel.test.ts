@@ -3021,3 +3021,135 @@ describe("Agent direct channel steering", () => {
     expect(steerResult).toBe(firstResult)
   })
 })
+
+describe("Agent direct channel on a second tab of a chat with a turn running", () => {
+  // A tab that sends to the queue before its socket said a turn was running: the box queues the
+  // message behind the turn another tab opened.
+  async function queueBehindRunningTurn() {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const turnEnds: string[] = []
+    session.on("turnEnd", ({ reason, content }) => turnEnds.push(`${reason}:${content}`))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const result = session.sendAndWait("Then birds", { mode: "queue" })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const id = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: 1,
+      text: "Then birds",
+      queueHeld: false,
+      lifecycle: { clientMessageId: id },
+    })
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: "other" } }, 4)
+    return { session, socket, id, result, turnEnds }
+  }
+
+  it("ends the running turn, and answers the queued message only with the turn the box opens for it", async () => {
+    const { session, socket, id, result, turnEnds } = await queueBehindRunningTurn()
+    let settled = false
+    void result.finally(() => {
+      settled = true
+    })
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: id } }, 6)
+    socket.receive("textDelta", { text: "Eagle", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 7)
+    await expect(result).resolves.toMatchObject({ content: "Eagle", reason: "stop" })
+    expect(turnEnds).toEqual(["stop:1. Lion", "stop:Eagle"])
+    expect(session.queue).toEqual([])
+    session.close()
+  })
+
+  it("sends behind a turn that started while the message was on its way, and announces that turn once", async () => {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const turnStarts = vi.fn()
+    const turnEnds: string[] = []
+    session.on("turnStart", turnStarts)
+    session.on("turnEnd", ({ reason, content }) => turnEnds.push(`${reason}:${content}`))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const socket = FakeWebSocket.last()
+    // The message waits on the turn baseline while the replay says a turn runs.
+    let releaseBaseline!: () => void
+    tasks.listMessages.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseBaseline = () => resolve(EMPTY_PAGE)
+        }),
+    )
+
+    const result = session.sendAndWait("Then birds", { mode: "queue" })
+    await vi.waitFor(() => expect(releaseBaseline).toBeDefined())
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: "other" } }, 4)
+    expect(session.status).toBe("streaming")
+    releaseBaseline()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const id = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: 1,
+      text: "Then birds",
+      queueHeld: false,
+      lifecycle: { clientMessageId: id },
+    })
+    let settled = false
+    void result.finally(() => {
+      settled = true
+    })
+
+    socket.receive("toolCall", { toolId: "t-1", name: "Read", lifecycle: { turnId: "turn-1" } })
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(turnStarts).toHaveBeenCalledTimes(1)
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: id } }, 6)
+    socket.receive("textDelta", { text: "Eagle", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 7)
+    await expect(result).resolves.toMatchObject({ content: "Eagle", reason: "stop" })
+    expect(turnStarts).toHaveBeenCalledTimes(2)
+    session.close()
+  })
+
+  it("rejects only the queued message when it is taken out of the queue behind the running turn", async () => {
+    const { session, socket, id, result, turnEnds } = await queueBehindRunningTurn()
+    const settledResult = expect(result).rejects.toThrow("cancelled")
+    session.removeQueueItem(id)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: null,
+      cancelled: true,
+      lifecycle: { clientMessageId: id },
+    })
+    await settledResult
+    expect(session.status).toBe("streaming")
+
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    expect(session.status).toBe("idle")
+    session.close()
+  })
+})
