@@ -1648,6 +1648,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
         this.openingAwaitsStart = false
         this.forgetFinishedTurn(lifecycle)
+      } else if (event.type === "stepStart") {
+        // Another message's turn starting means one runs ahead of ours (a tab that sent to the
+        // queue before its socket said a turn was running): its frames are the running turn's,
+        // not a finished one's, or its terminal is dropped and the turn never ends here.
+        this.openingAwaitsStart = false
       }
     } else if (
       this.openingAwaitsStart &&

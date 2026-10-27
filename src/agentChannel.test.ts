@@ -3021,3 +3021,39 @@ describe("Agent direct channel steering", () => {
     expect(steerResult).toBe(firstResult)
   })
 })
+
+describe("Agent direct channel on a second tab of a chat with a turn running", () => {
+  it("ends the running turn when a message sent to the queue before the socket said so is waiting", async () => {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const turnEnds: string[] = []
+    session.on("turnEnd", ({ reason, content }) => turnEnds.push(`${reason}:${content}`))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    session.send("Then birds", { mode: "queue" })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const id = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: 1,
+      text: "Then birds",
+      queueHeld: false,
+      lifecycle: { clientMessageId: id },
+    })
+
+    // The turn another tab opened, still running when this tab sent.
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: "other" } }, 4)
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+    session.close()
+  })
+})
