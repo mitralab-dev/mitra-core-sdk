@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
+  successful administrative response. Missing or structurally invalid code remains an invalid
+  response, and `null` is not treated as empty source.
+
 ## 0.3.4
 
 - The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as
