@@ -14,6 +14,9 @@ All notable changes to this project are documented in this file.
   second `turnStart`. Before, that tab never emitted the `turnEnd` of the running
   turn, and a Stop from it failed with "Agent turn cancellation was not acknowledged before the
   safety timeout" (mitra-core-sdk#136).
+- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
+  successful administrative response. Missing or structurally invalid code remains an invalid
+  response, and `null` is not treated as empty source (#107).
 
 ## 0.3.4
 
