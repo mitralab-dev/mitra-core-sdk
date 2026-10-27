@@ -655,8 +655,9 @@ export interface AppUpdateInput {
   passwordLoginMode?: PasswordLoginMode
   /**
    * Replaces the login theme whole: a field left out is cleared. `null`, or a theme without any
-   * field, clears it, and omission preserves it. Code Studio rejects a key it does not know, so a
-   * misspelled field cannot wipe the theme.
+   * field, clears it, and omission preserves it. A field set to `undefined` drops out of the JSON,
+   * so a theme whose fields are all `undefined` clears it too. Code Studio rejects a key it does not
+   * know, so a misspelled field cannot wipe the theme.
    */
   loginTheme?: Partial<AppLoginTheme> | null
 }

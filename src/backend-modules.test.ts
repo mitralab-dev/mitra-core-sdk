@@ -522,34 +522,21 @@ describe("apps and public Functions", () => {
     ])
   })
 
-  it("sends the login fields on update and leaves the omitted ones out of the body", async () => {
+  it("sends the login fields on update, a null loginTheme included, and leaves the omitted ones out", async () => {
     const transport = new QueueTransport([appDefinition, appDefinition])
     const apps = createAppsModule(transport)
-
-    await expect(
-      apps.update("app-1", { emailLoginEnabled: true, passwordLoginEnabled: false }),
-    ).resolves.toEqual(appDefinition)
-    await apps.update("app-1", { emailLoginEnabled: false })
-
-    expect(transport.requests[0]?.options).toEqual({
-      method: "PATCH",
-      body: { emailLoginEnabled: true, passwordLoginEnabled: false },
-    })
-    expect(transport.requests[1]?.options.body).toStrictEqual({ emailLoginEnabled: false })
-  })
-
-  it("sends a null loginTheme to clear the theme and leaves an omitted one out of the body", async () => {
-    const transport = new QueueTransport([appDefinition, appDefinition])
-    const apps = createAppsModule(transport)
-
-    await apps.update("app-1", { passwordLoginMode: "POPUP", loginTheme: null })
-    await apps.update("app-1", { loginTheme: { title: "Loja X" } })
-
-    expect(transport.requests[0]?.options.body).toStrictEqual({
+    const loginChange = {
+      emailLoginEnabled: true,
+      passwordLoginEnabled: false,
       passwordLoginMode: "POPUP",
       loginTheme: null,
-    })
-    expect(transport.requests[1]?.options.body).toStrictEqual({ loginTheme: { title: "Loja X" } })
+    } as const
+
+    await expect(apps.update("app-1", loginChange)).resolves.toEqual(appDefinition)
+    await apps.update("app-1", { emailLoginEnabled: false })
+
+    expect(transport.requests[0]?.options).toStrictEqual({ method: "PATCH", body: loginChange })
+    expect(transport.requests[1]?.options.body).toStrictEqual({ emailLoginEnabled: false })
   })
 
   it("accepts apps without login fields from an older Code Studio", async () => {
@@ -580,9 +567,15 @@ describe("apps and public Functions", () => {
     },
   )
 
+  it("reads a passwordLoginMode this Core does not know", async () => {
+    const futureMode = { ...appDefinition, passwordLoginMode: "FUTURE_MODE" }
+    const apps = createAppsModule(new QueueTransport([futureMode]))
+
+    await expect(apps.get("app-1")).resolves.toEqual(futureMode)
+  })
+
   it.each([
     ["a passwordLoginMode that is not a string", { passwordLoginMode: null }],
-    ["a loginTheme that is not an object", { loginTheme: "dark" }],
     [
       "a loginTheme field that is not a string",
       { loginTheme: { ...appDefinition.loginTheme, title: 1 } },

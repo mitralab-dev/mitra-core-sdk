@@ -17,8 +17,9 @@ All notable changes to this project are documented in this file.
   that is not null or an object with the six fields as strings or null.
 - `EmailTemplateType` gains `PASSWORD_RESET`, `PASSWORD_CHANGED` and `ACCOUNT_LOCKED`, the password
   login emails Messenger opens to the app. The README documents the `$auth` block that
-  `PASSWORD_RESET` writes in place of the reset link, as the sign-in and invite types do, and the
-  `422` `TEMPLATE_AUTH_BLOCK_INVALID` Messenger answers when the block breaks the rule.
+  `PASSWORD_RESET` writes in place of the reset link, as `SIGN_IN`, `APP_USER_INVITED` and
+  `APP_ACCESS_REQUIRED` do, and the `422` `TEMPLATE_AUTH_BLOCK_INVALID` Messenger answers when the
+  block breaks the rule.
 
 ## 0.3.4
 
