@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+Removes the app email and login methods added for the business agent of the Infusion editor (#133).
+Those apps call the Messenger and Code Studio REST routes directly with the session token they get
+at sign-in, so the SDK no longer carries them.
+
+- Removed from `messenger`: `listEmailTemplates`, `getEmailTemplateType`, `getEmailTemplate`,
+  `upsertEmailTemplate`, `previewEmailTemplate`, `deleteEmailTemplate`, `listEmailSenders`,
+  `registerEmailSender`, `resendEmailSenderVerification`, `confirmEmailSender`, `getEmailSettings`
+  and `updateEmailSettings`, with their types. `notify` and `sendEmail` stay.
+- Removed from `AppUpdateInput`: `emailLoginEnabled` and `passwordLoginEnabled`. `allowSignup`
+  stays.
+
 ## 0.3.4
 
 - The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as
