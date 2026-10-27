@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.2.18-beta.0` is the `0.2.17-beta.0` parity surface without the app email template, app sender
+  and login methods (#133), which the parity cases do not cover. Same parity cases; the version
+  exists so a consumer pinning the package can pin a corpus with the same number.
+
 - `0.2.17-beta.0` is the `0.2.16-beta.0` parity surface with `passwordLoginMode` and `loginTheme` on
   `apps.update()` and the app reads, and the `PASSWORD_RESET`, `PASSWORD_CHANGED` and
   `ACCOUNT_LOCKED` email template types, which the parity cases do not cover. Same parity cases;
