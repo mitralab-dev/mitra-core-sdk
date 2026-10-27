@@ -385,7 +385,7 @@ export interface FunctionVersion {
   id: string
   functionId: string
   status: string
-  code: string
+  code: string | null
   inputSchema: Record<string, unknown> | null
   outputSchema: Record<string, unknown> | null
   secrets: string[] | null
