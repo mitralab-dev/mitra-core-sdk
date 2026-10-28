@@ -1270,6 +1270,12 @@ export interface AgentTaskChannel {
    * log starts a new one. The `boxLog` of the history items. Absent from an older Copilot.
    */
   boxLog?: number
+  /**
+   * The Copilot serving the chat's queue while the box boots, in the box's queue dialect, until
+   * it closes the socket (4100) to hand the chat to the box. It has no log, so no turn runs on it
+   * and nothing is replayed from it. Absent means the box itself.
+   */
+  provisional?: boolean
 }
 
 /** One call to the provider inside a turn, or one model's total when the source gives only that. */

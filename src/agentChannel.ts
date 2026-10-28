@@ -166,7 +166,14 @@ interface PendingAdmission {
 /** The direct channel of one open chat. */
 interface DirectLink {
   wire: Wire | null
+  /** On the Copilot's stand-in while the box boots, which speaks as the box but keeps no log. */
+  provisional: boolean
   inTurn: boolean
+  /**
+   * The turn in flight began on the stand-in: the box that takes over runs that same turn, so
+   * leaving the stand-in never closes it.
+   */
+  turnOnStandIn: boolean
   /** The `lifecycle.turnId` of the last turn frame, so a lost turn can be closed by name. */
   turnId: string | undefined
   /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
@@ -399,6 +406,12 @@ const TURN_FRAME_TYPES: ReadonlySet<string> = new Set([
 
 const TURN_END_REASONS: ReadonlySet<unknown> = new Set(["stop", "endTurn", "interrupted"])
 
+// Records on which wire the turn in flight began, the stand-in or a box.
+function startTurn(link: DirectLink, inTurn: boolean): void {
+  if (inTurn && !link.inTurn) link.turnOnStandIn = link.provisional
+  link.inTurn = inTurn
+}
+
 /** Whether a turn is still in flight after this frame, read the way the session reads it. */
 function turnAfter(event: AgentTaskEvent, inTurn: boolean): boolean {
   if (TURN_FRAME_TYPES.has(event.type)) return true
@@ -540,7 +553,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     if (!this.enabled()) return this.fallback.open(taskId, observer, signal, transport)
     const mode = this.modeFor(transport)
     const answer: AgentTaskChannel | ChannelDeclined = mode
-      ? await this.requestChannel(taskId)
+      ? await this.requestChannel(taskId, mode)
       : { declined: { reason: transport === "websocket" ? "websocket" : "http_unsupported" } }
     if (signal?.aborted) throw signal.reason ?? new Error("Agent channel request aborted.")
     if ("declined" in answer || !mode) {
@@ -613,7 +626,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
           done()
           // Taken, the message has a turn on the box, now or once the queue reaches it. Refused,
           // it opened none, and a drop with nothing else in flight is not redialed.
-          if (value) link.inTurn = true
+          if (value) startTurn(link, true)
           resolve(value)
         },
         fail: (error) => {
@@ -656,13 +669,26 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   }
 
   /**
+   * Only a socket can follow the Copilot's stand-in, which hands the chat to the box by closing
+   * it; an HTTP session keeps waiting for the box on the request, as before.
+   */
+  private askChannel(taskId: string, mode: DirectMode): Promise<AgentTaskChannel | null> {
+    return mode === "websocket"
+      ? this.tasks.channel!(taskId, { standIn: true })
+      : this.tasks.channel!(taskId)
+  }
+
+  /**
    * One request. The Copilot holds it while the box boots and answers with the channel, or an
    * error once the box cannot be had. A 202 comes only from a Copilot that offers no channel.
    */
-  private async requestChannel(taskId: string): Promise<AgentTaskChannel | ChannelDeclined> {
+  private async requestChannel(
+    taskId: string,
+    mode: DirectMode,
+  ): Promise<AgentTaskChannel | ChannelDeclined> {
     let channel: AgentTaskChannel | null
     try {
-      channel = await this.tasks.channel!(taskId)
+      channel = await this.askChannel(taskId, mode)
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code
       return {
@@ -701,7 +727,17 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     signal?: AbortSignal,
     historyCursor?: AgentHistoryCursor,
   ): Promise<AgentTaskEventConnection> {
-    const link: DirectLink = { wire: null, inTurn: false, turnId: undefined, admissions: [] }
+    const link: DirectLink = {
+      wire: null,
+      provisional: channel.provisional === true,
+      inTurn: false,
+      turnOnStandIn: false,
+      turnId: undefined,
+      admissions: [],
+    }
+    // The box log the cursor counts in, which the box that takes over from the stand-in is held to.
+    let expectedLog = historyCursor?.boxLog ?? channel.boxLog
+    let nextProvisional = link.provisional
     let box = boxAddress(channel.wsUrl)
     let thread: string | undefined
     const otherLog =
@@ -737,7 +773,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       if (followsTurn(link, event)) {
         const turnId = asObject(asObject(event.payload)?.lifecycle)?.turnId
         if (typeof turnId === "string" && event.type !== "toolResult") link.turnId = turnId
-        link.inTurn = turnAfter(event, link.inTurn)
+        startTurn(link, turnAfter(event, link.inTurn))
       }
       observer.onEvent(event)
       if (event.type === "stepStart") admissionFor(link, event)?.settle(true)
@@ -752,7 +788,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       if (abort.signal.aborted) return
       // A message the box has not answered yet keeps the redial even after a turn ended: the box
       // may have opened its turn, and only the replay shows that.
-      if ((!link.inTurn && link.admissions.length === 0) || code === SUPERSEDED_CLOSE_CODE) {
+      // The stand-in closes to hand the chat to the box, and drops on a Copilot deploy: both
+      // mean asking for the channel again, turn or not.
+      const idle = !link.provisional && !link.inTurn && link.admissions.length === 0
+      if (idle || code === SUPERSEDED_CLOSE_CODE) {
         for (const pending of link.admissions) pending.fail(error)
         observer.onDisconnect(error)
         return
@@ -763,6 +802,27 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         onLost,
         replayFrom: (next) => {
           boxLog = next.boxLog
+          nextProvisional = next.provisional === true
+          // A stand-in has no log to replay, and says nothing of the box the turn ran on: the
+          // decision waits for the box, with the box, thread and cursor as they were.
+          if (nextProvisional) return undefined
+          const previousLog = expectedLog
+          if (next.boxLog !== undefined) expectedLog = next.boxLog
+          if (link.provisional && (!link.inTurn || link.turnOnStandIn)) {
+            // The box runs the turn the stand-in showed, so none is closed. It keeps the open's
+            // decision: the cursor stays on the expected log, another log is read from its
+            // beginning, and the hello still zeroes a log short of the cursor. A turn that began
+            // on a box before the stand-in is decided against that box, below.
+            box = boxAddress(next.wsUrl)
+            if (
+              previousLog !== undefined &&
+              next.boxLog !== undefined &&
+              next.boxLog !== previousLog
+            ) {
+              cursor = 0
+            }
+            return mode === "websocket" ? afterHello : cursor
+          }
           const decide = (hello: BoxHello | undefined) => {
             const nextBox = boxAddress(next.wsUrl)
             // A box back with an empty log is a new box behind the same address. Only an empty
@@ -799,6 +859,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         if (outcome instanceof Error) for (const pending of link.admissions) pending.fail(outcome)
         else if (outcome) {
           link.wire = outcome
+          link.provisional = nextProvisional
+          // From here the box runs the turn: a later drop is decided against this box.
+          if (!nextProvisional) link.turnOnStandIn = false
           for (const pending of link.admissions) pending.rearm()
         }
       })
@@ -811,8 +874,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       if (hello !== undefined && hello.lastSequence < cursor) cursor = 0
       return cursor
     }
+    // The stand-in has no log: the cursor waits where the history ends for the box to take over.
     const replay =
-      historyFrom === undefined
+      historyFrom === undefined || link.provisional
         ? {}
         : mode === "websocket"
           ? { replayAfterHello: afterHello }
@@ -912,7 +976,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   ): Promise<ReopenOutcome> {
     let channel: AgentTaskChannel | null
     try {
-      channel = await this.tasks.channel!(taskId)
+      channel = await this.askChannel(taskId, mode)
     } catch (error) {
       return { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }
     }

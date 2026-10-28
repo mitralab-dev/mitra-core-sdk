@@ -1419,6 +1419,7 @@ export function expectAgentTaskChannel(
     lastSequence:
       isInteger(channel.lastSequence) && channel.lastSequence > 0 ? channel.lastSequence : 0,
     ...(isInteger(channel.boxLog) ? { boxLog: channel.boxLog } : {}),
+    ...(channel.provisional === true ? { provisional: true } : {}),
   }
 }
 
