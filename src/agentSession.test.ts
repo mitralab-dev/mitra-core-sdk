@@ -1187,6 +1187,7 @@ describe("Agent task session", () => {
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
 
     const combined = withAgentTaskSessions(tasks, manager)
@@ -1213,6 +1214,7 @@ describe("Agent task session", () => {
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
@@ -1263,12 +1265,14 @@ describe("Agent older history", () => {
       size: 2,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(tasks.listMessages).toHaveBeenNthCalledWith(4, "task-1", {
       before: "m3",
       size: 2,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(first.map((item) => item.id)).toEqual(["m3", "m4"])
     expect(second.map((item) => item.id)).toEqual(["m1", "m2"])
@@ -1343,6 +1347,65 @@ describe("Agent older history", () => {
     const fresh = createSession()
     await expect(fresh.session.loadOlder()).resolves.toEqual([])
     expect(fresh.tasks.listMessages).not.toHaveBeenCalled()
+  })
+
+  // mitra-core-sdk#140: a long turn with 121 rows after its question, reopened with a page of
+  // 100. The box sends the running turn's `stepStart` again on the new connection.
+  describe("a turn whose question is older than the loaded page", () => {
+    const boxRow = (id: string, sequence: number, extra: Partial<AgentMessage> = {}) => ({
+      ...message(id, "AGENT", id, "REASONING"),
+      sequence,
+      boxLog: 0,
+      ...extra,
+    })
+    const question = boxRow("q", 45, { sender: "USER", type: "TEXT", clientMessageId: "cm-q" })
+    const turnRows = [boxRow("r1", 46), boxRow("r2", 47), boxRow("r3", 48)]
+    const runningStart = {
+      ...event("stepStart", {
+        text: "q",
+        lifecycle: { turnId: "turn-q", clientMessageId: "cm-q" },
+      }),
+      sequence: 45,
+    }
+
+    function openLongTurn(): { session: AgentTaskSession; source: FakeEventSource } {
+      const tasks = createTasks()
+      tasks.listMessages.mockImplementation(async (_taskId, query) =>
+        query?.before ? olderPage([question]) : olderPage([...turnRows].reverse(), 1),
+      )
+      const source = new FakeEventSource()
+      const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
+        taskId: "task-1",
+        transport: "http",
+      })
+      return { session, source }
+    }
+
+    it("keeps the question out of the end and in its place once the older rows load", async () => {
+      const { session, source } = openLongTurn()
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({ ...event("hello", { threadId: "thread-1", lastSequence: 48 }) })
+      source.emit(runningStart)
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3"])
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["q", "r1", "r2", "r3"])
+    })
+
+    it("still shows the question of a box whose log started over", async () => {
+      const { session, source } = openLongTurn()
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({ ...event("hello", { threadId: "thread-2", lastSequence: 3 }) })
+      source.emit({
+        ...event("stepStart", {
+          text: "new",
+          lifecycle: { turnId: "t2", clientMessageId: "cm-n" },
+        }),
+        sequence: 2,
+      })
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3", "live:user:cm-n"])
+    })
   })
 })
 
@@ -1508,6 +1571,109 @@ describe("Agent turn usage", () => {
 })
 
 describe("Agent history item identity", () => {
+  it("reads a PLAN row as the plan item T3 shows, with its payload as it came", async () => {
+    const payload = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps: [{ id: "step-1", text: "Read the schema", status: "completed", durationMs: 1200 }],
+      explanation: "One step",
+      status: "completed",
+    }
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("p", "AGENT", JSON.stringify(payload), "PLAN"),
+          sequence: 5,
+          lastSequence: 9,
+          boxLog: 0,
+          itemId: "p-1",
+        },
+      ]),
+    )
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages }),
+      eventSource: new FakeEventSource(),
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.history).toEqual([
+      {
+        id: "p",
+        kind: "plan",
+        payload,
+        planId: "plan-1",
+        steps: payload.steps,
+        explanation: "One step",
+        status: "completed",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 5,
+        lastSequence: 9,
+        boxLog: 0,
+        itemId: "p-1",
+      },
+    ])
+  })
+
+  it("keeps a PLAN row's state over an older update a replay brings, and takes a newer one", async () => {
+    const steps = [{ id: "step-1", text: "Read the schema", status: "completed" }]
+    const payload = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps,
+      explanation: "One step",
+      status: "completed",
+    }
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("p", "AGENT", JSON.stringify(payload), "PLAN"),
+          sequence: 5,
+          lastSequence: 9,
+          boxLog: 0,
+          itemId: "p-1",
+        },
+      ]),
+    )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages }),
+      eventSource: source,
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const seen: unknown[] = []
+    session.on("plan", (plan) => seen.push(plan))
+    const older = { ...payload, steps: [{ ...steps[0], status: "running" }] }
+    source.emit({ ...event("plan", older), sequence: 7 })
+    expect(seen).toEqual([])
+    expect(session.history).toEqual([
+      expect.objectContaining({ payload, sequence: 5, lastSequence: 9 }),
+    ])
+    const newer = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps: [...steps, { id: "step-2", text: "Write it", status: "running" }],
+      status: "completed",
+    }
+    source.emit({ ...event("plan", newer), sequence: 12 })
+    expect(seen).toHaveLength(1)
+    expect(session.history).toEqual([
+      {
+        id: "p",
+        kind: "plan",
+        payload: newer,
+        planId: "plan-1",
+        steps: newer.steps,
+        status: "completed",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 5,
+        lastSequence: 12,
+        boxLog: 0,
+        itemId: "p-1",
+      },
+    ])
+  })
+
   it("reads a NOTIFICATION row as the notification item T3 shows, with its payload as it came", async () => {
     const payload = {
       itemId: "n-1",
@@ -1625,7 +1791,11 @@ describe("Agent history item identity", () => {
     const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
     const session = manager.session({ taskId: "task-1" })
     await vi.waitFor(() => expect(session.status).toBe("idle"))
-    expect(listMessages).toHaveBeenCalledWith("task-1", { sort: "createdAt,desc", kinds: "all" })
+    expect(listMessages).toHaveBeenCalledWith("task-1", {
+      sort: "createdAt,desc",
+      kinds: "all",
+      include: "plan",
+    })
     expect(session.history).toEqual([
       { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
       {

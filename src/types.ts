@@ -385,7 +385,7 @@ export interface FunctionVersion {
   id: string
   functionId: string
   status: string
-  code: string
+  code: string | null
   inputSchema: Record<string, unknown> | null
   outputSchema: Record<string, unknown> | null
   secrets: string[] | null
@@ -576,6 +576,11 @@ export interface AgentMessageListOptions extends PageOptions {
    * and `TOOL_USE` rows of the chat itself, as before.
    */
   kinds?: "all"
+  /**
+   * `plan` also asks for the `PLAN` rows, which `kinds: "all"` alone leaves out: 0.3.0 to 0.3.5 read
+   * a row of a type they do not know as text. A Copilot without them ignores it.
+   */
+  include?: "plan"
   /** Id of a message: only the rows recorded before it, so the next page back holds still. */
   before?: string
 }
@@ -1314,7 +1319,7 @@ export interface AgentMessage {
   sender: string
   /**
    * `TEXT`, `ERROR`, `TOOL_USE`; asked with `kinds: "all"`, also `REASONING`, `SUBAGENT_TEXT`,
-   * `APPROVAL`, `USER_INPUT_REQUEST` and `NOTIFICATION`.
+   * `APPROVAL`, `USER_INPUT_REQUEST` and `NOTIFICATION`; with `include: "plan"`, also `PLAN`.
    */
   type: string
   content: string

@@ -15,6 +15,48 @@ at sign-in, so the SDK no longer carries them.
 - Removed from `AppUpdateInput`: `emailLoginEnabled` and `passwordLoginEnabled`. `allowSignup`
   stays.
 
+## 0.3.7
+
+Reads what the box and the Copilot send and record (mitra-sandbox#787, mitra-copilot#558), in any
+order: the session asks the history with `kinds=all&include=plan`, and the Copilot answers `PLAN` rows
+only to a client that names them, so 0.3.0 to 0.3.6 (which ask `kinds=all` and read an unknown row as
+the agent's text) never see one, and get the box's `plan` frame only as `raw`. A Copilot that does not
+know `include` ignores it and answers `kinds=all` as before.
+
+- The turn's list of steps (Claude's TodoWrite and tasks, Codex's plan) reaches the session as T3
+  unifies it: a `plan` event (`AgentPlan`: `planId`, `steps` with
+  `{id, text, status, durationMs?}`, `explanation`, the item's `status`, with `itemId`, `sequence`
+  and `turnId`) and a
+  `plan` item in `history`, live from the box's `plan` frame and reloaded from the Copilot's `PLAN`
+  row. Each update carries the whole list; live, it replaces the item where it first came. Values
+  pass as they come. `AgentTimelineItem` gains the `kind: "plan"` member, with `payload` and no
+  `text`: TypeScript code that reads `text` in a catch-all branch has to handle it.
+- `AgentMessageListOptions` gains `include: "plan"`.
+
+## 0.3.6
+
+- A session that loads the history while a turn runs, with a page that starts after that turn's
+  question, no longer adds the question again at the end of `history` when the box sends the
+  running turn's `stepStart` on connecting. The question is one of the older rows, and `loadOlder`
+  brings it in its place, once. Before, it showed at the end in the middle of the turn and, after
+  `loadOlder`, twice (mitra-core-sdk#140).
+
+## 0.3.5
+
+- A tab that sends a message to the queue of a chat whose turn runs, before its socket said a turn
+  was running, now ends that turn: the running turn's `stepStart`, which names another message,
+  moves its own message to wait for the turn the box opens for it, as a queued steer does. The
+  frames and the terminal of the running turn are no longer taken for a finished turn's and
+  dropped, the `sendAndWait` of the queued message resolves only with its own turn, and taking it
+  out of the queue rejects only it. A message whose turn started on the box while it was still on
+  its way (the replay of a chat another tab runs) goes behind that turn the same way, with no
+  second `turnStart`. Before, that tab never emitted the `turnEnd` of the running
+  turn, and a Stop from it failed with "Agent turn cancellation was not acknowledged before the
+  safety timeout" (mitra-core-sdk#136).
+- `FunctionVersion.code` now accepts `null` when the Functions API redacts source from an otherwise
+  successful administrative response. Missing or structurally invalid code remains an invalid
+  response, and `null` is not treated as empty source (#107).
+
 ## 0.3.4
 
 - The `notification` history item carries `source`, `outcome`, `summary` and `detail` on top, as

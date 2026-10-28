@@ -202,6 +202,33 @@ export interface AgentNotification {
   [field: string]: unknown
 }
 
+/**
+ * One step of the turn's list, as T3 has it: `status` `pending`, `running` or `completed`, and
+ * `durationMs` once T3 timed a completed step. Values are passed as they come, an unknown one
+ * included.
+ */
+export interface AgentPlanStep {
+  id: string
+  text: string
+  status: string
+  durationMs?: number
+  [field: string]: unknown
+}
+
+/**
+ * The turn's list of steps as it stands, T3's `todo_list` item: Claude's TodoWrite and tasks and
+ * Codex's plan. Each update carries the whole list; the same `itemId` is the same list. `status`
+ * is the item's own, as T3 sends it.
+ */
+export interface AgentPlan {
+  planId: string | null
+  steps: AgentPlanStep[]
+  explanation?: string
+  status: string | null
+  itemId?: string
+  [field: string]: unknown
+}
+
 export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
   /** The title the box gave the tool: a subagent's own name (its description), as T3 shows it. */
@@ -288,6 +315,19 @@ export type AgentTimelineItem =
       AgentTimelineItemIdentity)
   | ({
       id: string
+      /**
+       * The turn's list of steps (`PLAN` row), one item per T3 item with its last state: `planId`,
+       * `steps`, `explanation` and `status` as the live `plan` event carries them, and the box's
+       * frame as it came in `payload`. Live, each update replaces the item in place.
+       */
+      kind: "plan"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & Pick<AgentPlan, "planId" | "steps" | "explanation" | "status"> &
+      AgentTimelineItemIdentity)
+  | ({
+      id: string
       kind: "tool"
       tool: AgentToolEvent
       at: string
@@ -344,6 +384,8 @@ export interface AgentTaskSessionEventMap {
   backgroundTasks: { tasks: readonly AgentBackgroundTask[] }
   /** Background work ended: what it was, how it ended and T3's line for it. */
   notification: AgentNotification & AgentPieceIdentity
+  /** The turn's list of steps changed: the whole list, as T3 shows it. */
+  plan: AgentPlan & AgentPieceIdentity
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
@@ -648,11 +690,12 @@ function isChatRow(message: AgentMessage): boolean {
 
 const REQUEST_ROW_KINDS: Record<
   string,
-  "approval" | "userInputRequest" | "notification" | undefined
+  "approval" | "userInputRequest" | "notification" | "plan" | undefined
 > = {
   APPROVAL: "approval",
   USER_INPUT_REQUEST: "userInputRequest",
   NOTIFICATION: "notification",
+  PLAN: "plan",
 }
 
 // The fields the live `notification` event carries on top, so the history item reads the same
@@ -662,6 +705,20 @@ function notificationFieldsOf(
 ): Pick<AgentNotification, "source" | "outcome" | "summary" | "detail"> {
   const { source, outcome, summary, detail } = payload as AgentNotification
   return { source, outcome, summary, ...(detail !== undefined ? { detail } : {}) }
+}
+
+// The fields the live `plan` event carries on top, so the history item reads the same live and
+// after a reload.
+function planFieldsOf(
+  payload: Record<string, unknown>,
+): Pick<AgentPlan, "planId" | "steps" | "explanation" | "status"> {
+  const { planId, steps, explanation, status } = payload as AgentPlan
+  return {
+    planId: planId ?? null,
+    steps: Array.isArray(steps) ? steps : [],
+    ...(explanation !== undefined ? { explanation } : {}),
+    status: status ?? null,
+  }
 }
 
 function parseJson(text: string): unknown {
@@ -696,8 +753,11 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
         ...timelineIdentityOf(message),
         ...parentToolIdOf(message.parentToolId),
       }
-      return requestKind === "notification"
-        ? { ...item, kind: requestKind, ...notificationFieldsOf(payload) }
+      if (requestKind === "notification") {
+        return { ...item, kind: requestKind, ...notificationFieldsOf(payload) }
+      }
+      return requestKind === "plan"
+        ? { ...item, kind: requestKind, ...planFieldsOf(payload) }
         : { ...item, kind: requestKind }
     }
   }
@@ -878,6 +938,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private _hasOlder = false
   // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
   private historyGeneration = 0
+  // Whether the box the channel follows counts in the log of the history's rows. A box whose hello
+  // names another log, or reports a log shorter than the history's, has sequences that start over.
+  private rowsInChannelLog = true
   private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
     null
 
@@ -1011,6 +1074,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.limit !== undefined ? { size: options.limit } : {}),
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.historyLimit = options.limit
     this.replaceHistory(page)
@@ -1045,6 +1109,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
         sort: "createdAt,desc",
         kinds: "all",
+        include: "plan",
       })
     } catch (error) {
       // A read of a history since replaced resolves with nothing, as its success would.
@@ -1061,6 +1126,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   private replaceHistory(page: Page<AgentMessage>): void {
     this.historyGeneration += 1
+    this.rowsInChannelLog = true
     this._hasOlder = hasOlderRows(page)
     this._history = [...page.content].reverse().map(toAgentTimelineItem)
   }
@@ -1225,6 +1291,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
     await this.captureTurnBaseline()
     if (this.isClosed()) return this.handOverAfterClose(input, clientMessageId, waiter)
+    // A box turn started while the channel opened (the replay of a chat another tab runs): the
+    // message goes behind it, as one typed during it does, and that turn was announced already.
+    if (this._status === "streaming" || this._status === "cancelled") {
+      return this.sendBehindRunningTurn(input, clientMessageId, handedOver, waiter)
+    }
     this._content = ""
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
@@ -1239,6 +1310,44 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!direct) this.openingAwaitsStart = false
     handedOver()
     if (!(await admitted)) return false
+    this.acceptOnce(clientMessageId)
+    return true
+  }
+
+  private async sendBehindRunningTurn(
+    input: AgentTaskInput,
+    clientMessageId: string,
+    handedOver: () => void,
+    waiter?: TurnWaiter,
+  ): Promise<boolean> {
+    const steered: SteeredMessage = {
+      clientMessageId,
+      ...(waiter ? { waiter } : {}),
+      taken: false,
+    }
+    this.steers.push(steered)
+    // Failing this message leaves the running turn, which is not its own, alone.
+    const fail = (error: unknown) => {
+      this.forgetSteer(steered)
+      waiter?.reject(error)
+      return false
+    }
+    let taken: boolean
+    try {
+      const { admitted } = await this.handOver(input, clientMessageId, true)
+      handedOver()
+      taken = await admitted
+    } catch (error) {
+      handedOver()
+      this.emitError("Failed to send Agent prompt", error)
+      return fail(error)
+    }
+    if (!taken) {
+      return fail(
+        steered.refusal ?? new AgentTaskTurnError("The Agent box did not take the message."),
+      )
+    }
+    if (!steered.queued) this.steerTaken(steered)
     this.acceptOnce(clientMessageId)
     return true
   }
@@ -1352,6 +1461,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this.steers.includes(steered)) return
     this.steers = this.steers.filter((pending) => pending !== steered)
     this.strayedSteers.push(steered)
+  }
+
+  // Another message's turn started while ours waited for its own: one runs ahead of ours (a tab
+  // that sent to the queue before its socket said a turn was running). Its frames are the running
+  // turn's, not a finished one's, or its terminal is dropped and the turn never ends here. Ours
+  // waits for the turn the box opens for it, as a queued steer does, so that turn answers it.
+  private openingQueuedBehind(): void {
+    const id = this.openingMessageId
+    this.openingAwaitsStart = false
+    this.openingMessageId = undefined
+    if (id === undefined) return
+    this.strayedSteers.push({
+      clientMessageId: id,
+      ...(this.activeWaiter ? { waiter: this.activeWaiter } : {}),
+      taken: false,
+      queued: true,
+    })
+    this.activeWaiter = undefined
   }
 
   private forgetSteer(steered: SteeredMessage): void {
@@ -1512,6 +1639,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       size: 100,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
@@ -1522,6 +1650,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       size: 100,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.replaceHistory(page)
     this.emit("historyLoaded", { history: this.history })
@@ -1648,6 +1777,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
       if (id === this.openingMessageId || (id === undefined && event.type === "stepStart")) {
         this.openingAwaitsStart = false
         this.forgetFinishedTurn(lifecycle)
+      } else if (event.type === "stepStart" && this.openingAwaitsStart) {
+        this.openingQueuedBehind()
       }
     } else if (
       this.openingAwaitsStart &&
@@ -1724,6 +1855,24 @@ class CoreAgentTaskSession implements AgentTaskSession {
             : {}),
         })
         break
+      case "hello": {
+        const lastSequence = payload?.lastSequence
+        const history = historyCursorOf(this._history)
+        const rowsLog = [...this._history]
+          .reverse()
+          .find((item) => item.boxLog !== undefined)?.boxLog
+        if (
+          (typeof payload?.boxLog === "number" &&
+            rowsLog !== undefined &&
+            payload.boxLog !== rowsLog) ||
+          (typeof lastSequence === "number" &&
+            history !== undefined &&
+            lastSequence < history.sequence)
+        ) {
+          this.rowsInChannelLog = false
+        }
+        break
+      }
       case "backgroundTasks":
         this._backgroundTasks = backgroundTasksOf(payload?.tasks)
         this.emit("backgroundTasks", { tasks: this._backgroundTasks })
@@ -1822,6 +1971,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
         if (payload) {
           this.emit("notification", {
             ...(payload as AgentNotification),
+            ...pieceIdentityOf(event, payload),
+          })
+        }
+        break
+      case "plan":
+        if (payload && this.livePlan(event, payload)) {
+          this.emit("plan", {
+            ...(payload as AgentPlan),
+            ...planFieldsOf(payload),
             ...pieceIdentityOf(event, payload),
           })
         }
@@ -2062,6 +2220,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const text = (id !== undefined ? this.sentTexts.get(id) : undefined) ?? boxText
     if (typeof text !== "string" || !text) return
     const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if ((id === undefined || !this.sentTexts.has(id)) && this.beforeLoadedRows(sequence)) return
     this.livePiece(
       (item) =>
         item.kind === "user" &&
@@ -2077,6 +2236,21 @@ class CoreAgentTaskSession implements AgentTaskSession {
       }),
       (item) => item,
     )
+  }
+
+  // Every connection to the box brings the running turn's `stepStart` again, and a history loaded
+  // while that turn ran can start after its question (mitra-core-sdk#140: 121 rows after it, a
+  // page of 100). Before the oldest row the history holds, with older rows still on the server,
+  // the question is one of those rows, and `loadOlder` brings it in its place.
+  private beforeLoadedRows(sequence: number | undefined): boolean {
+    if (sequence === undefined || !this._hasOlder || !this.rowsInChannelLog) return false
+    const rows = this._history.filter(
+      (item) => !item.id.startsWith("live:") && typeof item.sequence === "number",
+    )
+    const oldest = rows[0]
+    const newest = rows[rows.length - 1]
+    if (oldest?.sequence === undefined || oldest.boxLog !== newest?.boxLog) return false
+    return sequence < oldest.sequence
   }
 
   private liveText(
@@ -2175,6 +2349,47 @@ class CoreAgentTaskSession implements AgentTaskSession {
       },
       (item) => item,
     )
+  }
+
+  // T3 sends the list whole on each update: the item takes the last one where it first came, as
+  // the Copilot's row does. An update the item already holds (a replay after the history) leaves
+  // it as it is and answers false.
+  private livePlan(event: AgentTaskEvent, payload: Record<string, unknown>): boolean {
+    const itemId = typeof payload.itemId === "string" ? payload.itemId : undefined
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if (itemId === undefined && sequence === undefined) return true
+    let applied = true
+    this.livePiece(
+      (item) =>
+        item.kind === "plan" &&
+        (itemId !== undefined ? item.itemId === itemId : item.sequence === sequence),
+      () => ({
+        id: `live:plan:${itemId ?? sequence}`,
+        kind: "plan",
+        payload,
+        ...planFieldsOf(payload),
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(itemId === undefined ? {} : { itemId }),
+      }),
+      (item) => {
+        const held = item.lastSequence ?? item.sequence
+        if (sequence !== undefined && held !== undefined && sequence <= held) {
+          applied = false
+          return item
+        }
+        const fields = planFieldsOf(payload)
+        const next = {
+          ...(item as Extract<AgentTimelineItem, { kind: "plan" }>),
+          payload,
+          ...fields,
+          ...(sequence === undefined ? {} : { lastSequence: sequence }),
+        }
+        if (fields.explanation === undefined) delete next.explanation
+        return next
+      },
+    )
+    return applied
   }
 
   // A child thread's frames are the subagent's conversation: they open no turn and settle no

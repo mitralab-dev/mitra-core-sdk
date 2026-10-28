@@ -15,7 +15,7 @@ import type {
 } from "./agentSession"
 import { createAgentTasksModule, type AgentTasksModule } from "./modules/agentTasks"
 import type { Transport } from "./transport"
-import type { AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
+import type { AgentMessage, AgentTask, AgentTaskChannel, AgentTaskEvent, Page } from "./types"
 
 const AGENT_ID = "agent-1"
 
@@ -3019,5 +3019,194 @@ describe("Agent direct channel steering", () => {
     redialed.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
     const [firstResult, steerResult] = await Promise.all([first, steer])
     expect(steerResult).toBe(firstResult)
+  })
+})
+
+describe("Agent direct channel on a second tab of a chat with a turn running", () => {
+  // A tab that sends to the queue before its socket said a turn was running: the box queues the
+  // message behind the turn another tab opened.
+  async function queueBehindRunningTurn() {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const turnEnds: string[] = []
+    session.on("turnEnd", ({ reason, content }) => turnEnds.push(`${reason}:${content}`))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    const result = session.sendAndWait("Then birds", { mode: "queue" })
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    const id = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: 1,
+      text: "Then birds",
+      queueHeld: false,
+      lifecycle: { clientMessageId: id },
+    })
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: "other" } }, 4)
+    return { session, socket, id, result, turnEnds }
+  }
+
+  it("ends the running turn, and answers the queued message only with the turn the box opens for it", async () => {
+    const { session, socket, id, result, turnEnds } = await queueBehindRunningTurn()
+    let settled = false
+    void result.finally(() => {
+      settled = true
+    })
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(session.queue.map((item) => item.id)).toEqual([id])
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: id } }, 6)
+    socket.receive("textDelta", { text: "Eagle", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 7)
+    await expect(result).resolves.toMatchObject({ content: "Eagle", reason: "stop" })
+    expect(turnEnds).toEqual(["stop:1. Lion", "stop:Eagle"])
+    expect(session.queue).toEqual([])
+    session.close()
+  })
+
+  it("sends behind a turn that started while the message was on its way, and announces that turn once", async () => {
+    const tasks = createTasks(offer())
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    const turnStarts = vi.fn()
+    const turnEnds: string[] = []
+    session.on("turnStart", turnStarts)
+    session.on("turnEnd", ({ reason, content }) => turnEnds.push(`${reason}:${content}`))
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const socket = FakeWebSocket.last()
+    // The message waits on the turn baseline while the replay says a turn runs.
+    let releaseBaseline!: () => void
+    tasks.listMessages.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseBaseline = () => resolve(EMPTY_PAGE)
+        }),
+    )
+
+    const result = session.sendAndWait("Then birds", { mode: "queue" })
+    await vi.waitFor(() => expect(releaseBaseline).toBeDefined())
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-1", clientMessageId: "other" } }, 4)
+    expect(session.status).toBe("streaming")
+    releaseBaseline()
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+    const id = (socket.sent[0] as { clientMessageId: string }).clientMessageId
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: 1,
+      text: "Then birds",
+      queueHeld: false,
+      lifecycle: { clientMessageId: id },
+    })
+    let settled = false
+    void result.finally(() => {
+      settled = true
+    })
+
+    socket.receive("toolCall", { toolId: "t-1", name: "Read", lifecycle: { turnId: "turn-1" } })
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(turnStarts).toHaveBeenCalledTimes(1)
+
+    socket.receive("stepStart", { lifecycle: { turnId: "turn-2", clientMessageId: id } }, 6)
+    socket.receive("textDelta", { text: "Eagle", lifecycle: { turnId: "turn-2" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-2" } }, 7)
+    await expect(result).resolves.toMatchObject({ content: "Eagle", reason: "stop" })
+    expect(turnStarts).toHaveBeenCalledTimes(2)
+    session.close()
+  })
+
+  it("rejects only the queued message when it is taken out of the queue behind the running turn", async () => {
+    const { session, socket, id, result, turnEnds } = await queueBehindRunningTurn()
+    const settledResult = expect(result).rejects.toThrow("cancelled")
+    session.removeQueueItem(id)
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2))
+    socket.receive("messageQueued", {
+      clientMessageId: id,
+      position: null,
+      cancelled: true,
+      lifecycle: { clientMessageId: id },
+    })
+    await settledResult
+    expect(session.status).toBe("streaming")
+
+    socket.receive("textDelta", { text: "1. Lion", lifecycle: { turnId: "turn-1" } })
+    socket.receive("stepFinish", { reason: "stop", lifecycle: { turnId: "turn-1" } }, 5)
+    await vi.waitFor(() => expect(turnEnds).toEqual(["stop:1. Lion"]))
+    expect(session.status).toBe("idle")
+    session.close()
+  })
+})
+
+// mitra-core-sdk#140: a page of the history that starts after the running turn's question, read
+// again while that turn runs. The box sends the turn's `stepStart` again on connecting.
+describe("Agent direct channel with a history page that starts after the running turn", () => {
+  const row = (id: string, sequence: number): AgentMessage => ({
+    id,
+    sender: "AGENT",
+    type: "REASONING",
+    content: id,
+    createdAt: `2026-01-01T00:00:0${sequence}Z`,
+    sequence,
+    boxLog: 0,
+  })
+  const newestPage: Page<AgentMessage> = {
+    content: [row("r3", 4), row("r2", 3), row("r1", 2)],
+    page: { size: 3, totalElements: 4, totalPages: 2, number: 0 },
+  }
+
+  async function openOn(boxLog: number) {
+    const tasks = createTasks(async () => ({ wsUrl: BOX_URL, lastSequence: 6, boxLog }))
+    tasks.listMessages.mockResolvedValue(newestPage)
+    const manager = createAgentTaskSessionManager({
+      tasks,
+      eventSource: new FallbackSource(),
+      directChannel: { apiUrl: API_URL, WebSocket: WebSocketImpl },
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive("hello", { threadId: "thread-1", lastSequence: 6 })
+    return { session, socket }
+  }
+
+  it("keeps the running turn's question of the rows' log out of the end", async () => {
+    const { session, socket } = await openOn(0)
+    socket.receive(
+      "stepStart",
+      { text: "q", lifecycle: { turnId: "t1", clientMessageId: "cm-q" } },
+      1,
+    )
+
+    expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3"])
+    session.close()
+  })
+
+  it("shows a question the box logged in another log than the rows'", async () => {
+    const { session, socket } = await openOn(1)
+    socket.receive(
+      "stepStart",
+      { text: "n", lifecycle: { turnId: "t2", clientMessageId: "cm-n" } },
+      1,
+    )
+
+    expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3", "live:user:cm-n"])
+    session.close()
   })
 })

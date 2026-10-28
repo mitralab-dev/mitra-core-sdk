@@ -31,7 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
-import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
+import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentPlan, type AgentPlanStep, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
   shortId: "AAAAAAAAAAAAAAAAAAAAEA",
@@ -107,6 +107,14 @@ void endedWork
 void onNotification
 void notificationOf
 void notificationSummaryOf
+const turnPlan: AgentPlan = { planId: "plan-1", status: "completed", steps: [{ id: "step-1", text: "Read the schema", status: "running" }] }
+const onPlan = (session: AgentTaskSession): void => {
+  session.on("plan", (plan) => { const steps: AgentPlanStep[] = plan.steps; void steps })
+}
+const planStepsOf = (item: AgentTimelineItem): AgentPlanStep[] | undefined => (item.kind === "plan" ? item.steps : undefined)
+void turnPlan
+void onPlan
+void planStepsOf
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -194,6 +202,14 @@ void endedWork
 void onNotification
 void notificationOf
 void notificationSummaryOf
+const turnPlan: core.AgentPlan = { planId: "plan-1", status: "completed", steps: [{ id: "step-1", text: "Read the schema", status: "running" }] }
+const onPlan = (session: core.AgentTaskSession): void => {
+  session.on("plan", (plan) => { const steps: core.AgentPlanStep[] = plan.steps; void steps })
+}
+const planStepsOf = (item: core.AgentTimelineItem): core.AgentPlanStep[] | undefined => (item.kind === "plan" ? item.steps : undefined)
+void turnPlan
+void onPlan
+void planStepsOf
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

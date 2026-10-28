@@ -486,7 +486,7 @@ function expectFunctionVersion(value: unknown, context: string, errors: SdkCoreE
   if (typeof version.id !== "string") invalidField(context, "id", errors)
   if (typeof version.functionId !== "string") invalidField(context, "functionId", errors)
   if (typeof version.status !== "string") invalidField(context, "status", errors)
-  if (typeof version.code !== "string") invalidField(context, "code", errors)
+  if (!isNullableString(version.code)) invalidField(context, "code", errors)
   if (version.inputSchema !== null && !isObject(version.inputSchema)) {
     invalidField(context, "inputSchema", errors)
   }
