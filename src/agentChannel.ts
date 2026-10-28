@@ -31,9 +31,11 @@ export const RECONNECT_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_00
 export const ADMISSION_TIMEOUT_MS = 35_000
 /** The box closes the older socket with this code when the same chat is opened elsewhere. */
 const SUPERSEDED_CLOSE_CODE = 4409
-/** The stand-in's close once the box is ready; after the hand-over it is only a safety net. */
-const STAND_IN_CLOSE_CODE = 4100
-/** The stand-in's word that the box is ready: the box's socket opens before the stand-in's closes. */
+/**
+ * The stand-in's word that the box owns the chat's queue. The session stops sending there, answers
+ * with the same frame once everything it sent is on its way, and the stand-in, having taken all of
+ * it, closes; the box's socket opens then.
+ */
 const HANDOVER_FRAME = "handover"
 /** `WebSocket.OPEN`, read as a literal so an injected implementation without the static works. */
 const SOCKET_OPEN = 1
@@ -141,6 +143,8 @@ type BoxMessage = Extract<AgentTaskInput, { type: "message" }> & { clientMessage
 /** The box, reached over its socket or its HTTP routes, as the session's sends see it. */
 interface Wire {
   close(): void
+  /** The stand-in's socket only: the answer to its `handover`. */
+  handOver?(): boolean
   /** Null when the wire cannot carry it right now. */
   interrupt(input: AgentTaskInput): Promise<boolean> | null
   /** False when the message was not handed over; the admission is settled by the wire or stream. */
@@ -178,6 +182,13 @@ interface DirectLink {
    * leaving the stand-in never closes it.
    */
   turnOnStandIn: boolean
+  /**
+   * From the stand-in's `handover` until the box's replay is complete: what the caller sends waits
+   * in `outbox`, in order, and goes on the box's socket, with the same ids, once the box has shown
+   * what it took from the stand-in.
+   */
+  handingOver: boolean
+  outbox: Array<() => void>
   /** The `lifecycle.turnId` of the last turn frame, so a lost turn can be closed by name. */
   turnId: string | undefined
   /** Oldest first: the box admits the messages of a chat one at a time, in the order sent. */
@@ -602,6 +613,7 @@ export class AgentDirectChannel implements AgentTaskEventSource {
   send(taskId: string, input: AgentTaskInput, clientMessageId?: string): Promise<boolean> | null {
     if (input.type === "approval_response") return null
     const link = this.links.get(taskId)
+    if (link?.handingOver) return this.holdForTheBox(link, input, clientMessageId)
     if (!link?.wire) {
       // A Stop with the chat's socket down is an error the person sees, not one the Copilot
       // holds: with others on the chat, what a Stop lands on is known only while connected.
@@ -618,6 +630,19 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     // A message sent while a turn runs is not held back: the box takes it into that turn, so
     // several can wait for the box at once, each answered by its own `stepStart`.
     const messageId = clientMessageId ?? newClientMessageId()
+    const { admission, admitted } = this.admission(link, messageId)
+    if (!link.wire.message({ ...input, clientMessageId: messageId }, admission)) {
+      admission.settle(false)
+      return null
+    }
+    return admitted
+  }
+
+  /** The box's answer the message waits for, armed now and listed with the chat's others. */
+  private admission(
+    link: DirectLink,
+    messageId: string,
+  ): { admission: PendingAdmission; admitted: Promise<boolean> } {
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -654,10 +679,36 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       arm()
     })
     link.admissions = [...link.admissions, admission]
-    if (!link.wire.message({ ...input, clientMessageId: messageId }, admission)) {
-      admission.settle(false)
-      return null
+    return { admission, admitted }
+  }
+
+  /**
+   * During the hand-over from the stand-in to the box: the send waits in the outbox and goes on
+   * the box's socket as it would have gone on the stand-in's, its admission armed as any other.
+   */
+  private holdForTheBox(
+    link: DirectLink,
+    input: AgentTaskInput,
+    clientMessageId?: string,
+  ): Promise<boolean> {
+    const notSent = () =>
+      new Error("The Agent input was not sent: the box channel closed during the hand-over.")
+    if (input.type !== "message") {
+      return new Promise<boolean>((resolve, reject) => {
+        link.outbox.push(() => {
+          const sent = link.wire?.interrupt(input) ?? null
+          if (sent) sent.then(resolve, reject)
+          else reject(notSent())
+        })
+      })
     }
+    const messageId = clientMessageId ?? newClientMessageId()
+    const { admission, admitted } = this.admission(link, messageId)
+    link.outbox.push(() => {
+      if (!link.wire?.message({ ...input, clientMessageId: messageId }, admission)) {
+        admission.fail(notSent())
+      }
+    })
     return admitted
   }
 
@@ -749,6 +800,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       turnOnStandIn: false,
       turnId: undefined,
       admissions: [],
+      handingOver: false,
+      outbox: [],
     }
     // The box log the cursor counts in, which the box that takes over from the stand-in is held to.
     let expectedLog = historyCursor?.boxLog ?? channel.boxLog
@@ -776,6 +829,8 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         handOver()
         return
       }
+      // The box has shown what it took from the stand-in: what waited goes now, in its order.
+      if (frame.type === "replayComplete" && link.handingOver && !link.provisional) flushOutbox()
       const hello = helloOf(frame)
       if (hello) thread = hello.threadId
       const event =
@@ -853,48 +908,50 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       // rest until the replay is asked for. HTTP picks its cursor before the stream opens.
       return mode === "websocket" && thread !== undefined ? decide : decide(undefined)
     }
-    // The box's socket opens and replays before the stand-in's closes, so the chat is never
-    // without a socket on the way to the box. Until then everything still goes on the stand-in,
-    // which hands the box what it already took. A try that fails leaves it to the stand-in's own
-    // 4100, which redials as any drop does.
-    let handingOver = false
+    // The box owns the chat's queue: nothing more goes on the stand-in, which is told so with the
+    // same frame. Frames of one socket are taken in order, so once the stand-in closes (4100)
+    // everything sent there is in the list the box drains, and the box's socket opens then.
     const handOver = () => {
-      if (handingOver || !link.provisional) return
-      handingOver = true
-      void this.reopenOnce(taskId, mode, abort.signal, {
-        onFrame,
-        onLost,
-        replayFrom: replayFromNext,
-      }).then((outcome) => {
-        handingOver = false
-        if (outcome.kind === "wire") {
-          // Still the stand-in (this Copilot does not see the box ready yet), or the 4100's
-          // redial got there first: this socket is one too many.
-          if (abort.signal.aborted || nextProvisional || !link.provisional) {
-            outcome.wire.close()
-            return
-          }
-          const standIn = link.wire
-          link.wire = outcome.wire
-          link.provisional = false
-          link.turnOnStandIn = false
-          standIn?.close()
-          for (const pending of link.admissions) pending.rearm()
-          return
-        }
-        // The stand-in went away while the box was being dialed: redial as after any drop.
-        if (link.wire === null && !abort.signal.aborted) {
-          onLost(new Error("The Agent channel could not be handed over to the box."))
-        }
-      })
+      if (link.handingOver || !link.provisional || !link.wire?.handOver) return
+      link.handingOver = true
+      link.wire.handOver()
+    }
+    const flushOutbox = () => {
+      link.handingOver = false
+      const waiting = link.outbox
+      link.outbox = []
+      for (const send of waiting) send()
+    }
+    // A wire taken after a drop or the hand-over. A stand-in again (a Copilot that took the queue
+    // back) takes what waited at once; the box, after its replay.
+    const adopt = (wire: Wire) => {
+      link.wire = wire
+      link.provisional = nextProvisional
+      // From here the box runs the turn: a later drop is decided against this box.
+      if (!nextProvisional) link.turnOnStandIn = false
+      for (const pending of link.admissions) pending.rearm()
+      if (link.handingOver && nextProvisional) flushOutbox()
     }
     const onLost = (error: Error, code?: number) => {
-      // The stand-in closing once the box took over: the box's socket is the chat's now.
-      if (code === STAND_IN_CLOSE_CODE && !link.provisional) return
       link.wire = null
       if (abort.signal.aborted) return
-      // The hand-over in flight opens the box's socket, or redials if it cannot.
-      if (handingOver) return
+      // The stand-in closed after the hand-over (4100), or dropped in the middle of it: the box's
+      // socket opens now, without the redial's first wait, and the redial takes over if it cannot.
+      if (link.handingOver) {
+        void this.reopenOnce(taskId, mode, abort.signal, {
+          onFrame,
+          onLost,
+          replayFrom: replayFromNext,
+        }).then((outcome) => {
+          if (abort.signal.aborted) {
+            if (outcome.kind === "wire") outcome.wire.close()
+            return
+          }
+          if (outcome.kind === "wire") adopt(outcome.wire)
+          else redialAfter(outcome.kind === "failed" ? outcome.error : error)
+        })
+        return
+      }
       // A message the box has not answered yet keeps the redial even after a turn ended: the box
       // may have opened its turn, and only the replay shows that.
       // The stand-in closes to hand the chat to the box, and drops on a Copilot deploy: both
@@ -905,6 +962,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         observer.onDisconnect(error)
         return
       }
+      redialAfter(error)
+    }
+    const redialAfter = (error: Error) => {
       for (const pending of link.admissions) pending.hold()
       void this.redial(taskId, mode, error, abort.signal, observer, {
         onFrame,
@@ -913,14 +973,13 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       }).then((outcome) => {
         // A message still waiting when the channel is gone for good fails out loud: the caller
         // that fires and leaves must not take a lost message for a sent one.
-        if (outcome instanceof Error) for (const pending of link.admissions) pending.fail(outcome)
-        else if (outcome) {
-          link.wire = outcome
-          link.provisional = nextProvisional
-          // From here the box runs the turn: a later drop is decided against this box.
-          if (!nextProvisional) link.turnOnStandIn = false
-          for (const pending of link.admissions) pending.rearm()
-        }
+        if (outcome instanceof Error) {
+          for (const pending of link.admissions) pending.fail(outcome)
+          link.handingOver = false
+          const waiting = link.outbox
+          link.outbox = []
+          for (const send of waiting) send()
+        } else if (outcome) adopt(outcome)
       })
     }
 
@@ -973,6 +1032,9 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     const socket = await this.dial(channel.wsUrl, options)
     return {
       close: () => socket.close(),
+      ...(channel.provisional === true
+        ? { handOver: () => socket.send(JSON.stringify({ type: HANDOVER_FRAME })) }
+        : {}),
       interrupt: (input) => (socket.send(JSON.stringify(input)) ? Promise.resolve(true) : null),
       message: (input) => socket.send(JSON.stringify(input)),
     }

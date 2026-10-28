@@ -13,11 +13,13 @@ the stand-in; with a Copilot without it, everything stays as in 0.3.7.
 - With the box cold, the Copilot answers at once with a `provisional` channel that sends the same
   frames a live box does, without `sequence`: the session shows the same turn, queue, steer,
   cancel, edit and Stop as on a live box. The SDK adds no queue, admission or Stop of its own.
-- When the box is ready the stand-in says so (`handover`): the session asks for the channel again,
-  opens the box's socket and only then closes the stand-in's, so the chat is never without a
-  socket on the way. Until the box's socket is open everything still goes on the stand-in. The
-  stand-in's 4100 that follows asks for nothing; one that comes first, or a hand-over that still
-  finds the stand-in, redials as before.
+- When the box takes the chat's queue the stand-in says so (`handover`): the session stops sending
+  there and answers with the same frame. The Copilot takes a socket's frames in order, so once it
+  closes the stand-in with 4100 everything the session sent there is in the box's list; the
+  session then asks for the channel and opens the box, without the redial's wait. What the app
+  sends meanwhile (message, Stop, cancel, edit, resume) waits in order and goes on the box's socket,
+  with the same ids, once the box's replay completes. A stand-in again (the Copilot took the queue
+  back) takes it at once. A stand-in that drops in the middle of the hand-over opens the box too.
 - A Stop with the chat's socket down (a redial in flight) is refused with an error instead of
   going to the Copilot by REST, as cancel and edit already were: with others on the chat, what a
   Stop lands on is known only while connected. A session with no direct channel still stops by
