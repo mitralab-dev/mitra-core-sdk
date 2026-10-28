@@ -645,13 +645,6 @@ export interface AppUpdateInput {
   icon?: string
   /** Whether users may sign up through this app. Omission preserves the current value. */
   allowSignup?: boolean
-  /** Whether users may sign in with a code sent by email. Omission preserves the current value. */
-  emailLoginEnabled?: boolean
-  /**
-   * Whether users may sign in with a password. Omission preserves the current value. Code Studio
-   * rejects `true` while the app inherits the platform login.
-   */
-  passwordLoginEnabled?: boolean
 }
 
 export interface AppDomain {
@@ -675,10 +668,6 @@ export interface AppSummary {
   template: string | null
   planId: string
   allowSignup: boolean
-  /** Absent on a Code Studio that predates email login. */
-  emailLoginEnabled?: boolean
-  /** Absent on a Code Studio that predates password login. */
-  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -700,10 +689,6 @@ export interface AppDefinition {
   planId: string
   template: string | null
   allowSignup: boolean
-  /** Absent on a Code Studio that predates email login. */
-  emailLoginEnabled?: boolean
-  /** Absent on a Code Studio that predates password login. */
-  passwordLoginEnabled?: boolean
   externalAccessEnabled: boolean
   currentVersion: AppVersion | null
   createdAt: string
@@ -1537,121 +1522,6 @@ export interface SendEmailInput {
   html: string
   /** Plain-text alternative for clients that do not render HTML. */
   text?: string
-}
-
-/**
- * The account emails an app may rewrite with its own token. Messenger sends them from the app's
- * sender settings or the brand, so a template never picks its sender.
- */
-export type EmailTemplateType =
-  "SIGN_IN" | "SSO_GUIDANCE" | "APP_USER_INVITED" | "APP_ACCESS_REQUIRED"
-
-export interface EmailTemplate {
-  id: string
-  /**
-   * An `EmailTemplateType` with an app token. Kept as a string because a console token also
-   * lists the platform's other types, and a type Messenger opens later must not break the list.
-   */
-  type: string
-  /** Always null for these types: their sender comes from the app settings or the brand. */
-  senderIdentityId: string | null
-  subject: string
-  htmlBody: string
-  textBody: string | null
-  /** True on a platform row. The list returns it next to the app's own row when the app rewrote the type. */
-  platformDefault: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-export interface EmailTemplateVariable {
-  /** Referenced in a template as `$name`. */
-  name: string
-  /** A required variable must appear in the subject or the HTML body. */
-  required: boolean
-  description: string | null
-  /** Sample value used to render the preview. */
-  preview: string | null
-}
-
-export interface EmailTemplateTypeCatalog {
-  type: string
-  variables: EmailTemplateVariable[]
-}
-
-/** Replaces the app's version of the template as a whole. */
-export interface EmailTemplateInput {
-  subject: string
-  htmlBody: string
-  /** Left out, the plain-text version saved before is cleared. */
-  textBody?: string
-}
-
-/** The template rendered with the preview values of its variables. */
-export interface EmailTemplatePreview {
-  subject: string
-  htmlBody: string
-  textBody: string | null
-}
-
-export interface EmailTemplateUpsertResult {
-  template: EmailTemplate
-  /** Null when only the preview failed; the template is saved all the same. */
-  preview: EmailTemplatePreview | null
-  /** The transport or response error of the preview, unchanged, when `preview` is null. */
-  previewError?: unknown
-}
-
-/** An address of a person, available as a sender in the app's workspace. */
-export interface EmailSender {
-  id: string
-  email: string
-  displayName: string
-  /**
-   * `PENDING`, `VERIFIED` or `FAILED`. Kept as a string so a status Messenger adds later does not
-   * break the list. Only a `VERIFIED` address signs the app's emails.
-   */
-  status: string
-  sharedWithCurrentWorkspace: boolean
-  /** True until the person confirms the 6-digit code Messenger sent to the address. */
-  ownerConfirmationPending: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-export interface EmailSenderInput {
-  email: string
-  /** Name of the address; the app settings may override it in the From header. */
-  displayName: string
-}
-
-/** The From the app's emails use now, which falls back to the brand while the app sender cannot sign. */
-export interface EffectiveEmailSender {
-  email: string
-  displayName: string | null
-  /** `APP_SENDER` or `BRAND_DEFAULT`, as a string for the same reason as `EmailSender.status`. */
-  source: string
-  /** Why the brand signs: `NO_SETTINGS`, `IDENTITY_NOT_VERIFIED` or `IDENTITY_NOT_SHARED`. */
-  reason: string | null
-}
-
-export interface EmailSettings {
-  appId: string
-  senderIdentityId: string | null
-  displayName: string | null
-  replyTo: string | null
-  effectiveSender: EffectiveEmailSender
-  /** True when the app's own templates go out even while the brand signs. */
-  ownTemplateSendsFromBrand: boolean
-}
-
-/** Replaces the app's settings as a whole: a field left out or null is cleared. */
-export interface EmailSettingsInput {
-  /** An `EmailSender.id` from `listEmailSenders`; without it the app sends from the brand. */
-  senderIdentityId?: string | null
-  /** Single line, shown in the From header. */
-  displayName?: string | null
-  replyTo?: string | null
 }
 
 export interface AppContext {

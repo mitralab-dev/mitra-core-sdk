@@ -26,11 +26,6 @@ import type {
   DataSourceBulkResult,
   DataSourceDefinition,
   DeviceAuthorization,
-  EmailSender,
-  EmailSettings,
-  EmailTemplate,
-  EmailTemplatePreview,
-  EmailTemplateTypeCatalog,
   FunctionBulkDeleteResult,
   FunctionDefinition,
   FunctionExecution,
@@ -77,10 +72,6 @@ function isObject(value: unknown): value is JsonObject {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string"
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0
 }
 
 function isNullableBoolean(value: unknown): value is boolean | null {
@@ -653,9 +644,6 @@ function expectAppFields(app: JsonObject, context: string, errors: SdkCoreErrorF
   if (!isNullableString(app.icon)) invalidField(context, "icon", errors)
   if (!isNullableString(app.template)) invalidField(context, "template", errors)
   if (typeof app.allowSignup !== "boolean") invalidField(context, "allowSignup", errors)
-  for (const field of ["emailLoginEnabled", "passwordLoginEnabled"] as const) {
-    if (field in app && typeof app[field] !== "boolean") invalidField(context, field, errors)
-  }
   if (typeof app.externalAccessEnabled !== "boolean") {
     invalidField(context, "externalAccessEnabled", errors)
   }
@@ -951,108 +939,6 @@ export function expectMessageAccepted(
   const response = expectObject<JsonObject>(value, context, errors)
   if (typeof response.messageId !== "string") invalidField(context, "messageId", errors)
   return response as unknown as MessageAccepted
-}
-
-export function expectEmailTemplate(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): EmailTemplate {
-  const template = expectObject<JsonObject>(value, context, errors)
-  if (typeof template.id !== "string") invalidField(context, "id", errors)
-  if (!isNonEmptyString(template.type)) invalidField(context, "type", errors)
-  if (!isNullableString(template.senderIdentityId)) {
-    invalidField(context, "senderIdentityId", errors)
-  }
-  if (typeof template.subject !== "string") invalidField(context, "subject", errors)
-  if (typeof template.htmlBody !== "string") invalidField(context, "htmlBody", errors)
-  if (!isNullableString(template.textBody)) invalidField(context, "textBody", errors)
-  if (typeof template.platformDefault !== "boolean") {
-    invalidField(context, "platformDefault", errors)
-  }
-  if (typeof template.createdAt !== "string") invalidField(context, "createdAt", errors)
-  if (typeof template.updatedAt !== "string") invalidField(context, "updatedAt", errors)
-  return template as unknown as EmailTemplate
-}
-
-export function expectEmailTemplateTypeCatalog(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): EmailTemplateTypeCatalog {
-  const catalog = expectObject<JsonObject>(value, context, errors)
-  if (!isNonEmptyString(catalog.type)) invalidField(context, "type", errors)
-  expectObjectArray<JsonObject>(catalog.variables, `${context} variables`, errors).forEach(
-    (variable, position) => {
-      const variableContext = `${context} variable ${position}`
-      if (typeof variable.name !== "string") invalidField(variableContext, "name", errors)
-      if (typeof variable.required !== "boolean") {
-        invalidField(variableContext, "required", errors)
-      }
-      if (!isNullableString(variable.description)) {
-        invalidField(variableContext, "description", errors)
-      }
-      if (!isNullableString(variable.preview)) invalidField(variableContext, "preview", errors)
-    },
-  )
-  return catalog as unknown as EmailTemplateTypeCatalog
-}
-
-export function expectEmailTemplatePreview(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): EmailTemplatePreview {
-  const preview = expectObject<JsonObject>(value, context, errors)
-  if (typeof preview.subject !== "string") invalidField(context, "subject", errors)
-  if (typeof preview.htmlBody !== "string") invalidField(context, "htmlBody", errors)
-  if (!isNullableString(preview.textBody)) invalidField(context, "textBody", errors)
-  return preview as unknown as EmailTemplatePreview
-}
-
-export function expectEmailSender(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): EmailSender {
-  const sender = expectObject<JsonObject>(value, context, errors)
-  if (typeof sender.id !== "string") invalidField(context, "id", errors)
-  if (typeof sender.email !== "string") invalidField(context, "email", errors)
-  if (typeof sender.displayName !== "string") invalidField(context, "displayName", errors)
-  if (!isNonEmptyString(sender.status)) invalidField(context, "status", errors)
-  if (typeof sender.sharedWithCurrentWorkspace !== "boolean") {
-    invalidField(context, "sharedWithCurrentWorkspace", errors)
-  }
-  if (typeof sender.ownerConfirmationPending !== "boolean") {
-    invalidField(context, "ownerConfirmationPending", errors)
-  }
-  if (typeof sender.createdAt !== "string") invalidField(context, "createdAt", errors)
-  if (typeof sender.updatedAt !== "string") invalidField(context, "updatedAt", errors)
-  return sender as unknown as EmailSender
-}
-
-export function expectEmailSettings(
-  value: unknown,
-  context: string,
-  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): EmailSettings {
-  const settings = expectObject<JsonObject>(value, context, errors)
-  if (typeof settings.appId !== "string") invalidField(context, "appId", errors)
-  if (!isNullableString(settings.senderIdentityId)) {
-    invalidField(context, "senderIdentityId", errors)
-  }
-  if (!isNullableString(settings.displayName)) invalidField(context, "displayName", errors)
-  if (!isNullableString(settings.replyTo)) invalidField(context, "replyTo", errors)
-  if (typeof settings.ownTemplateSendsFromBrand !== "boolean") {
-    invalidField(context, "ownTemplateSendsFromBrand", errors)
-  }
-  const senderContext = `${context} effectiveSender`
-  const sender = expectObject<JsonObject>(settings.effectiveSender, senderContext, errors)
-  if (typeof sender.email !== "string") invalidField(senderContext, "email", errors)
-  if (!isNullableString(sender.displayName)) invalidField(senderContext, "displayName", errors)
-  if (!isNonEmptyString(sender.source)) invalidField(senderContext, "source", errors)
-  if (!isNullableString(sender.reason)) invalidField(senderContext, "reason", errors)
-  return settings as unknown as EmailSettings
 }
 
 export function expectAgentDefinition(

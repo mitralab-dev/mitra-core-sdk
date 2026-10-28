@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+Removes the app email and login methods added for the business agent of the Infusion editor (#133).
+Those apps call the Messenger and Code Studio REST routes directly with the session token they get
+at sign-in, so the SDK no longer carries them.
+
+- Removed from `messenger`: `listEmailTemplates`, `getEmailTemplateType`, `getEmailTemplate`,
+  `upsertEmailTemplate`, `previewEmailTemplate`, `deleteEmailTemplate`, `listEmailSenders`,
+  `registerEmailSender`, `resendEmailSenderVerification`, `confirmEmailSender`, `getEmailSettings`
+  and `updateEmailSettings`, with their types. `notify` and `sendEmail` stay.
+- Removed `emailLoginEnabled` and `passwordLoginEnabled` from `AppUpdateInput`, `AppDefinition` and
+  `AppSummary`, and from the validation of app responses. The API still sends
+  the fields; the SDK just no longer types or checks them. `allowSignup` stays.
+
 ## 0.3.7
 
 Reads what the box and the Copilot send and record (mitra-sandbox#787, mitra-copilot#558), in any
