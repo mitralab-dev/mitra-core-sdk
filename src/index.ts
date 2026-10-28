@@ -12,6 +12,8 @@ export type {
   AgentProviderUsage,
   AgentBackgroundTask,
   AgentNotification,
+  AgentPlan,
+  AgentPlanStep,
   AgentQueueItem,
   AgentSendAndWaitOptions,
   AgentSendOptions,

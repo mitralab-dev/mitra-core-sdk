@@ -24,6 +24,10 @@ publishes.
 
 ## Versions
 
+- `0.3.7` is the `0.3.6` parity surface with the agent session's `plan` event and history item,
+  which the parity cases do not cover. Same parity cases; the version exists so a consumer pinning
+  the package can pin a corpus with the same number.
+
 - `0.3.6` is the `0.3.5` parity surface with a fix in the agent session: the question of a turn
   that runs while the history loads no longer comes back at the end of a page that starts after it.
   Same parity cases; the version exists so a consumer pinning the package can pin a corpus with the

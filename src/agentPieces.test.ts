@@ -162,7 +162,8 @@ function draw(session: AgentTaskSession) {
       } else if (
         item.kind === "approval" ||
         item.kind === "userInputRequest" ||
-        item.kind === "notification"
+        item.kind === "notification" ||
+        item.kind === "plan"
       ) {
         add({ key: `${item.kind}:${item.itemId}`, text: "", result: item.payload })
       } else if (item.kind === "reasoning") {

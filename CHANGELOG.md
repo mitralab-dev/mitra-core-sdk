@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.7
+
+Reads what the box and the Copilot send and record (mitra-sandbox#787, mitra-copilot#558), in any
+order: the session asks the history with `kinds=all&include=plan`, and the Copilot answers `PLAN` rows
+only to a client that names them, so 0.3.0 to 0.3.6 (which ask `kinds=all` and read an unknown row as
+the agent's text) never see one, and get the box's `plan` frame only as `raw`. A Copilot that does not
+know `include` ignores it and answers `kinds=all` as before.
+
+- The turn's list of steps (Claude's TodoWrite and tasks, Codex's plan) reaches the session as T3
+  unifies it: a `plan` event (`AgentPlan`: `planId`, `steps` with
+  `{id, text, status, durationMs?}`, `explanation`, the item's `status`, with `itemId`, `sequence`
+  and `turnId`) and a
+  `plan` item in `history`, live from the box's `plan` frame and reloaded from the Copilot's `PLAN`
+  row. Each update carries the whole list; live, it replaces the item where it first came. Values
+  pass as they come. `AgentTimelineItem` gains the `kind: "plan"` member, with `payload` and no
+  `text`: TypeScript code that reads `text` in a catch-all branch has to handle it.
+- `AgentMessageListOptions` gains `include: "plan"`.
+
 ## 0.3.6
 
 - A session that loads the history while a turn runs, with a page that starts after that turn's

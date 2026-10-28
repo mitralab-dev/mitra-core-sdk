@@ -202,6 +202,33 @@ export interface AgentNotification {
   [field: string]: unknown
 }
 
+/**
+ * One step of the turn's list, as T3 has it: `status` `pending`, `running` or `completed`, and
+ * `durationMs` once T3 timed a completed step. Values are passed as they come, an unknown one
+ * included.
+ */
+export interface AgentPlanStep {
+  id: string
+  text: string
+  status: string
+  durationMs?: number
+  [field: string]: unknown
+}
+
+/**
+ * The turn's list of steps as it stands, T3's `todo_list` item: Claude's TodoWrite and tasks and
+ * Codex's plan. Each update carries the whole list; the same `itemId` is the same list. `status`
+ * is the item's own, as T3 sends it.
+ */
+export interface AgentPlan {
+  planId: string | null
+  steps: AgentPlanStep[]
+  explanation?: string
+  status: string | null
+  itemId?: string
+  [field: string]: unknown
+}
+
 export interface AgentToolEvent extends AgentPieceIdentity {
   tool: string
   /** The title the box gave the tool: a subagent's own name (its description), as T3 shows it. */
@@ -288,6 +315,19 @@ export type AgentTimelineItem =
       AgentTimelineItemIdentity)
   | ({
       id: string
+      /**
+       * The turn's list of steps (`PLAN` row), one item per T3 item with its last state: `planId`,
+       * `steps`, `explanation` and `status` as the live `plan` event carries them, and the box's
+       * frame as it came in `payload`. Live, each update replaces the item in place.
+       */
+      kind: "plan"
+      payload: Record<string, unknown>
+      at: string
+      parentToolId?: string
+    } & Pick<AgentPlan, "planId" | "steps" | "explanation" | "status"> &
+      AgentTimelineItemIdentity)
+  | ({
+      id: string
       kind: "tool"
       tool: AgentToolEvent
       at: string
@@ -344,6 +384,8 @@ export interface AgentTaskSessionEventMap {
   backgroundTasks: { tasks: readonly AgentBackgroundTask[] }
   /** Background work ended: what it was, how it ended and T3's line for it. */
   notification: AgentNotification & AgentPieceIdentity
+  /** The turn's list of steps changed: the whole list, as T3 shows it. */
+  plan: AgentPlan & AgentPieceIdentity
   /**
    * The box took a message into the running turn at this point, with no turn of its own: the
    * place the app shows it in that turn. The turn's `turnEnd` answers it.
@@ -648,11 +690,12 @@ function isChatRow(message: AgentMessage): boolean {
 
 const REQUEST_ROW_KINDS: Record<
   string,
-  "approval" | "userInputRequest" | "notification" | undefined
+  "approval" | "userInputRequest" | "notification" | "plan" | undefined
 > = {
   APPROVAL: "approval",
   USER_INPUT_REQUEST: "userInputRequest",
   NOTIFICATION: "notification",
+  PLAN: "plan",
 }
 
 // The fields the live `notification` event carries on top, so the history item reads the same
@@ -662,6 +705,20 @@ function notificationFieldsOf(
 ): Pick<AgentNotification, "source" | "outcome" | "summary" | "detail"> {
   const { source, outcome, summary, detail } = payload as AgentNotification
   return { source, outcome, summary, ...(detail !== undefined ? { detail } : {}) }
+}
+
+// The fields the live `plan` event carries on top, so the history item reads the same live and
+// after a reload.
+function planFieldsOf(
+  payload: Record<string, unknown>,
+): Pick<AgentPlan, "planId" | "steps" | "explanation" | "status"> {
+  const { planId, steps, explanation, status } = payload as AgentPlan
+  return {
+    planId: planId ?? null,
+    steps: Array.isArray(steps) ? steps : [],
+    ...(explanation !== undefined ? { explanation } : {}),
+    status: status ?? null,
+  }
 }
 
 function parseJson(text: string): unknown {
@@ -696,8 +753,11 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
         ...timelineIdentityOf(message),
         ...parentToolIdOf(message.parentToolId),
       }
-      return requestKind === "notification"
-        ? { ...item, kind: requestKind, ...notificationFieldsOf(payload) }
+      if (requestKind === "notification") {
+        return { ...item, kind: requestKind, ...notificationFieldsOf(payload) }
+      }
+      return requestKind === "plan"
+        ? { ...item, kind: requestKind, ...planFieldsOf(payload) }
         : { ...item, kind: requestKind }
     }
   }
@@ -1014,6 +1074,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.limit !== undefined ? { size: options.limit } : {}),
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.historyLimit = options.limit
     this.replaceHistory(page)
@@ -1048,6 +1109,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
         sort: "createdAt,desc",
         kinds: "all",
+        include: "plan",
       })
     } catch (error) {
       // A read of a history since replaced resolves with nothing, as its success would.
@@ -1577,6 +1639,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       size: 100,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
@@ -1587,6 +1650,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       size: 100,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     this.replaceHistory(page)
     this.emit("historyLoaded", { history: this.history })
@@ -1907,6 +1971,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
         if (payload) {
           this.emit("notification", {
             ...(payload as AgentNotification),
+            ...pieceIdentityOf(event, payload),
+          })
+        }
+        break
+      case "plan":
+        if (payload && this.livePlan(event, payload)) {
+          this.emit("plan", {
+            ...(payload as AgentPlan),
+            ...planFieldsOf(payload),
             ...pieceIdentityOf(event, payload),
           })
         }
@@ -2276,6 +2349,47 @@ class CoreAgentTaskSession implements AgentTaskSession {
       },
       (item) => item,
     )
+  }
+
+  // T3 sends the list whole on each update: the item takes the last one where it first came, as
+  // the Copilot's row does. An update the item already holds (a replay after the history) leaves
+  // it as it is and answers false.
+  private livePlan(event: AgentTaskEvent, payload: Record<string, unknown>): boolean {
+    const itemId = typeof payload.itemId === "string" ? payload.itemId : undefined
+    const sequence = typeof event.sequence === "number" ? event.sequence : undefined
+    if (itemId === undefined && sequence === undefined) return true
+    let applied = true
+    this.livePiece(
+      (item) =>
+        item.kind === "plan" &&
+        (itemId !== undefined ? item.itemId === itemId : item.sequence === sequence),
+      () => ({
+        id: `live:plan:${itemId ?? sequence}`,
+        kind: "plan",
+        payload,
+        ...planFieldsOf(payload),
+        at: liveAtOf(event),
+        ...(sequence === undefined ? {} : { sequence }),
+        ...(itemId === undefined ? {} : { itemId }),
+      }),
+      (item) => {
+        const held = item.lastSequence ?? item.sequence
+        if (sequence !== undefined && held !== undefined && sequence <= held) {
+          applied = false
+          return item
+        }
+        const fields = planFieldsOf(payload)
+        const next = {
+          ...(item as Extract<AgentTimelineItem, { kind: "plan" }>),
+          payload,
+          ...fields,
+          ...(sequence === undefined ? {} : { lastSequence: sequence }),
+        }
+        if (fields.explanation === undefined) delete next.explanation
+        return next
+      },
+    )
+    return applied
   }
 
   // A child thread's frames are the subagent's conversation: they open no turn and settle no

@@ -1187,6 +1187,7 @@ describe("Agent task session", () => {
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
 
     const combined = withAgentTaskSessions(tasks, manager)
@@ -1213,6 +1214,7 @@ describe("Agent task session", () => {
     expect(tasks.listMessages).toHaveBeenCalledWith("task-1", {
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
@@ -1263,12 +1265,14 @@ describe("Agent older history", () => {
       size: 2,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(tasks.listMessages).toHaveBeenNthCalledWith(4, "task-1", {
       before: "m3",
       size: 2,
       sort: "createdAt,desc",
       kinds: "all",
+      include: "plan",
     })
     expect(first.map((item) => item.id)).toEqual(["m3", "m4"])
     expect(second.map((item) => item.id)).toEqual(["m1", "m2"])
@@ -1567,6 +1571,109 @@ describe("Agent turn usage", () => {
 })
 
 describe("Agent history item identity", () => {
+  it("reads a PLAN row as the plan item T3 shows, with its payload as it came", async () => {
+    const payload = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps: [{ id: "step-1", text: "Read the schema", status: "completed", durationMs: 1200 }],
+      explanation: "One step",
+      status: "completed",
+    }
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("p", "AGENT", JSON.stringify(payload), "PLAN"),
+          sequence: 5,
+          lastSequence: 9,
+          boxLog: 0,
+          itemId: "p-1",
+        },
+      ]),
+    )
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages }),
+      eventSource: new FakeEventSource(),
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.history).toEqual([
+      {
+        id: "p",
+        kind: "plan",
+        payload,
+        planId: "plan-1",
+        steps: payload.steps,
+        explanation: "One step",
+        status: "completed",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 5,
+        lastSequence: 9,
+        boxLog: 0,
+        itemId: "p-1",
+      },
+    ])
+  })
+
+  it("keeps a PLAN row's state over an older update a replay brings, and takes a newer one", async () => {
+    const steps = [{ id: "step-1", text: "Read the schema", status: "completed" }]
+    const payload = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps,
+      explanation: "One step",
+      status: "completed",
+    }
+    const listMessages = vi.fn(async () =>
+      page([
+        {
+          ...message("p", "AGENT", JSON.stringify(payload), "PLAN"),
+          sequence: 5,
+          lastSequence: 9,
+          boxLog: 0,
+          itemId: "p-1",
+        },
+      ]),
+    )
+    const source = new FakeEventSource()
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ listMessages }),
+      eventSource: source,
+    })
+    const session = manager.session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    const seen: unknown[] = []
+    session.on("plan", (plan) => seen.push(plan))
+    const older = { ...payload, steps: [{ ...steps[0], status: "running" }] }
+    source.emit({ ...event("plan", older), sequence: 7 })
+    expect(seen).toEqual([])
+    expect(session.history).toEqual([
+      expect.objectContaining({ payload, sequence: 5, lastSequence: 9 }),
+    ])
+    const newer = {
+      itemId: "p-1",
+      planId: "plan-1",
+      steps: [...steps, { id: "step-2", text: "Write it", status: "running" }],
+      status: "completed",
+    }
+    source.emit({ ...event("plan", newer), sequence: 12 })
+    expect(seen).toHaveLength(1)
+    expect(session.history).toEqual([
+      {
+        id: "p",
+        kind: "plan",
+        payload: newer,
+        planId: "plan-1",
+        steps: newer.steps,
+        status: "completed",
+        at: "2026-01-01T00:00:01Z",
+        sequence: 5,
+        lastSequence: 12,
+        boxLog: 0,
+        itemId: "p-1",
+      },
+    ])
+  })
+
   it("reads a NOTIFICATION row as the notification item T3 shows, with its payload as it came", async () => {
     const payload = {
       itemId: "n-1",
@@ -1684,7 +1791,11 @@ describe("Agent history item identity", () => {
     const manager = createAgentTaskSessionManager({ tasks, eventSource: new FakeEventSource() })
     const session = manager.session({ taskId: "task-1" })
     await vi.waitFor(() => expect(session.status).toBe("idle"))
-    expect(listMessages).toHaveBeenCalledWith("task-1", { sort: "createdAt,desc", kinds: "all" })
+    expect(listMessages).toHaveBeenCalledWith("task-1", {
+      sort: "createdAt,desc",
+      kinds: "all",
+      include: "plan",
+    })
     expect(session.history).toEqual([
       { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
       {
