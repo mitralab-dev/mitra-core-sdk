@@ -3389,6 +3389,176 @@ describe("Agent direct channel on the Copilot's stand-in while the box boots", (
     session.close()
   })
 
+  it("opens the box before it closes the stand-in when the stand-in says the box is ready", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 2 })
+    const tasks = createTasks(channel)
+    const { session, raw } = open(tasks)
+
+    const result = session.sendAndWait("List 40 animals")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    const id = idOf(provisional.sent[0])!
+    deliver(provisional, admitted(id, "List 40 animals", false))
+
+    provisional.receive("handover")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const box = FakeWebSocket.last()
+    expect(box.url).toBe(BOX_URL)
+    box.receive("hello", { threadId: "thread-1", lastSequence: 2 })
+    expect(box.sent).toEqual([{ type: "replay", fromSequence: 0 }])
+    await vi.waitFor(() => expect(provisional.readyState).toBe(3))
+    let sequence = 0
+    deliver(
+      box,
+      [...admitted(id, "List 40 animals", true), ...answered(id, "1. Lion")],
+      () => ++sequence,
+    )
+
+    await expect(result).resolves.toMatchObject({ content: "1. Lion", reason: "stop" })
+    // The stand-in's own close comes after: it asks for nothing.
+    provisional.drop(4100)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(raw.filter((event) => event.type === "channelReconnecting")).toEqual([])
+    session.close()
+  })
+
+  it("sends on the stand-in until the box's socket is open, and on the box after", async () => {
+    vi.useFakeTimers()
+    let answer!: (channel: AgentTaskChannel) => void
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve
+          }),
+      )
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    session.send("first")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    deliver(provisional, admitted(idOf(provisional.sent[0])!, "first", false))
+
+    provisional.receive("handover")
+    await vi.waitFor(() => expect(channel).toHaveBeenCalledTimes(2))
+    session.send("second", { mode: "queue" })
+    await vi.waitFor(() => expect(provisional.sent).toHaveLength(2))
+    answer({ wsUrl: BOX_URL, lastSequence: 0 })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const box = FakeWebSocket.last()
+    box.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    await vi.waitFor(() => expect(provisional.readyState).toBe(3))
+    session.send("third", { mode: "queue" })
+    await vi.waitFor(() =>
+      expect(
+        box.sent.filter((frame) => (frame as { type?: string }).type === "message"),
+      ).toHaveLength(1),
+    )
+    expect(provisional.sent).toHaveLength(2)
+    session.close()
+  })
+
+  it("opens one box socket when the stand-in closes while the box is being dialed", async () => {
+    vi.useFakeTimers()
+    let answer!: (channel: AgentTaskChannel) => void
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve
+          }),
+      )
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session, raw } = open(tasks)
+    const result = session.sendAndWait("first")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    const id = idOf(provisional.sent[0])!
+    deliver(provisional, admitted(id, "first", false))
+
+    provisional.receive("handover")
+    await vi.waitFor(() => expect(channel).toHaveBeenCalledTimes(2))
+    provisional.drop(4100)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    answer({ wsUrl: BOX_URL, lastSequence: 0 })
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const box = FakeWebSocket.last()
+    box.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    let sequence = 0
+    deliver(box, [...admitted(id, "first", true), ...answered(id, "ok")], () => ++sequence)
+
+    await expect(result).resolves.toMatchObject({ content: "ok" })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(raw.filter((event) => event.type === "channelReconnecting")).toEqual([])
+    session.close()
+  })
+
+  it("leaves it to the stand-in's 4100 when the Copilot still answers with the stand-in", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockResolvedValueOnce(standIn())
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const result = session.sendAndWait("first")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    const id = idOf(provisional.sent[0])!
+    deliver(provisional, admitted(id, "first", false))
+
+    provisional.receive("handover")
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    await vi.waitFor(() => expect(FakeWebSocket.last().readyState).toBe(3))
+    expect(provisional.readyState).toBe(1)
+
+    provisional.drop(4100)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+    const box = FakeWebSocket.last()
+    expect(box.url).toBe(BOX_URL)
+    box.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    let sequence = 0
+    deliver(box, [...admitted(id, "first", true), ...answered(id, "ok")], () => ++sequence)
+    await expect(result).resolves.toMatchObject({ content: "ok" })
+    session.close()
+  })
+
+  it("refuses a Stop out loud while the chat's socket is down, instead of the Copilot's REST", async () => {
+    vi.useFakeTimers()
+    const tasks = createTasks(offer(BOX_URL, 0))
+    const { session } = open(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    session.send("long one")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const socket = FakeWebSocket.last()
+    socket.receive(
+      "stepStart",
+      { lifecycle: { turnId: "turn-1", clientMessageId: idOf(socket.sent[0]) } },
+      1,
+    )
+    socket.drop()
+
+    await expect(session.cancel()).rejects.toThrow("not connected right now")
+    expect(tasks.sendInput).not.toHaveBeenCalled()
+    expect(errors.some((error) => error.includes("not connected right now"))).toBe(true)
+    session.close()
+  })
+
   it("asks for the channel again when the stand-in closes with nothing in flight", async () => {
     vi.useFakeTimers()
     const channel = vi
