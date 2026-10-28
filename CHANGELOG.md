@@ -12,8 +12,9 @@ at sign-in, so the SDK no longer carries them.
   `upsertEmailTemplate`, `previewEmailTemplate`, `deleteEmailTemplate`, `listEmailSenders`,
   `registerEmailSender`, `resendEmailSenderVerification`, `confirmEmailSender`, `getEmailSettings`
   and `updateEmailSettings`, with their types. `notify` and `sendEmail` stay.
-- Removed from `AppUpdateInput`: `emailLoginEnabled` and `passwordLoginEnabled`. `allowSignup`
-  stays.
+- Removed `emailLoginEnabled` and `passwordLoginEnabled` from `AppUpdateInput`, `AppDefinition` and
+  `AppSummary`, and from the response validation of `apps.get` and `apps.list`. The API still sends
+  the fields; the SDK just no longer types or checks them. `allowSignup` stays.
 
 ## 0.3.7
 
