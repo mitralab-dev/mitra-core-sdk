@@ -3467,6 +3467,51 @@ describe("Agent direct channel on the Copilot's stand-in while the box boots", (
     session.close()
   })
 
+  it("sends the edit, the cancel and the Stop made during the hand-over on the box, in that order, with no error", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    const errors: string[] = []
+    session.on("error", ({ error }) => errors.push(error))
+    session.send("first")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    deliver(provisional, admitted(idOf(provisional.sent[0])!, "first", false))
+    session.send("queued", { mode: "queue" })
+    await vi.waitFor(() => expect(provisional.sent).toHaveLength(2))
+    const queuedId = idOf(provisional.sent[1])!
+    deliver(provisional, [queuedAt(queuedId, 1, "queued")])
+
+    provisional.receive("handover")
+    session.editQueueItem(queuedId, "edited")
+    session.removeQueueItem(queuedId)
+    const stop = session.cancel()
+    provisional.drop(4100)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const box = FakeWebSocket.last()
+    box.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+    box.receive("replayComplete", { lastSequence: 0 })
+    await stop
+
+    const sent = box.sent.filter((frame) => (frame as { type?: string }).type !== "replay")
+    expect(sent).toEqual([
+      { type: "queued-run.edit", clientMessageId: queuedId, text: "edited" },
+      { type: "queued-run.cancel", clientMessageId: queuedId },
+      { type: "interrupt" },
+    ])
+    expect(provisional.sent.map((frame) => (frame as { type?: string }).type)).toEqual([
+      "message",
+      "message",
+      "handover",
+    ])
+    expect(errors).toEqual([])
+    session.close()
+  })
+
   it("opens the box when the stand-in drops in the middle of the hand-over", async () => {
     vi.useFakeTimers()
     const channel = vi
