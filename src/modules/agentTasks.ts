@@ -38,10 +38,12 @@ export interface AgentTasksModule {
   listMessages(id: string, options?: AgentMessageListOptions): Promise<Page<AgentMessage>>
   /**
    * Asks the Copilot where the chat is served. It holds the request while the box boots and
-   * answers with the box socket, or null (202) when it offers none. Optional so hand-written
-   * modules keep compiling; a module without it never takes the direct channel.
+   * answers with the box socket, or null (202) when it offers none. With `standIn`, a Copilot
+   * that serves the chat itself while the box boots answers at once with that channel, marked
+   * `provisional`. Optional so hand-written modules keep compiling; a module without it never
+   * takes the direct channel.
    */
-  channel?(id: string): Promise<AgentTaskChannel | null>
+  channel?(id: string, options?: { standIn?: boolean }): Promise<AgentTaskChannel | null>
 }
 
 export function createAgentTasksModule(
@@ -128,9 +130,12 @@ export function createAgentTasksModule(
         ),
       }
     },
-    async channel(id) {
+    async channel(id, options) {
       return expectAgentTaskChannel(
-        await transport.request<unknown>(`${path(id)}/channel`, { method: "POST" }),
+        await transport.request<unknown>(`${path(id)}/channel`, {
+          method: "POST",
+          ...(options?.standIn ? { body: { standIn: true } } : {}),
+        }),
         "Agent task channel response",
         errors,
       )

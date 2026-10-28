@@ -2013,6 +2013,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.queueItems = known
       ? this.queueItems.map((current) => (current === known ? item : current))
       : [...this.queueItems, item]
+    // The box that takes the chat from the Copilot's stand-in logs the queue the stand-in showed,
+    // and its replay repeats it: the queue the app sees did not change.
+    if (
+      known &&
+      known.text === item.text &&
+      known.position === item.position &&
+      known.queueHeld === item.queueHeld
+    ) {
+      return
+    }
     this.emit("queueChange", { queue: this.queue })
   }
 

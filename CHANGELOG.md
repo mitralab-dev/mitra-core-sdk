@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.8-beta.0 (fila, nao publicada)
+
+The Copilot's stand-in channel while the box boots (mitra-core-sdk#121). It needs the Copilot with
+the stand-in; with a Copilot without it, everything stays as in 0.3.7.
+
+- On a `websocket` session the channel request (`POST /tasks/{id}/channel`) sends
+  `{ "standIn": true }`: `agentTasks.channel(id, { standIn })` and the new field
+  `AgentTaskChannel.provisional`. An `http` session sends no body and waits for the box, as before.
+- With the box cold, the Copilot answers at once with a `provisional` channel that sends the same
+  frames a live box does, without `sequence`: the session shows the same turn, queue, steer,
+  cancel, edit and Stop as on a live box. The SDK adds no queue, admission or Stop of its own.
+- When the box is ready the stand-in says so (`handover`): the session asks for the channel again,
+  opens the box's socket and only then closes the stand-in's, so the chat is never without a
+  socket on the way. Until the box's socket is open everything still goes on the stand-in. The
+  stand-in's 4100 that follows asks for nothing; one that comes first, or a hand-over that still
+  finds the stand-in, redials as before.
+- A Stop with the chat's socket down (a redial in flight) is refused with an error instead of
+  going to the Copilot by REST, as cancel and edit already were: with others on the chat, what a
+  Stop lands on is known only while connected. A session with no direct channel still stops by
+  REST.
+- Opening a provisional channel asks no replay, and one that closes (4100 once the box is ready,
+  or a drop on a Copilot deploy) is always asked for again, turn or not. Leaving it never closes
+  the turn as interrupted: the box runs that same turn, and the `messageQueued` and `stepStart` it
+  repeats for the same `clientMessageId` open no second turn or bubble. On the box the cursor stays
+  where the history ends when the `boxLog` is the expected one, and goes back to 0 when it is
+  another or the `hello` brings a smaller `lastSequence`.
+- A `messageQueued` that repeats a queue item as the session already holds it (same text, position
+  and `queueHeld`) emits no `queueChange`: the box that takes over logs the queue the stand-in
+  showed, and its replay repeats it.
+
 ## 0.3.7
 
 Reads what the box and the Copilot send and record (mitra-sandbox#787, mitra-copilot#558), in any
