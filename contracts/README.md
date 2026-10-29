@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.8` is the `0.3.7` parity surface with typed `aiProviders.get()` discovery and the removal
+  of the app email management methods and app login fields. These surfaces are outside the parity
+  cases. Same parity cases; the version exists so a consumer pinning the package can pin a corpus
+  with the same number. The changelog lists the breaking removals.
+
 - `0.3.7` is the `0.3.6` parity surface with the agent session's `plan` event and history item,
   which the parity cases do not cover. Same parity cases; the version exists so a consumer pinning
   the package can pin a corpus with the same number.
