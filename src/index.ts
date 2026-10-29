@@ -68,6 +68,8 @@ export { createAgentsModule } from "./modules/agents"
 export type { AgentsModule } from "./modules/agents"
 export { createAgentTasksModule } from "./modules/agentTasks"
 export type { AgentTasksModule } from "./modules/agentTasks"
+export { createAiProvidersModule } from "./modules/aiProviders"
+export type { AiProvidersModule } from "./modules/aiProviders"
 export { createAppsModule } from "./modules/apps"
 export type { AppsModule } from "./modules/apps"
 export { createAuthModule } from "./modules/auth"
@@ -155,6 +157,7 @@ export type {
   AgentTurnUsage,
   AgentTurnUsageRequest,
   AgentUpdateItem,
+  AiProviders,
   AppColor,
   AppContext,
   AppCreateInput,
@@ -216,6 +219,8 @@ export type {
   ImportSource,
   ImportSourceResponse,
   ImportTarget,
+  IncludedAiQuota,
+  IncludedAiQuotaWindow,
   IntegrationExecution,
   IntegrationConnectionStatus,
   IntegrationCredentialRule,
@@ -238,9 +243,11 @@ export type {
   ListTablesOptions,
   ListTemplateConfigsOptions,
   LegacyPage,
+  ManagedAiProfile,
   MessageAccepted,
   OAuthExchangeInput,
   OAuthStartResult,
+  OpencodeAiProvider,
   Page,
   PageOptions,
   PlanPrice,

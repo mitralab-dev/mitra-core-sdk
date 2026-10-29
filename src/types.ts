@@ -1390,6 +1390,52 @@ export interface AgentReadyProvider {
   usage: CredentialUsage | null
 }
 
+export interface AiProviders {
+  activeEngine: "FREE" | "CLAUDE" | "CODEX" | "CUSTOM" | "OPENCODE" | (string & {})
+  includedAiAvailable: boolean
+  includedAiQuota: IncludedAiQuota | null
+  activeCustomProviderId: string | null
+  customProviders: AgentConnectionCustomProvider[]
+  opencode: OpencodeAiProvider
+  /** Null when ineligible; absent on a Copilot that predates managed profiles. */
+  managedAiProfile?: ManagedAiProfile | null
+}
+
+export interface IncludedAiQuota {
+  planCode: string
+  /** Omitted when no window is exhausted. */
+  blockingWindow?: "DAY" | "MONTH" | (string & {})
+  /** A window the plan does not have is omitted, never null. */
+  windows: { day?: IncludedAiQuotaWindow; month?: IncludedAiQuotaWindow }
+  /** Omitted when no token reading is available. */
+  remainingTokens?: number
+}
+
+export interface IncludedAiQuotaWindow {
+  limit: number
+  left: number
+  leftCenticredits: number
+  resetsAt: string
+}
+
+export interface OpencodeAiProvider {
+  connected: boolean
+  presetId: string | null
+  presetName: string | null
+  authMethod: "API_KEY" | "ENDPOINT" | (string & {}) | null
+  providerId: string | null
+  baseUrl: string | null
+  models: string[] | null
+}
+
+export interface ManagedAiProfile {
+  profile: "IMMERSION" | (string & {})
+  agentType: "IMMERSION" | (string & {})
+  selectionMode: "FORCED" | (string & {})
+  model: string
+  requiredScope: "ACCOUNT" | (string & {})
+}
+
 export interface CredentialStatus {
   provider: CopilotProvider
   connected: boolean

@@ -66,6 +66,7 @@ const { data: tasks, hasMore } = await core.entities.getTable("Task").list({ lim
 - `functions`, `publicFunctions`, `functionsAdmin` e `workflows`: executar e administrar Server Functions e workflows.
 - `integration`, `integrationAdmin`, `integrationResources` e `integrationTemplates`: chamadas a APIs externas e a configuração delas.
 - `agentTasks`, com `createAgentTaskSessionManager` e `withAgentTaskSessions`: chats de agente com `send`, `sendAndWait`, `cancel` e eventos. O gerenciador recebe `tasks`, o `eventSource` do seu SDK e `directChannel`, com o `apiUrl` do gateway e, se quiser, `WebSocket` e `fetch`.
+- `aiProviders.get()`: leitura tipada de `GET /api/v1/ai-providers` pelo transporte `copilot`, com engine ativa, quota pessoal, provedores personalizados, conexão OpenCode e perfil gerenciado quando oferecido pelo backend.
 - `apps`, `context`, `agents`, `agentConnections`, `agentCredentials`, `members`, `imports`, `dataSources` e `auth`: o app em si, a configuração de agentes e os demais recursos.
 - `messenger`: `notify` avisa o usuário autenticado e `sendEmail` manda e-mail com o remetente do app.
 - `resolveApiKeyToken`, `readTokenAppId` e `tokenAuthorizesApp`: contrato da troca de API key por token, para o SDK que autentica por chave.
@@ -74,15 +75,32 @@ Em `functionsAdmin`, `FunctionVersion.code` pode ser `null` quando o token permi
 
 ## Configuração
 
-| Opção                                                        | Obrigatória | Uso                                                                                                                                                                                                                                          |
-| ------------------------------------------------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` para cada serviço                                                                                                                                                                                                             |
-| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles falham com `SdkCoreConfigurationError`, antes de sair a requisição: `apps` (`codeStudio`); `agentTasks`, `agentConnections`, `agentCredentials` e `agents.listModels` (`copilot`); `messenger`. O resto de `agents` usa `functions` |
-| `transports.publicFunctions`                                 | não         | transporte anônimo de `publicFunctions`, sem `Authorization` nem `X-App-Id`                                                                                                                                                                  |
-| `getAppId`                                                   | não         | devolve o app fixado pelo seu SDK; usado por `context`                                                                                                                                                                                       |
-| `functions.executeInvocationType`                            | não         | `sync` ou `async` em `functions.execute`; sem valor, vale o padrão do servidor                                                                                                                                                               |
-| `functions.emptyInput`                                       | não         | `empty-object` manda `{ "input": {} }` quando não há input; `omit-body` não manda corpo                                                                                                                                                      |
-| `errors`                                                     | não         | `SdkCoreErrorFactory` para o seu SDK lançar as próprias classes no lugar de `SdkCoreConfigurationError` e `SdkCoreResponseError`                                                                                                             |
+| Opção                                                        | Obrigatória | Uso                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transports.auth`, `dataManager`, `functions`, `integration` | sim         | um `Transport` para cada serviço                                                                                                                                                                                                                            |
+| `transports.codeStudio`, `copilot`, `messenger`              | não         | sem eles falham com `SdkCoreConfigurationError`, antes de sair a requisição: `apps` (`codeStudio`); `agentTasks`, `agentConnections`, `agentCredentials`, `aiProviders` e `agents.listModels` (`copilot`); `messenger`. O resto de `agents` usa `functions` |
+| `transports.publicFunctions`                                 | não         | transporte anônimo de `publicFunctions`, sem `Authorization` nem `X-App-Id`                                                                                                                                                                                 |
+| `getAppId`                                                   | não         | devolve o app fixado pelo seu SDK; usado por `context`                                                                                                                                                                                                      |
+| `functions.executeInvocationType`                            | não         | `sync` ou `async` em `functions.execute`; sem valor, vale o padrão do servidor                                                                                                                                                                              |
+| `functions.emptyInput`                                       | não         | `empty-object` manda `{ "input": {} }` quando não há input; `omit-body` não manda corpo                                                                                                                                                                     |
+| `errors`                                                     | não         | `SdkCoreErrorFactory` para o seu SDK lançar as próprias classes no lugar de `SdkCoreConfigurationError` e `SdkCoreResponseError`                                                                                                                            |
+
+## Leitura de provedores de IA
+
+Com `transports.copilot` configurado, o Core expõe somente a leitura:
+
+```typescript
+import type { AiProviders, ManagedAiProfile, SdkCore } from "@mitralab.io/sdk-core"
+
+async function readManagedProfile(core: SdkCore): Promise<ManagedAiProfile | null> {
+  const providers: AiProviders = await core.aiProviders.get()
+  return providers.managedAiProfile ?? null
+}
+```
+
+`managedAiProfile` é `null` quando inelegível e pode estar ausente em backends anteriores. O perfil Immersion atual traz `{ profile: "IMMERSION", agentType: "IMMERSION", selectionMode: "FORCED", model: "immersion", requiredScope: "ACCOUNT" }`. Os tipos e a validação aceitam strings futuras em `activeEngine`, `opencode.authMethod`, `includedAiQuota.blockingWindow` e nos campos do perfil, preservando a resposta sem restringi-la aos valores conhecidos. O perfil não é uma engine da conta: a leitura não troca preferências, não cria tarefa e não deduz elegibilidade a partir da quota pessoal.
+
+Os tipos `AiProvidersModule`, `AiProviders`, `ManagedAiProfile`, `IncludedAiQuota`, `IncludedAiQuotaWindow` e `OpencodeAiProvider` são exportados. `includedAiQuota` pode ser `null`; dentro dela, `blockingWindow`, `remainingTokens` e as janelas `day`/`month` são omitidos quando não se aplicam. `customProviders` usa o contrato existente `AgentConnectionCustomProvider`. A resposta é validada e devolvida sem transformação; erros HTTP, inclusive `404` de backend sem a rota, são propagados pelo transporte.
 
 ## Erros
 

@@ -10,6 +10,7 @@ import {
 } from "./modules/agentCredentials"
 import { createAgentsModule, type AgentsModule } from "./modules/agents"
 import { createAgentTasksModule, type AgentTasksModule } from "./modules/agentTasks"
+import { createAiProvidersModule, type AiProvidersModule } from "./modules/aiProviders"
 import { createAppsModule, type AppsModule } from "./modules/apps"
 import { createAuthModule, type AuthModule } from "./modules/auth"
 import { createContextModule, type ContextModule } from "./modules/context"
@@ -76,6 +77,7 @@ export interface SdkCore {
   readonly agentCredentials: AgentCredentialsModule
   readonly agents: AgentsModule
   readonly agentTasks: AgentTasksModule
+  readonly aiProviders: AiProvidersModule
   readonly apps: AppsModule
   readonly auth: AuthModule
   readonly context: ContextModule
@@ -116,6 +118,7 @@ export function createSdkCore(options: SdkCoreOptions): SdkCore {
     agentCredentials: createAgentCredentialsModule(copilot, errors),
     agents,
     agentTasks: createAgentTasksModule(copilot, errors),
+    aiProviders: createAiProvidersModule(copilot, errors),
     apps,
     auth: createAuthModule(options.transports.auth, errors),
     context: createContextModule(
