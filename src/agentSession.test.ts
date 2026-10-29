@@ -1349,6 +1349,245 @@ describe("Agent older history", () => {
     expect(fresh.tasks.listMessages).not.toHaveBeenCalled()
   })
 
+  // mitra-core-sdk#145: the recovery rereads the newest 100 rows every second while the turn runs.
+  describe("a reread while a turn runs", () => {
+    const boxRow = (id: string, sequence: number, extra: Partial<AgentMessage> = {}) => ({
+      ...message(id, "AGENT", id, "REASONING"),
+      sequence,
+      boxLog: 0,
+      itemId: `item-${id}`,
+      ...extra,
+    })
+    const runningStart = {
+      ...event("stepStart", { lifecycle: { turnId: "turn-1" } }),
+      sequence: 1,
+    }
+
+    // `newest` is what the Copilot answers to a page that is not a `before` read.
+    function openRunningTurn(older: AgentMessage[], newest: { page: Page<AgentMessage> }) {
+      const tasks = createTasks()
+      tasks.listMessages.mockImplementation(async (_taskId, query) =>
+        query?.before ? olderPage(older) : newest.page,
+      )
+      const source = new FakeEventSource()
+      const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
+        taskId: "task-1",
+        transport: "http",
+      })
+      return { session, source, tasks }
+    }
+
+    async function startTurn(session: AgentTaskSession, source: FakeEventSource): Promise<void> {
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit(runningStart)
+      expect(session.status).toBe("streaming")
+    }
+
+    const reread = (session: AgentTaskSession) =>
+      new Promise<void>((resolve) => {
+        const off = session.on("historyLoaded", () => {
+          off()
+          resolve()
+        })
+      })
+
+    it("keeps the older pages already read and replaces only the newest one", async () => {
+      const spawn = {
+        ...boxRow("spawn", 2, { type: "TOOL_USE" }),
+        content: JSON.stringify({ name: "Task", toolId: "tool-sub", input: {} }),
+        subagent: { toolId: "tool-sub", subagentId: "sub-1", status: "running" },
+      }
+      const [r3, r4, r5] = [boxRow("r3", 3), boxRow("r4", 4), boxRow("r5", 5)]
+      const newest = { page: olderPage([r4, r3], 1) }
+      const { session, source } = openRunningTurn([spawn], newest)
+      await startTurn(session, source)
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["spawn", "r3", "r4"])
+      expect(session.hasOlder).toBe(false)
+
+      newest.page = olderPage([r5, r4, r3], 1)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["spawn", "r3", "r4", "r5"])
+      expect(session.history[0]).toMatchObject({ subagent: { subagentId: "sub-1" } })
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    it("replaces the history with a page that does not reach it, as before", async () => {
+      const [r3, r4, r5, r6] = [boxRow("r3", 3), boxRow("r4", 4), boxRow("r5", 5), boxRow("r6", 6)]
+      const newest = { page: olderPage([r4, r3]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      expect(session.hasOlder).toBe(false)
+
+      newest.page = olderPage([r6, r5], 2)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["r5", "r6"])
+      expect(session.hasOlder).toBe(true)
+      session.close()
+    })
+
+    it("does not take a row older than the plan the session already saw live", async () => {
+      const steps = (status: string) => [{ id: "s1", text: "Read", status }]
+      const planRow = (lastSequence: number, status: string) => ({
+        ...boxRow("p", 5, { type: "PLAN", itemId: "p-1", lastSequence }),
+        content: JSON.stringify({ itemId: "p-1", planId: "plan-1", steps: steps(status) }),
+      })
+      const newest = { page: olderPage([planRow(6, "pending")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit({
+        ...event("plan", { itemId: "p-1", planId: "plan-1", steps: steps("completed") }),
+        sequence: 12,
+      })
+
+      // The Copilot got the frame of sequence 9 so far, not the one of 12.
+      newest.page = olderPage([planRow(9, "running")])
+      const first = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await first
+      expect(session.history).toEqual([
+        expect.objectContaining({ id: "p", lastSequence: 12, steps: steps("completed") }),
+      ])
+
+      newest.page = olderPage([planRow(15, "failed")])
+      await reread(session)
+      expect(session.history).toEqual([
+        expect.objectContaining({ id: "p", lastSequence: 15, steps: steps("failed") }),
+      ])
+      session.close()
+    })
+
+    it("takes the row when the box's log is not the one of the rows", async () => {
+      const steps = (status: string) => [{ id: "s1", text: "Read", status }]
+      const planRow = (lastSequence: number, status: string) => ({
+        ...boxRow("p", 5, { type: "PLAN", itemId: "p-1", lastSequence }),
+        content: JSON.stringify({ itemId: "p-1", planId: "plan-1", steps: steps(status) }),
+      })
+      const newest = { page: olderPage([planRow(6, "pending")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      // A box that came up again: its sequences start over and say nothing of the rows'.
+      source.emit(event("hello", { threadId: "thread-2", lastSequence: 2 }))
+      source.emit(runningStart)
+      source.emit({
+        ...event("plan", { itemId: "p-1", planId: "plan-1", steps: steps("completed") }),
+        sequence: 12,
+      })
+
+      newest.page = olderPage([planRow(9, "running")])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+      expect(session.history).toEqual([
+        expect.objectContaining({ id: "p", lastSequence: 9, steps: steps("running") }),
+      ])
+      session.close()
+    })
+
+    // The Copilot overwrites the spawn row's subagent in place: the row keeps its sequence.
+    const spawnRow = (status: string) => ({
+      ...boxRow("spawn", 2, { type: "TOOL_USE", itemId: "tool-sub" }),
+      content: JSON.stringify({ name: "Task", toolId: "tool-sub", input: {} }),
+      subagent: { toolId: "tool-sub", subagentId: "sub-1", status },
+    })
+    const subagentUpdate = (status: string, sequence: number) => ({
+      ...event("subagentUpdate", { toolId: "tool-sub", subagentId: "sub-1", status }),
+      sequence,
+    })
+    const spawnStatus = (session: AgentTaskSession) => {
+      const spawn = session.history.find((item) => item.id === "spawn")
+      return spawn?.kind === "tool" ? spawn.subagent?.status : undefined
+    }
+
+    it("keeps the subagent state the session saw live over an older spawn row", async () => {
+      const newest = { page: olderPage([boxRow("r3", 3), spawnRow("running")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit(subagentUpdate("completed", 12))
+      expect(spawnStatus(session)).toBe("completed")
+
+      // The Copilot got the frames up to 9 so far, not the one of 12.
+      newest.page = olderPage([boxRow("r9", 9), boxRow("r3", 3), spawnRow("running")])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["spawn", "r3", "r9"])
+      expect(spawnStatus(session)).toBe("completed")
+      expect(session.subagents).toEqual([expect.objectContaining({ status: "completed" })])
+      session.close()
+    })
+
+    it("takes the spawn row when the Copilot recorded past the frame the session saw", async () => {
+      const newest = { page: olderPage([spawnRow("running")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit(subagentUpdate("running", 5))
+
+      newest.page = olderPage([boxRow("r9", 9), spawnRow("completed")])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(spawnStatus(session)).toBe("completed")
+      session.close()
+    })
+
+    it("takes the spawn row when the box's log is not the one of the rows", async () => {
+      const newest = { page: olderPage([spawnRow("running")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit(event("hello", { threadId: "thread-2", boxLog: 1, lastSequence: 12 }))
+      source.emit(runningStart)
+      source.emit(subagentUpdate("completed", 12))
+
+      newest.page = olderPage([boxRow("r3", 3), spawnRow("running")])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(spawnStatus(session)).toBe("running")
+      session.close()
+    })
+
+    it("keeps the live pieces the Copilot has not recorded yet and drops the ones it has", async () => {
+      const newest = { page: olderPage([boxRow("r1", 2)]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      const text = (itemId: string, value: string, sequence: number) => ({
+        ...event("textDelta", { itemId, text: value, lifecycle: { turnId: "turn-1" } }),
+        sequence,
+      })
+      source.emit(text("t-1", "Hello", 20))
+      source.emit(text("t-2", "Next", 30))
+      expect(session.history.map((item) => item.id)).toEqual([
+        "r1",
+        "live:agent:t-1",
+        "live:agent:t-2",
+      ])
+
+      const recorded = {
+        ...boxRow("a1", 20, { type: "TEXT", itemId: "t-1", lastSequence: 25 }),
+        content: "Hello there",
+      }
+      newest.page = olderPage([recorded, boxRow("r1", 2)])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "a1", "live:agent:t-2"])
+      expect(session.history[1]).toMatchObject({ kind: "agent", text: "Hello there" })
+      session.close()
+    })
+  })
+
   // mitra-core-sdk#140: a long turn with 121 rows after its question, reopened with a page of
   // 100. The box sends the running turn's `stepStart` again on the new connection.
   describe("a turn whose question is older than the loaded page", () => {

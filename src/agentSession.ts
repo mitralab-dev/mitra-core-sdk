@@ -673,6 +673,24 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
   return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
 }
 
+// The same piece of T3 in two reads: the same row, or the live item of the row's T3 item. A tool
+// call and its result share the item id and are two pieces.
+function samePiece(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
+  if (held.id === row.id) return true
+  if (!held.id.startsWith("live:") || row.itemId === undefined) return false
+  if (held.kind !== row.kind || held.itemId !== row.itemId) return false
+  return held.kind !== "tool" || (row.kind === "tool" && held.tool.phase === row.tool.phase)
+}
+
+// A live item has no box log of its own: it counts in the channel's, which the caller checks.
+function heldIsNewer(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
+  const heldLast = held.lastSequence ?? held.sequence
+  const rowLast = row.lastSequence ?? row.sequence
+  if (heldLast === undefined || rowLast === undefined) return false
+  if (held.boxLog !== undefined && held.boxLog !== row.boxLog) return false
+  return heldLast > rowLast
+}
+
 // The Copilot counts the rows before the cursor (or all of them, on the newest page), so a page
 // after this one means older rows (mitra-copilot#549).
 function hasOlderRows(page: Page<AgentMessage>): boolean {
@@ -1124,11 +1142,54 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return older
   }
 
+  // The recovery rereads only the newest 100 rows while the turn runs: the older pages already
+  // read stay, or what sits in them (the cards of subagents still running) vanishes until
+  // `loadOlder` (#145). A page that does not reach the history it already has replaces it.
   private replaceHistory(page: Page<AgentMessage>): void {
     this.historyGeneration += 1
+    const liveComparable = this.rowsInChannelLog
     this.rowsInChannelLog = true
-    this._hasOlder = hasOlderRows(page)
-    this._history = [...page.content].reverse().map(toAgentTimelineItem)
+    const rows = [...page.content].reverse().map(toAgentTimelineItem)
+    const anchor = rows[0] ? this._history.findIndex((item) => item.id === rows[0]?.id) : -1
+    const rowIds = new Set(rows.map((item) => item.id))
+    // A row the Copilot moved into the page (a question placed at its stepStart) is not kept twice.
+    const kept =
+      anchor < 0 ? [] : this._history.slice(0, anchor).filter((item) => !rowIds.has(item.id))
+    const replaced = anchor < 0 ? this._history : this._history.slice(anchor)
+    if (anchor < 0) this._hasOlder = hasOlderRows(page)
+    // The box hands the Copilot its events in batches (200 ms plus the request), so a row read
+    // mid-turn can be older than the frames this session already applied to the same piece: the
+    // plan the Copilot updates in place went back to its first version (#145).
+    const used = new Set<AgentTimelineItem>()
+    const merged = rows.map((row) => {
+      const held = replaced.find((item) => !used.has(item) && samePiece(item, row))
+      if (held === undefined) return row
+      used.add(held)
+      if (!liveComparable || !heldIsNewer(held, row)) return row
+      return { ...held, id: row.id, ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }) }
+    })
+    // A live piece that starts after every row read is not recorded yet; dropped, its next frames
+    // would rebuild it from where they come.
+    const cursor = liveComparable ? historyCursorOf(rows) : undefined
+    const unrecorded =
+      cursor === undefined
+        ? []
+        : replaced.filter(
+            (item) =>
+              !used.has(item) &&
+              item.id.startsWith("live:") &&
+              item.sequence !== undefined &&
+              item.sequence > cursor.sequence,
+          )
+    this._history = [...kept, ...merged, ...unrecorded]
+    // The Copilot overwrites the spawn row's subagent without moving its sequence, so the row
+    // cannot say how new it is. A frame past every row read may not have reached the Copilot yet;
+    // one at or before them already did, and the row carries it or something newer.
+    if (cursor === undefined) return
+    for (const subagent of this.subagentsById.values()) {
+      const applied = this.subagentSequences.get(subagent.subagentId)
+      if (applied !== undefined && applied > cursor.sequence) this.writeSubagentOnSpawn(subagent)
+    }
   }
 
   editQueueItem(id: string, text: string): void {
@@ -2456,7 +2517,13 @@ class CoreAgentTaskSession implements AgentTaskSession {
         : {}),
     }
     this.subagentsById.set(subagentId, subagent)
-    // The call that spawned it carries its last state, as the history records it.
+    this.writeSubagentOnSpawn(subagent)
+    this.emit("subagent", { ...subagent, ...sequenceOf(event) })
+  }
+
+  // The call that spawned it carries its last state, as the history records it.
+  private writeSubagentOnSpawn(subagent: AgentSubagent): void {
+    const { toolId, subagentId, status } = subagent
     const index = this._history.findIndex(
       (item) => item.kind === "tool" && item.tool.toolId === toolId,
     )
@@ -2476,7 +2543,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         },
       }
     }
-    this.emit("subagent", { ...subagent, ...sequenceOf(event) })
   }
 
   private finishTurn(

@@ -35,6 +35,15 @@ must migrate to those REST routes before upgrading.
 - Removed `emailLoginEnabled` and `passwordLoginEnabled` from `AppUpdateInput`, `AppDefinition` and
   `AppSummary`, and from the validation of app responses. The API still sends
   the fields; the SDK just no longer types or checks them. `allowSignup` stays.
+- A reread of the history while a turn runs (the recovery reads the newest 100 rows every second)
+  no longer drops the older pages the session already read: when the page's oldest row is in
+  `history`, what comes before it stays and `hasOlder` keeps its value; a page that does not reach
+  `history` replaces it, as before. The cards of background subagents opened more than a page ago
+  no longer vanish until `loadOlder` (mitra-core-sdk#145).
+- A row read mid-turn that is older than what the session already saw live of the same piece (by
+  `lastSequence`, or `sequence`, in the same box log) no longer replaces it: the plan list the
+  Copilot updates in place no longer goes back to an earlier version. A live piece that starts
+  after every row read stays at the end of `history` instead of being dropped (mitra-core-sdk#145).
 
 ## 0.3.7
 
