@@ -31,6 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
+import { createAiProvidersModule, type AiProviders, type AiProvidersModule, type IncludedAiQuota, type IncludedAiQuotaWindow, type ManagedAiProfile, type OpencodeAiProvider } from "@mitralab.io/sdk-core"
 import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentPlan, type AgentPlanStep, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
@@ -79,6 +80,18 @@ const agentTasks = withAgentTaskSessions(
 void agentTasks.session
 const readProviders = (): Promise<AgentReadyProvider[]> =>
   core.agentCredentials.providers("agent-1", { scope: "ACCOUNT" })
+const aiProviders: AiProvidersModule = createAiProvidersModule(transport)
+const readAiProviders = (): Promise<AiProviders> => core.aiProviders.get()
+const readManagedProfile = async (): Promise<ManagedAiProfile | null> =>
+  (await aiProviders.get()).managedAiProfile ?? null
+const quotaOf = (providers: AiProviders): IncludedAiQuota | null => providers.includedAiQuota
+const dayOf = (quota: IncludedAiQuota): IncludedAiQuotaWindow | undefined => quota.windows.day
+const opencodeOf = (providers: AiProviders): OpencodeAiProvider => providers.opencode
+void readAiProviders
+void readManagedProfile
+void quotaOf
+void dayOf
+void opencodeOf
 const readOlderMessages = (): Promise<Page<AgentMessage>> =>
   core.agentTasks.listMessages("task-1", { before: "message-1", size: 50 })
 const readOlder = (session: AgentTaskSession): Promise<readonly AgentTimelineItem[]> =>
@@ -174,6 +187,12 @@ const agentTasks = core.withAgentTaskSessions(
 void agentTasks.session
 const readProviders = (): Promise<core.AgentReadyProvider[]> =>
   client.agentCredentials.providers("agent-1", { scope: "ACCOUNT" })
+const aiProviders: core.AiProvidersModule = core.createAiProvidersModule(transport)
+const readAiProviders = (): Promise<core.AiProviders> => client.aiProviders.get()
+const readManagedProfile = async (): Promise<core.ManagedAiProfile | null> =>
+  (await aiProviders.get()).managedAiProfile ?? null
+void readAiProviders
+void readManagedProfile
 const readOlderMessages = (): Promise<core.Page<core.AgentMessage>> =>
   client.agentTasks.listMessages("task-1", { before: "message-1", size: 50 })
 const readOlder = (session: core.AgentTaskSession): Promise<readonly core.AgentTimelineItem[]> =>

@@ -11,6 +11,7 @@ import type {
   AgentTaskChannel,
   AgentTurnUsage,
   AgentTurnUsageRequest,
+  AiProviders,
   AppMember,
   AppDefinition,
   AppDeploy,
@@ -1408,6 +1409,86 @@ export function expectAgentModel(
     invalidField(context, "providerName", errors)
   }
   return model as unknown as AgentModel
+}
+
+export function expectAiProviders(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): AiProviders {
+  const providers = expectObject<JsonObject>(value, context, errors)
+  if (typeof providers.activeEngine !== "string") {
+    invalidField(context, "activeEngine", errors)
+  }
+  if (typeof providers.includedAiAvailable !== "boolean") {
+    invalidField(context, "includedAiAvailable", errors)
+  }
+  if (!isNullableString(providers.activeCustomProviderId)) {
+    invalidField(context, "activeCustomProviderId", errors)
+  }
+  expectObjectArray(
+    providers.customProviders,
+    `${context} customProviders`,
+    errors,
+    expectAgentConnectionCustomProvider,
+  )
+  if (providers.includedAiQuota !== null) {
+    expectIncludedAiQuota(providers.includedAiQuota, `${context} includedAiQuota`, errors)
+  }
+
+  const opencode = expectObject<JsonObject>(providers.opencode, `${context} opencode`, errors)
+  if (typeof opencode.connected !== "boolean") invalidField(context, "opencode.connected", errors)
+  for (const field of ["presetId", "presetName", "providerId", "baseUrl"] as const) {
+    if (!isNullableString(opencode[field])) invalidField(context, `opencode.${field}`, errors)
+  }
+  if (!isNullableString(opencode.authMethod)) {
+    invalidField(context, "opencode.authMethod", errors)
+  }
+  if (opencode.models !== null && !isStringArray(opencode.models)) {
+    invalidField(context, "opencode.models", errors)
+  }
+
+  if (hasOwn(providers, "managedAiProfile") && providers.managedAiProfile !== null) {
+    const profile = expectObject<JsonObject>(
+      providers.managedAiProfile,
+      `${context} managedAiProfile`,
+      errors,
+    )
+    for (const field of [
+      "profile",
+      "agentType",
+      "selectionMode",
+      "model",
+      "requiredScope",
+    ] as const) {
+      if (typeof profile[field] !== "string") {
+        invalidField(context, `managedAiProfile.${field}`, errors)
+      }
+    }
+  }
+  return providers as unknown as AiProviders
+}
+
+function expectIncludedAiQuota(value: unknown, context: string, errors: SdkCoreErrorFactory): void {
+  const quota = expectObject<JsonObject>(value, context, errors)
+  if (typeof quota.planCode !== "string") invalidField(context, "planCode", errors)
+  if (hasOwn(quota, "blockingWindow") && typeof quota.blockingWindow !== "string") {
+    invalidField(context, "blockingWindow", errors)
+  }
+  if (hasOwn(quota, "remainingTokens") && !isInteger(quota.remainingTokens)) {
+    invalidField(context, "remainingTokens", errors)
+  }
+  const windows = expectObject<JsonObject>(quota.windows, `${context} windows`, errors)
+  for (const kind of ["day", "month"] as const) {
+    if (!hasOwn(windows, kind)) continue
+    const window = expectObject<JsonObject>(windows[kind], `${context} windows.${kind}`, errors)
+    for (const field of ["limit", "left", "leftCenticredits"] as const) {
+      if (!isInteger(window[field])) invalidField(context, `windows.${kind}.${field}`, errors)
+    }
+    if (typeof window.resetsAt !== "string") {
+      invalidField(context, `windows.${kind}.resetsAt`, errors)
+    }
+  }
 }
 
 export function expectCredentialStatus(

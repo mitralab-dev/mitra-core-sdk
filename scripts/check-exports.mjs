@@ -14,6 +14,7 @@ const expectedRuntimeExports = {
   createAgentsModule: "function",
   createAgentTaskSessionManager: "function",
   createAgentTasksModule: "function",
+  createAiProvidersModule: "function",
   createAppsModule: "function",
   createAuthModule: "function",
   createContextModule: "function",

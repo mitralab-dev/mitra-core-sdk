@@ -2,16 +2,36 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.8
+
+This release includes typed AI provider discovery (#144) and the breaking app email and login
+surface removals already merged in #135 since 0.3.7.
+
+- Added `aiProviders.get()` to `createSdkCore`, backed by the optional `copilot` transport's
+  `GET /api/v1/ai-providers`, and the standalone `createAiProvidersModule` factory. The response
+  is validated and returned unchanged: active engine, personal quota, custom providers, OpenCode
+  connection and an optional managed AI profile. Missing transport fails before a request; HTTP
+  errors, including a backend without the route returning `404`, propagate unchanged.
+- Exported `AiProvidersModule`, `AiProviders`, `IncludedAiQuota`, `IncludedAiQuotaWindow`,
+  `OpencodeAiProvider` and `ManagedAiProfile`. `managedAiProfile` may be absent on older backends
+  or `null` when ineligible. The Immersion profile is read as returned by the backend, without
+  changing account preferences, creating a task or deriving eligibility from personal quota.
+  Engine, auth method, blocking window and managed-profile string fields accept future values.
+
+### Breaking changes
 
 Removes the app email and login methods added for the business agent of the Infusion editor (#133).
 Those apps call the Messenger and Code Studio REST routes directly with the session token they get
-at sign-in, so the SDK no longer carries them.
+at sign-in, so the SDK no longer carries them. Consumers of the removed methods, types or fields
+must migrate to those REST routes before upgrading.
 
 - Removed from `messenger`: `listEmailTemplates`, `getEmailTemplateType`, `getEmailTemplate`,
   `upsertEmailTemplate`, `previewEmailTemplate`, `deleteEmailTemplate`, `listEmailSenders`,
   `registerEmailSender`, `resendEmailSenderVerification`, `confirmEmailSender`, `getEmailSettings`
   and `updateEmailSettings`, with their types. `notify` and `sendEmail` stay.
+- Removed the third `getAppId` argument from `createMessengerModule`. SDK adapters calling the
+  factory must pass only `transport` and `errors`, including adapters that only use `notify`
+  or `sendEmail`.
 - Removed `emailLoginEnabled` and `passwordLoginEnabled` from `AppUpdateInput`, `AppDefinition` and
   `AppSummary`, and from the validation of app responses. The API still sends
   the fields; the SDK just no longer types or checks them. `allowSignup` stays.
