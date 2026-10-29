@@ -3467,6 +3467,38 @@ describe("Agent direct channel on the Copilot's stand-in while the box boots", (
     session.close()
   })
 
+  it("starts the wait for a held message's admission only when it leaves the outbox, however late the box's replay", async () => {
+    vi.useFakeTimers()
+    const channel = vi
+      .fn<NonNullable<AgentTasksModule["channel"]>>()
+      .mockResolvedValueOnce(standIn())
+      .mockResolvedValue({ wsUrl: BOX_URL, lastSequence: 0 })
+    const tasks = createTasks(channel)
+    const { session } = open(tasks)
+    session.send("first")
+    await vi.waitFor(() => expect(FakeWebSocket.last().sent).toHaveLength(1))
+    const provisional = FakeWebSocket.last()
+    deliver(provisional, admitted(idOf(provisional.sent[0])!, "first", false))
+    provisional.receive("handover")
+    const errors = vi.fn()
+    session.on("error", errors)
+    session.send("second", { mode: "queue" })
+    provisional.drop(4100)
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const box = FakeWebSocket.last()
+    box.receive("hello", { threadId: "thread-1", lastSequence: 0 })
+
+    await vi.advanceTimersByTimeAsync(40_000)
+    box.receive("replayComplete", { lastSequence: 0 })
+    const sent = box.sent.filter((frame) => (frame as { type?: string }).type === "message")
+    expect(sent).toHaveLength(1)
+    deliver(box, admitted(idOf(sent[0])!, "second", false))
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(errors).not.toHaveBeenCalled()
+    session.close()
+  })
+
   it("sends the edit, the cancel and the Stop made during the hand-over on the box, in that order, with no error", async () => {
     vi.useFakeTimers()
     const channel = vi

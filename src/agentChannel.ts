@@ -169,6 +169,8 @@ interface PendingAdmission {
   hold(): void
   /** Starts the admission clock again on a wire that is back. */
   rearm(): void
+  /** The message left the outbox: its clock starts now. */
+  sent(): void
 }
 
 /** The direct channel of one open chat. */
@@ -638,15 +640,23 @@ export class AgentDirectChannel implements AgentTaskEventSource {
     return admitted
   }
 
-  /** The box's answer the message waits for, armed now and listed with the chat's others. */
+  /**
+   * The box's answer the message waits for, listed with the chat's others. Its clock starts now,
+   * or, for one held in the outbox, once it goes out: the box cannot answer a message it has not
+   * got, and a wait that ran out while the message still waited would read as a failure before
+   * the message ran, and a resend would run it twice.
+   */
   private admission(
     link: DirectLink,
     messageId: string,
+    inOutbox = false,
   ): { admission: PendingAdmission; admitted: Promise<boolean> } {
     let admission!: PendingAdmission
     const admitted = new Promise<boolean>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
+      let waiting = inOutbox
       const arm = () => {
+        if (waiting) return
         clearTimeout(timer)
         timer = setTimeout(() => {
           admission.fail(
@@ -675,6 +685,10 @@ export class AgentDirectChannel implements AgentTaskEventSource {
         },
         hold: () => clearTimeout(timer),
         rearm: arm,
+        sent: () => {
+          waiting = false
+          arm()
+        },
       }
       arm()
     })
@@ -703,11 +717,13 @@ export class AgentDirectChannel implements AgentTaskEventSource {
       })
     }
     const messageId = clientMessageId ?? newClientMessageId()
-    const { admission, admitted } = this.admission(link, messageId)
+    const { admission, admitted } = this.admission(link, messageId, true)
     link.outbox.push(() => {
       if (!link.wire?.message({ ...input, clientMessageId: messageId }, admission)) {
         admission.fail(notSent())
+        return
       }
+      admission.sent()
     })
     return admitted
   }

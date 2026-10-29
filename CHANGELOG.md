@@ -20,6 +20,8 @@ the stand-in; with a Copilot without it, everything stays as in 0.3.7.
   sends meanwhile (message, Stop, cancel, edit, resume) waits in order and goes on the box's socket,
   with the same ids, once the box's replay completes. A stand-in again (the Copilot took the queue
   back) takes it at once. A stand-in that drops in the middle of the hand-over opens the box too.
+  A message held that way starts its admission wait (35 s) only when it goes out: a replay that
+  takes long never fails a message that has not reached the box yet.
 - A Stop with the chat's socket down (a redial in flight) is refused with an error instead of
   going to the Copilot by REST, as cancel and edit already were: with others on the chat, what a
   Stop lands on is known only while connected. A session with no direct channel still stops by
