@@ -673,6 +673,13 @@ function historyCursorOf(history: readonly AgentTimelineItem[]): AgentHistoryCur
   return { sequence, ...(newest.boxLog === undefined ? {} : { boxLog: newest.boxLog }) }
 }
 
+const SUBAGENT_END_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+])
+
 // The same piece of T3 in two reads: the same row, or the live item of the row's T3 item. A tool
 // call and its result share the item id and are two pieces.
 function samePiece(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
@@ -959,6 +966,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // Whether the box the channel follows counts in the log of the history's rows. A box whose hello
   // names another log, or reports a log shorter than the history's, has sequences that start over.
   private rowsInChannelLog = true
+  // The log the hello of the channel named. A reread compares its rows with it every time: the
+  // flag above starts over at each reread, and a page from the old log may come again.
+  private channelLog: number | undefined
   private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
     null
 
@@ -1147,9 +1157,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // `loadOlder` (#145). A page that does not reach the history it already has replaces it.
   private replaceHistory(page: Page<AgentMessage>): void {
     this.historyGeneration += 1
-    const liveComparable = this.rowsInChannelLog
-    this.rowsInChannelLog = true
     const rows = [...page.content].reverse().map(toAgentTimelineItem)
+    const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
+    const liveComparable =
+      this.rowsInChannelLog &&
+      (this.channelLog === undefined || rowsLog === undefined || rowsLog === this.channelLog)
+    this.rowsInChannelLog = true
     const anchor = rows[0] ? this._history.findIndex((item) => item.id === rows[0]?.id) : -1
     const rowIds = new Set(rows.map((item) => item.id))
     // A row the Copilot moved into the page (a question placed at its stepStart) is not kept twice.
@@ -1183,12 +1196,23 @@ class CoreAgentTaskSession implements AgentTaskSession {
           )
     this._history = [...kept, ...merged, ...unrecorded]
     // The Copilot overwrites the spawn row's subagent without moving its sequence, so the row
-    // cannot say how new it is. A frame past every row read may not have reached the Copilot yet;
-    // one at or before them already did, and the row carries it or something newer.
+    // cannot say how new it is. A subagent never leaves an end status, so an end status wins on
+    // either side. Between two others, a frame past every row read may not have reached the
+    // Copilot yet; one at or before them already did, and the row carries it or something newer.
     if (cursor === undefined) return
     for (const subagent of this.subagentsById.values()) {
+      const row = this._history.find(
+        (item) => item.kind === "tool" && item.tool.toolId === subagent.toolId,
+      )
+      const rowStatus = row?.kind === "tool" ? row.subagent?.status : undefined
+      if (rowStatus !== undefined && SUBAGENT_END_STATUSES.has(rowStatus)) continue
       const applied = this.subagentSequences.get(subagent.subagentId)
-      if (applied !== undefined && applied > cursor.sequence) this.writeSubagentOnSpawn(subagent)
+      if (
+        SUBAGENT_END_STATUSES.has(subagent.status) ||
+        (applied !== undefined && applied > cursor.sequence)
+      ) {
+        this.writeSubagentOnSpawn(subagent)
+      }
     }
   }
 
@@ -1918,6 +1942,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         break
       case "hello": {
         const lastSequence = payload?.lastSequence
+        if (typeof payload?.boxLog === "number") this.channelLog = payload.boxLog
         const history = historyCursorOf(this._history)
         const rowsLog = [...this._history]
           .reverse()

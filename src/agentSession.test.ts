@@ -1552,7 +1552,45 @@ describe("Agent older history", () => {
       const read = reread(session)
       source.disconnect(new Error("network"), 0)
       await read
+      expect(spawnStatus(session)).toBe("running")
 
+      // The page is still the old log's on the next reread.
+      await reread(session)
+      expect(spawnStatus(session)).toBe("running")
+      session.close()
+    })
+
+    it("takes an end status the Copilot recorded over a live frame past every row", async () => {
+      const newest = { page: olderPage([spawnRow("running")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit(subagentUpdate("running", 20))
+
+      // The Copilot recorded the end on the spawn row; no row after 9 came with it.
+      newest.page = olderPage([boxRow("r9", 9), spawnRow("completed")])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(spawnStatus(session)).toBe("completed")
+      session.close()
+    })
+
+    it("keeps a live frame past every row between two statuses that are not an end", async () => {
+      const newest = { page: olderPage([spawnRow("running")]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit(subagentUpdate("waiting", 20))
+
+      newest.page = olderPage([boxRow("r9", 9), spawnRow("running")])
+      const first = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await first
+      expect(spawnStatus(session)).toBe("waiting")
+
+      // Once the Copilot recorded past that frame, the row carries it or something newer.
+      newest.page = olderPage([boxRow("r21", 21), boxRow("r9", 9), spawnRow("running")])
+      await reread(session)
       expect(spawnStatus(session)).toBe("running")
       session.close()
     })
