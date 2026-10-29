@@ -1,0 +1,59 @@
+{"at":"2026-10-28T04:29:46.495Z","t":2.3,"kind":"say","m":"killed "}
+{"at":"2026-10-28T04:29:52.846Z","t":8.65,"kind":"ev:r0","ev":"error","error":"Failed to send Agent prompt: tok.py failed (1): Traceback (most recent call last):\r\n  File \"C:\\Users\\joao_\\AppData\\Local"}
+{"at":"2026-10-28T04:29:52.870Z","t":8.67,"kind":"say","m":"{\"round\":0,\"task\":null,\"createTask\":[],\"channel\":[],\"error\":2282}"}
+{"at":"2026-10-28T04:29:52.871Z","t":8.67,"kind":"ev:r0","ev":"statusChange","status":"closed"}
+{"at":"2026-10-28T04:29:58.422Z","t":14.22,"kind":"say","m":"killed "}
+{"at":"2026-10-28T04:30:08.257Z","t":24.06,"kind":"ev:r1","ev":"taskCreated","task":{"id":"b1456c39-c3b7-466e-bf00-185e7d66848c"}}
+{"at":"2026-10-28T04:30:19.065Z","t":34.87,"kind":"ev:r1","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-28T04:30:19.066Z","t":34.87,"kind":"ev:r1","ev":"turnStart"}
+{"at":"2026-10-28T04:30:22.854Z","t":38.66,"kind":"ev:r1","ev":"accepted"}
+{"at":"2026-10-28T04:30:51.044Z","t":66.85,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-28T04:30:51.440Z","t":67.24,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-28T04:30:51.630Z","t":67.43,"kind":"ev:r1","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-1"}
+{"at":"2026-10-28T04:30:51.630Z","t":67.43,"kind":"ev:r1","ev":"statusChange","status":"idle"}
+{"at":"2026-10-28T04:30:51.648Z","t":67.45,"kind":"say","m":"{\"round\":1,\"task\":\"b1456c39-c3b7-466e-bf00-185e7d66848c\",\"createTask\":[\"201 5307ms\"],\"channel\":[\"200 4999ms {\\\"standIn\\\":true}\",\"200 3594ms {\\\"standIn\\\":true}\"],\"msToStepStart\":20428,\"msToAccepted\":20426,\"msToTurnStart\":16638,\"msToTurnEnd\":49202}"}
+{"at":"2026-10-28T04:30:51.648Z","t":67.45,"kind":"ev:r1","ev":"statusChange","status":"closed"}
+{"at":"2026-10-28T04:30:59.279Z","t":75.08,"kind":"say","m":"killed izro9xaj2etkat9n3zfyr"}
+{"at":"2026-10-28T04:31:03.462Z","t":79.27,"kind":"ev:r2","ev":"taskCreated","task":{"id":"89edd2aa-2ece-4c41-9dfa-ae0f42145716"}}
+{"at":"2026-10-28T04:31:04.563Z","t":80.37,"kind":"ev:r2","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-28T04:31:04.563Z","t":80.37,"kind":"ev:r2","ev":"turnStart"}
+{"at":"2026-10-28T04:31:05.457Z","t":81.26,"kind":"ev:r2","ev":"accepted"}
+{"at":"2026-10-28T04:31:19.088Z","t":94.89,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-28T04:31:19.546Z","t":95.35,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-28T04:31:19.718Z","t":95.52,"kind":"ev:r2","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-2"}
+{"at":"2026-10-28T04:31:19.718Z","t":95.52,"kind":"ev:r2","ev":"statusChange","status":"idle"}
+{"at":"2026-10-28T04:31:19.718Z","t":95.52,"kind":"say","m":"{\"round\":2,\"task\":\"89edd2aa-2ece-4c41-9dfa-ae0f42145716\",\"createTask\":[\"201 174ms\"],\"channel\":[\"200 390ms {\\\"standIn\\\":true}\",\"200 2099ms {\\\"standIn\\\":true}\"],\"msToStepStart\":2262,\"msToAccepted\":2171,\"msToTurnStart\":1276,\"msToTurnEnd\":16431}"}
+{"at":"2026-10-28T04:31:19.719Z","t":95.52,"kind":"ev:r2","ev":"statusChange","status":"closed"}
+{"at":"2026-10-28T04:31:28.038Z","t":103.84,"kind":"say","m":"killed i0n8uovc77m1216i24o1t"}
+{"at":"2026-10-28T04:31:32.127Z","t":107.93,"kind":"ev:r3","ev":"taskCreated","task":{"id":"395197f8-30ae-487f-b0cf-98233c6f4de8"}}
+{"at":"2026-10-28T04:31:33.262Z","t":109.06,"kind":"ev:r3","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-28T04:31:33.262Z","t":109.06,"kind":"ev:r3","ev":"turnStart"}
+{"at":"2026-10-28T04:31:34.456Z","t":110.26,"kind":"ev:r3","ev":"accepted"}
+{"at":"2026-10-28T04:31:47.457Z","t":123.26,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-28T04:31:47.895Z","t":123.7,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-28T04:31:48.095Z","t":123.9,"kind":"ev:r3","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-3"}
+{"at":"2026-10-28T04:31:48.095Z","t":123.9,"kind":"ev:r3","ev":"statusChange","status":"idle"}
+{"at":"2026-10-28T04:31:48.109Z","t":123.91,"kind":"say","m":"{\"round\":3,\"task\":\"395197f8-30ae-487f-b0cf-98233c6f4de8\",\"createTask\":[\"201 73ms\"],\"channel\":[\"200 624ms {\\\"standIn\\\":true}\",\"200 2897ms {\\\"standIn\\\":true}\"],\"msToStepStart\":2403,\"msToAccepted\":2402,\"msToTurnStart\":1208,\"msToTurnEnd\":16041}"}
+{"at":"2026-10-28T04:31:48.109Z","t":123.91,"kind":"ev:r3","ev":"statusChange","status":"closed"}
+{"at":"2026-10-28T04:31:55.351Z","t":131.15,"kind":"say","m":"killed ihsl8rt2b4er4cnd4bk0o"}
+{"at":"2026-10-28T04:31:59.461Z","t":135.26,"kind":"ev:r4","ev":"taskCreated","task":{"id":"c4ebde75-fe42-4500-9082-eb4a1acc9e5e"}}
+{"at":"2026-10-28T04:32:00.454Z","t":136.26,"kind":"ev:r4","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-28T04:32:00.455Z","t":136.26,"kind":"ev:r4","ev":"turnStart"}
+{"at":"2026-10-28T04:32:02.257Z","t":138.06,"kind":"ev:r4","ev":"accepted"}
+{"at":"2026-10-28T04:32:15.878Z","t":151.68,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-28T04:32:16.400Z","t":152.2,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-28T04:32:16.569Z","t":152.37,"kind":"ev:r4","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-4"}
+{"at":"2026-10-28T04:32:16.569Z","t":152.37,"kind":"ev:r4","ev":"statusChange","status":"idle"}
+{"at":"2026-10-28T04:32:16.570Z","t":152.37,"kind":"say","m":"{\"round\":4,\"task\":\"c4ebde75-fe42-4500-9082-eb4a1acc9e5e\",\"createTask\":[\"201 106ms\"],\"channel\":[\"200 296ms {\\\"standIn\\\":true}\",\"200 1699ms {\\\"standIn\\\":true}\"],\"msToStepStart\":2903,\"msToAccepted\":2902,\"msToTurnStart\":1100,\"msToTurnEnd\":17214}"}
+{"at":"2026-10-28T04:32:16.570Z","t":152.37,"kind":"ev:r4","ev":"statusChange","status":"closed"}
+{"at":"2026-10-28T04:32:24.119Z","t":159.92,"kind":"say","m":"killed iltbenp7xljd7r7s3gyy8"}
+{"at":"2026-10-28T04:32:28.258Z","t":164.06,"kind":"ev:r5","ev":"taskCreated","task":{"id":"c05684a4-0f22-4fa6-8219-717bf9b190d3"}}
+{"at":"2026-10-28T04:32:28.858Z","t":164.66,"kind":"ev:r5","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-28T04:32:28.859Z","t":164.66,"kind":"ev:r5","ev":"turnStart"}
+{"at":"2026-10-28T04:32:30.052Z","t":165.85,"kind":"ev:r5","ev":"accepted"}
+{"at":"2026-10-28T04:32:41.286Z","t":177.09,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-28T04:32:41.707Z","t":177.51,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-28T04:32:41.859Z","t":177.66,"kind":"ev:r5","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-5"}
+{"at":"2026-10-28T04:32:41.859Z","t":177.66,"kind":"ev:r5","ev":"statusChange","status":"idle"}
+{"at":"2026-10-28T04:32:41.859Z","t":177.66,"kind":"say","m":"{\"round\":5,\"task\":\"c05684a4-0f22-4fa6-8219-717bf9b190d3\",\"createTask\":[\"201 126ms\"],\"channel\":[\"200 205ms {\\\"standIn\\\":true}\",\"200 1604ms {\\\"standIn\\\":true}\"],\"msToStepStart\":1922,\"msToAccepted\":1921,\"msToTurnStart\":728,\"msToTurnEnd\":13728}"}
+{"at":"2026-10-28T04:32:41.859Z","t":177.66,"kind":"ev:r5","ev":"statusChange","status":"closed"}

@@ -1,0 +1,86 @@
+{"at":"2026-10-27T11:03:04.028Z","t":4.63,"kind":"say","m":"killed iao9sj2hzo4b89ymlu0a3"}
+{"at":"2026-10-27T11:03:08.265Z","t":8.87,"kind":"ev:r0","ev":"taskCreated","task":{"id":"7dc29be6-7a38-45a2-8d49-1d634a3ca918"}}
+{"at":"2026-10-27T11:03:08.505Z","t":9.11,"kind":"ev:r0","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:03:08.505Z","t":9.11,"kind":"ev:r0","ev":"turnStart"}
+{"at":"2026-10-27T11:03:08.978Z","t":9.58,"kind":"ev:r0","ev":"accepted"}
+{"at":"2026-10-27T11:03:23.224Z","t":23.83,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:03:23.654Z","t":24.26,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:03:23.832Z","t":24.44,"kind":"ev:r0","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-0"}
+{"at":"2026-10-27T11:03:23.832Z","t":24.44,"kind":"ev:r0","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:03:23.851Z","t":24.45,"kind":"say","m":"{\"round\":0,\"task\":\"7dc29be6-7a38-45a2-8d49-1d634a3ca918\",\"createTask\":[\"201 116ms\"],\"channel\":[\"200 96ms {\\\"standIn\\\":true}\",\"200 896ms {\\\"standIn\\\":true}\"],\"msToStepStart\":926,\"msToHandOver\":11192,\"msToAccepted\":925,\"msToTurnStart\":452,\"msToTurnEnd\":15779}"}
+{"at":"2026-10-27T11:03:23.852Z","t":24.46,"kind":"ev:r0","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:03:31.030Z","t":31.63,"kind":"say","m":"killed ib3a4q7y6jajdfi0ymh8s"}
+{"at":"2026-10-27T11:03:35.090Z","t":35.69,"kind":"ev:r1","ev":"taskCreated","task":{"id":"04da0661-d893-4ad4-8609-7a6e482b1592"}}
+{"at":"2026-10-27T11:03:35.358Z","t":35.96,"kind":"ev:r1","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:03:35.359Z","t":35.96,"kind":"ev:r1","ev":"turnStart"}
+{"at":"2026-10-27T11:03:35.768Z","t":36.37,"kind":"ev:r1","ev":"accepted"}
+{"at":"2026-10-27T11:03:50.357Z","t":50.96,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:03:50.865Z","t":51.47,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:03:51.053Z","t":51.66,"kind":"ev:r1","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-1"}
+{"at":"2026-10-27T11:03:51.053Z","t":51.66,"kind":"ev:r1","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:03:51.053Z","t":51.66,"kind":"say","m":"{\"round\":1,\"task\":\"04da0661-d893-4ad4-8609-7a6e482b1592\",\"createTask\":[\"201 55ms\"],\"channel\":[\"200 155ms {\\\"standIn\\\":true}\",\"200 642ms {\\\"standIn\\\":true}\"],\"msToStepStart\":733,\"msToHandOver\":13391,\"msToAccepted\":733,\"msToTurnStart\":324,\"msToTurnEnd\":16018}"}
+{"at":"2026-10-27T11:03:51.053Z","t":51.66,"kind":"ev:r1","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:03:58.143Z","t":58.75,"kind":"say","m":"killed ijqaounvcau3o8l5hjeo5"}
+{"at":"2026-10-27T11:04:02.250Z","t":62.85,"kind":"ev:r2","ev":"taskCreated","task":{"id":"3aa10790-5b58-4dc0-ae93-adee46d014c4"}}
+{"at":"2026-10-27T11:04:02.748Z","t":63.35,"kind":"ev:r2","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:04:02.748Z","t":63.35,"kind":"ev:r2","ev":"turnStart"}
+{"at":"2026-10-27T11:04:03.093Z","t":63.7,"kind":"ev:r2","ev":"accepted"}
+{"at":"2026-10-27T11:04:15.816Z","t":76.42,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:04:16.274Z","t":76.88,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:04:16.426Z","t":77.03,"kind":"ev:r2","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-2"}
+{"at":"2026-10-27T11:04:16.426Z","t":77.03,"kind":"ev:r2","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:04:16.450Z","t":77.05,"kind":"say","m":"{\"round\":2,\"task\":\"3aa10790-5b58-4dc0-ae93-adee46d014c4\",\"createTask\":[\"201 91ms\"],\"channel\":[\"200 200ms {\\\"standIn\\\":true}\",\"200 901ms {\\\"standIn\\\":true}\"],\"msToStepStart\":936,\"msToHandOver\":11189,\"msToAccepted\":935,\"msToTurnStart\":590,\"msToTurnEnd\":14268}"}
+{"at":"2026-10-27T11:04:16.450Z","t":77.05,"kind":"ev:r2","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:04:23.713Z","t":84.32,"kind":"say","m":"killed i24bpg9t1kutsa37lkbhg"}
+{"at":"2026-10-27T11:04:27.790Z","t":88.39,"kind":"ev:r3","ev":"taskCreated","task":{"id":"71f30d59-61a8-44a0-a434-af259512ceb8"}}
+{"at":"2026-10-27T11:04:28.252Z","t":88.86,"kind":"ev:r3","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:04:28.253Z","t":88.86,"kind":"ev:r3","ev":"turnStart"}
+{"at":"2026-10-27T11:04:29.350Z","t":89.95,"kind":"ev:r3","ev":"accepted"}
+{"at":"2026-10-27T11:04:42.367Z","t":102.97,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:04:42.835Z","t":103.44,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:04:43.031Z","t":103.64,"kind":"ev:r3","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-3"}
+{"at":"2026-10-27T11:04:43.032Z","t":103.64,"kind":"ev:r3","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:04:43.032Z","t":103.64,"kind":"say","m":"{\"round\":3,\"task\":\"71f30d59-61a8-44a0-a434-af259512ceb8\",\"createTask\":[\"201 72ms\"],\"channel\":[\"200 170ms {\\\"standIn\\\":true}\",\"200 818ms {\\\"standIn\\\":true}\"],\"msToStepStart\":1633,\"msToHandOver\":11018,\"msToAccepted\":1632,\"msToTurnStart\":535,\"msToTurnEnd\":15314}"}
+{"at":"2026-10-27T11:04:43.032Z","t":103.64,"kind":"ev:r3","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:04:50.166Z","t":110.77,"kind":"say","m":"killed if0n0quakdzk1llcsvzoh"}
+{"at":"2026-10-27T11:04:54.235Z","t":114.84,"kind":"ev:r4","ev":"taskCreated","task":{"id":"199aa12a-d4d8-4c44-92ef-13a63915d853"}}
+{"at":"2026-10-27T11:04:54.405Z","t":115.01,"kind":"ev:r4","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:04:54.405Z","t":115.01,"kind":"ev:r4","ev":"turnStart"}
+{"at":"2026-10-27T11:04:55.249Z","t":115.85,"kind":"ev:r4","ev":"accepted"}
+{"at":"2026-10-27T11:05:08.475Z","t":129.08,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:05:08.931Z","t":129.53,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:05:09.132Z","t":129.74,"kind":"ev:r4","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-4"}
+{"at":"2026-10-27T11:05:09.132Z","t":129.74,"kind":"ev:r4","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:05:09.132Z","t":129.74,"kind":"say","m":"{\"round\":4,\"task\":\"199aa12a-d4d8-4c44-92ef-13a63915d853\",\"createTask\":[\"201 52ms\"],\"channel\":[\"200 70ms {\\\"standIn\\\":true}\",\"200 707ms {\\\"standIn\\\":true}\"],\"msToStepStart\":1067,\"msToHandOver\":12353,\"msToAccepted\":1067,\"msToTurnStart\":222,\"msToTurnEnd\":14949}"}
+{"at":"2026-10-27T11:05:09.132Z","t":129.74,"kind":"ev:r4","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:05:16.215Z","t":136.82,"kind":"say","m":"killed ibwqnlsevo62e0ozidt39"}
+{"at":"2026-10-27T11:05:20.273Z","t":140.88,"kind":"ev:r5","ev":"taskCreated","task":{"id":"1657e515-e252-4988-b5a1-89007fb9e413"}}
+{"at":"2026-10-27T11:05:20.452Z","t":141.06,"kind":"ev:r5","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:05:20.453Z","t":141.06,"kind":"ev:r5","ev":"turnStart"}
+{"at":"2026-10-27T11:05:21.051Z","t":141.66,"kind":"ev:r5","ev":"accepted"}
+{"at":"2026-10-27T11:05:34.872Z","t":155.48,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:05:35.420Z","t":156.02,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:05:35.603Z","t":156.21,"kind":"ev:r5","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-5"}
+{"at":"2026-10-27T11:05:35.603Z","t":156.21,"kind":"ev:r5","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:05:35.615Z","t":156.22,"kind":"say","m":"{\"round\":5,\"task\":\"1657e515-e252-4988-b5a1-89007fb9e413\",\"createTask\":[\"201 51ms\"],\"channel\":[\"200 60ms {\\\"standIn\\\":true}\",\"200 675ms {\\\"standIn\\\":true}\"],\"msToStepStart\":831,\"msToHandOver\":11246,\"msToAccepted\":830,\"msToTurnStart\":232,\"msToTurnEnd\":15382}"}
+{"at":"2026-10-27T11:05:35.615Z","t":156.22,"kind":"ev:r5","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:05:42.676Z","t":163.28,"kind":"say","m":"killed ilkne1b62uohuhl5bm6fb"}
+{"at":"2026-10-27T11:05:46.755Z","t":167.36,"kind":"ev:r6","ev":"taskCreated","task":{"id":"06e8e27f-6a62-4f39-8cd9-2da90ac3881c"}}
+{"at":"2026-10-27T11:05:47.256Z","t":167.86,"kind":"ev:r6","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:05:47.256Z","t":167.86,"kind":"ev:r6","ev":"turnStart"}
+{"at":"2026-10-27T11:05:47.662Z","t":168.27,"kind":"ev:r6","ev":"accepted"}
+{"at":"2026-10-27T11:06:06.971Z","t":187.57,"kind":"text","ev":"delta","len":8}
+{"at":"2026-10-27T11:06:07.383Z","t":187.99,"kind":"text","ev":"delta","len":2}
+{"at":"2026-10-27T11:06:07.616Z","t":188.22,"kind":"ev:r6","ev":"turnEnd","reason":"stop","content":"PRIMEIRA-6"}
+{"at":"2026-10-27T11:06:07.616Z","t":188.22,"kind":"ev:r6","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:06:07.635Z","t":188.24,"kind":"say","m":"{\"round\":6,\"task\":\"06e8e27f-6a62-4f39-8cd9-2da90ac3881c\",\"createTask\":[\"201 66ms\"],\"channel\":[\"200 204ms {\\\"standIn\\\":true}\",\"200 683ms {\\\"standIn\\\":true}\"],\"msToStepStart\":1060,\"msToHandOver\":14053,\"msToAccepted\":974,\"msToTurnStart\":568,\"msToTurnEnd\":20927}"}
+{"at":"2026-10-27T11:06:07.635Z","t":188.24,"kind":"ev:r6","ev":"statusChange","status":"closed"}
+{"at":"2026-10-27T11:06:14.713Z","t":195.32,"kind":"say","m":"killed ic0w3yq91eu9pp5ppe0vz"}
+{"at":"2026-10-27T11:06:18.772Z","t":199.38,"kind":"ev:r7","ev":"taskCreated","task":{"id":"0b757069-3bee-4642-8cce-cd3bccb50e97"}}
+{"at":"2026-10-27T11:06:18.930Z","t":199.53,"kind":"ev:r7","ev":"statusChange","status":"streaming"}
+{"at":"2026-10-27T11:06:18.931Z","t":199.53,"kind":"ev:r7","ev":"turnStart"}
+{"at":"2026-10-27T11:06:19.557Z","t":200.16,"kind":"ev:r7","ev":"accepted"}
+{"at":"2026-10-27T11:06:31.628Z","t":212.23,"kind":"ev:r7","ev":"turnEnd","reason":"stop","content":""}
+{"at":"2026-10-27T11:06:31.629Z","t":212.23,"kind":"ev:r7","ev":"statusChange","status":"idle"}
+{"at":"2026-10-27T11:06:31.647Z","t":212.25,"kind":"say","m":"{\"round\":7,\"task\":\"0b757069-3bee-4642-8cce-cd3bccb50e97\",\"createTask\":[\"201 59ms\"],\"channel\":[\"200 81ms {\\\"standIn\\\":true}\",\"200 707ms {\\\"standIn\\\":true}\"],\"msToStepStart\":845,\"msToHandOver\":11128,\"msToAccepted\":844,\"msToTurnStart\":218,\"msToTurnEnd\":12915}"}
+{"at":"2026-10-27T11:06:31.647Z","t":212.25,"kind":"ev:r7","ev":"statusChange","status":"closed"}

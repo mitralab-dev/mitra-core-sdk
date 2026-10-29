@@ -121,3 +121,5 @@ npm run check
 ```
 
 O `check` roda format, lint, typecheck, testes, build, a conferência dos exports e do corpus de contrato em `contracts/`, e um smoke test do pacote. A publicação no npm sai do workflow Release, sempre antes dos SDKs que dependem do Core.
+
+A bateria de ponta a ponta do agente, que conversa pela SDK com o copilot, a box e o T3 reais da dev, fica em [`e2e/`](e2e/README.md) e roda com `npm run e2e`. Ela não entra no pacote publicado.

@@ -4,3 +4,8 @@ coverage/
 *.tgz
 *.tsbuildinfo
 .DS_Store
+e2e/.sdk/
+e2e/.runs/
+.env
+.env.*
+*.pem
