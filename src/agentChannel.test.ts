@@ -994,7 +994,7 @@ describe("Agent direct channel over HTTP", () => {
         new AgentTaskTurnError(message, code),
       )
       await new Promise((resolve) => setTimeout(resolve, 10))
-      expect(errors).toEqual([{ code, error: `Failed to send Agent prompt: ${message}` }])
+      expect(errors).toEqual([{ code, error: message }])
       expect(accepted).not.toHaveBeenCalled()
       expect(tasks.sendInput).not.toHaveBeenCalled()
       expect(session.status).toBe("idle")
@@ -2797,7 +2797,10 @@ describe("Agent direct channel steering", () => {
     vi.useFakeTimers()
     vi.stubGlobal("fetch", undefined)
     const tasks = createTasks(offer(BOX_URL, 3))
-    const refusal = Object.assign(new Error("No balance"), { code: "INCLUDED_AI_EXHAUSTED" })
+    const refusal = Object.assign(new Error("No balance"), {
+      status: 402,
+      code: "INCLUDED_AI_EXHAUSTED",
+    })
     tasks.sendInput.mockRejectedValueOnce(refusal)
     const { session } = open(tasks)
     const errors: { code?: string; error: string }[] = []
@@ -2818,7 +2821,7 @@ describe("Agent direct channel steering", () => {
     await expect(steer).rejects.toBe(refusal)
     expect(errors).toContainEqual({
       code: "INCLUDED_AI_EXHAUSTED",
-      error: "Failed to send Agent prompt: No balance",
+      error: "No balance",
     })
     expect(session.status).toBe("streaming")
 

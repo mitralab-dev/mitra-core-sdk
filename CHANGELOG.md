@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Behaviour change: a send the server refuses with a code and its own sentence (the box's refusal,
+  or the Copilot's error answer such as `ACCOUNT_CREDENTIAL_EXPIRED`) emits `error` with that
+  sentence alone, without the `Failed to send Agent prompt:` prefix, so both paths read the same.
+  Network failures and timeouts keep the prefix.
+- A reread of the history while a turn runs (the recovery reads the newest 100 rows every second)
+  no longer drops the older pages the session already read: when the page's oldest row is in
+  `history`, what comes before it stays and `hasOlder` keeps its value; a page that does not reach
+  `history` replaces it, as before. The cards of background subagents opened more than a page ago
+  no longer vanish until `loadOlder` (mitra-core-sdk#145).
+- Behaviour change: calling `loadHistory` again goes through the same reread, so it now merges into
+  `history` instead of resetting it: when the new page's oldest row is already in `history`, the
+  older pages read with `loadOlder` stay and `hasOlder` keeps its value. Only a page that does not
+  reach `history` replaces it and resets `hasOlder` (mitra-core-sdk#145).
+- A `loadOlder` in flight is dropped only when a reread replaces `history` or changes its oldest
+  row; a reread that keeps the oldest row lets the older page land in place (mitra-core-sdk#145).
+- A row read mid-turn that is older than what the session already saw live of the same piece (by
+  `lastSequence`, or `sequence`, in the same box log) no longer replaces it: the plan list the
+  Copilot updates in place no longer goes back to an earlier version. A live text or reasoning is
+  kept over its row only when the session heard it from its first chunk; one heard from the middle
+  gives way to the row, which carries the start. A live piece that starts after every row read
+  stays at the end of `history` instead of being dropped (mitra-core-sdk#145).
+- A live plan whose row sits behind the reread page (the Copilot keeps the row where the plan's
+  first version came) stays at the end of `history` through the reread, instead of being dropped
+  as recorded; a `loadOlder` read before its last update then no longer lands the plan at an
+  earlier version, and the row it brings takes the live state with the row's `sequence`
+  (mitra-core-sdk#145).
+- A reread whose page starts at a piece held live, with live pieces before it that the page has no
+  row for (the Copilot wrote more than a page between two rereads), reads the rows before the page
+  with the same call and size `loadOlder` uses, until those pieces have their rows or the page
+  reaches a row `history` holds, and then merges. Those pieces no longer stay live without their
+  rows. A read that ends after `history` was replaced lands nowhere (mitra-core-sdk#145).
+
 ## 0.3.8
 
 This release includes typed AI provider discovery (#144) and the breaking app email and login
