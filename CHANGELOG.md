@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.9
+
+This release includes the agent session's history reread fix (#148): a reread no longer drops the
+pages already read nor goes back to an older version of a live piece, and a send the server refuses
+with its own sentence reads the same on both paths.
 
 - Behaviour change: a send the server refuses with a code and its own sentence (the box's refusal,
   or the Copilot's error answer such as `ACCOUNT_CREDENTIAL_EXPIRED`) emits `error` with that

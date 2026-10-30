@@ -24,6 +24,11 @@ publishes.
 
 ## Versions
 
+- `0.3.9` is the `0.3.8` parity surface with the agent session's history reread that keeps the
+  pages already read and the newest live state, and the send refused with the server's own sentence.
+  These behaviours are outside the parity cases. Same parity cases; the version exists so a consumer
+  pinning the package can pin a corpus with the same number.
+
 - `0.3.8` is the `0.3.7` parity surface with typed `aiProviders.get()` discovery and the removal
   of the app email management methods and app login fields. These surfaces are outside the parity
   cases. Same parity cases; the version exists so a consumer pinning the package can pin a corpus
