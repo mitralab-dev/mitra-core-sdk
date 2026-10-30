@@ -703,10 +703,20 @@ function heldIsNewer(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
   return heldLast > rowLast
 }
 
-// The row of a piece the session also holds: the held item stays, under the row's id, only when
-// it is newer and counts in the rows' log.
+// A live text or reasoning holds only the chunks heard since its first `sequence`: one that
+// started after the row's has lost the start the row carries. A plan comes whole on every frame.
+function heldHasRow(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
+  if (held.kind !== "agent" && held.kind !== "reasoning") return true
+  return held.sequence !== undefined && row.sequence !== undefined && held.sequence <= row.sequence
+}
+
+// Live items carry no message id the Copilot knows: `loadOlder` reads before the oldest row.
+function oldestRowOf(history: readonly AgentTimelineItem[]): AgentTimelineItem | undefined {
+  return history.find((item) => !item.id.startsWith("live:"))
+}
+
 function rowOrHeld(held: AgentTimelineItem, row: AgentTimelineItem, liveComparable: boolean) {
-  if (!liveComparable || !heldIsNewer(held, row)) return row
+  if (!liveComparable || !heldIsNewer(held, row) || !heldHasRow(held, row)) return row
   return { ...held, id: row.id, ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }) }
 }
 
@@ -1139,8 +1149,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private async readOlder(generation: number): Promise<readonly AgentTimelineItem[]> {
-    // Live items carry no message id the Copilot knows; they only ever sit after the rows.
-    const oldest = this._history.find((item) => !item.id.startsWith("live:"))
+    const oldest = oldestRowOf(this._history)
     if (!this._taskId || !this._hasOlder || !oldest) return []
     let page: Page<AgentMessage>
     try {
@@ -1184,15 +1193,14 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // read stay, or what sits in them (the cards of subagents still running) vanishes until
   // `loadOlder` (#145). A page that does not reach the history it already has replaces it.
   private replaceHistory(page: Page<AgentMessage>): void {
-    this.historyGeneration += 1
+    const oldest = oldestRowOf(this._history)?.id
     const rows = [...page.content].reverse().map(toAgentTimelineItem)
     const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
     const liveComparable =
       this.rowsInChannelLog &&
       (this.channelLog === undefined || rowsLog === undefined || rowsLog === this.channelLog)
     this.rowsInChannelLog = true
-    // The oldest row may be a piece the session holds live, under its `live:` id: a live turn
-    // longer than the page (dev, Codex: 235 items back to 50 and `hasOlder` true again).
+    // The page can start at a piece the session holds live, under its `live:` id.
     const first = rows[0]
     const anchor = first ? this._history.findIndex((item) => samePiece(item, first)) : -1
     // A row the Copilot moved into the page (a question placed at its stepStart), or a piece
@@ -1227,6 +1235,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
               item.sequence > cursor.sequence,
           )
     this._history = [...kept, ...merged, ...unrecorded]
+    // A `loadOlder` in flight reads before the oldest row: it still fits while that row stays.
+    if (anchor < 0 || oldestRowOf(this._history)?.id !== oldest) this.historyGeneration += 1
     // The Copilot overwrites the spawn row's subagent without moving its sequence, so the row
     // cannot say how new it is. A subagent never leaves an end status, so an end status wins on
     // either side. Between two others, a frame past every row read may not have reached the

@@ -1728,6 +1728,138 @@ describe("Agent older history", () => {
       expect(session.hasOlder).toBe(false)
       session.close()
     })
+
+    it("takes the row of a text the session only heard from its middle in an older page", async () => {
+      const textRow = {
+        ...boxRow("a1", 3, { type: "TEXT", itemId: "t-1", lastSequence: 10 }),
+        content: "Hello wor",
+      }
+      const newest = { page: olderPage([boxRow("r21", 21), boxRow("r20", 20)], 1) }
+      const { session, source } = openRunningTurn([textRow], newest)
+      await startTurn(session, source)
+      source.emit({ ...event("textDelta", { itemId: "t-1", text: "ld" }), sequence: 22 })
+      expect(session.history.map((item) => item.id)).toEqual(["r20", "r21", "live:agent:t-1"])
+
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["a1", "r20", "r21"])
+      expect(session.history[0]).toMatchObject({ kind: "agent", text: "Hello wor" })
+      session.close()
+    })
+
+    it("takes the row of a text the session only heard from its middle in a reread", async () => {
+      const newest = { page: olderPage([boxRow("r1", 2)]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit({ ...event("textDelta", { itemId: "t-1", text: "ld" }), sequence: 22 })
+
+      const recorded = {
+        ...boxRow("a1", 20, { type: "TEXT", itemId: "t-1", lastSequence: 21 }),
+        content: "Hello wor",
+      }
+      newest.page = olderPage([recorded, boxRow("r1", 2)])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "a1"])
+      expect(session.history[1]).toMatchObject({ kind: "agent", text: "Hello wor" })
+      session.close()
+    })
+
+    it("keeps a text the session heard from its first chunk over an older row", async () => {
+      const newest = { page: olderPage([boxRow("r1", 2)]) }
+      const { session, source } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      const text = (value: string, sequence: number) => ({
+        ...event("textDelta", { itemId: "t-1", text: value }),
+        sequence,
+      })
+      source.emit(text("Hello", 20))
+      source.emit(text(" world", 22))
+
+      const recorded = {
+        ...boxRow("a1", 20, { type: "TEXT", itemId: "t-1", lastSequence: 21 }),
+        content: "Hello",
+      }
+      newest.page = olderPage([recorded, boxRow("r1", 2)])
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "a1"])
+      expect(session.history[1]).toMatchObject({ kind: "agent", text: "Hello world" })
+      session.close()
+    })
+
+    it("takes the older row when the rows' log is not the channel's", async () => {
+      const steps = (status: string) => [{ id: "s1", text: "Read", status }]
+      const planRow = {
+        ...boxRow("p", 3, { type: "PLAN", itemId: "p-1", lastSequence: 9 }),
+        content: JSON.stringify({ itemId: "p-1", planId: "plan-1", steps: steps("running") }),
+      }
+      const newestRow = (id: string, sequence: number) => ({ ...boxRow(id, sequence), boxLog: 1 })
+      const newest = { page: olderPage([newestRow("r21", 21), newestRow("r20", 20)], 1) }
+      const { session, source } = openRunningTurn([planRow], newest)
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      // The older page is from the box's previous log: its sequences say nothing of the channel's.
+      source.emit(event("hello", { threadId: "thread-2", boxLog: 1, lastSequence: 21 }))
+      source.emit(runningStart)
+      source.emit({
+        ...event("plan", { itemId: "p-1", planId: "plan-1", steps: steps("completed") }),
+        sequence: 12,
+      })
+
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["p", "r20", "r21"])
+      expect(session.history[0]).toMatchObject({ kind: "plan", steps: steps("running") })
+      session.close()
+    })
+
+    it("does not keep twice a row before the anchor that the page brings again", async () => {
+      const question = { ...message("q", "USER", "question"), sequence: 2, boxLog: 0 }
+      const newest = { page: olderPage([boxRow("r4", 4), boxRow("r3", 3)], 2) }
+      const { session, source } = openRunningTurn([question, boxRow("r1", 1)], newest)
+      await startTurn(session, source)
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "q", "r3", "r4"])
+
+      // The Copilot moved the question's row into the newest page.
+      newest.page = olderPage([boxRow("r5", 5), question, boxRow("r4", 4), boxRow("r3", 3)], 1)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r3", "r4", "q", "r5"])
+      session.close()
+    })
+
+    it("lands a loadOlder in flight when a reread keeps the oldest row", async () => {
+      const [r3, r4, r5] = [boxRow("r3", 3), boxRow("r4", 4), boxRow("r5", 5)]
+      const newest = { page: olderPage([r4, r3], 1) }
+      const { session, source, tasks } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      let answerOlder: () => void = () => undefined
+      const answered = new Promise<void>((resolve) => {
+        answerOlder = resolve
+      })
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return newest.page
+        await answered
+        return olderPage([boxRow("r2", 2)])
+      })
+
+      const older = session.loadOlder()
+      newest.page = olderPage([r5, r4, r3], 1)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+      answerOlder()
+
+      await expect(older).resolves.toEqual([expect.objectContaining({ id: "r2" })])
+      expect(session.history.map((item) => item.id)).toEqual(["r2", "r3", "r4", "r5"])
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
   })
 
   // mitra-core-sdk#140: a long turn with 121 rows after its question, reopened with a page of
