@@ -572,6 +572,22 @@ function errorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined
 }
 
+// A typed refusal is the server's own sentence, shown as it came, so the box refusal and the
+// Copilot's error answer read the same. A transport may keep that sentence in `message`, or wrap
+// it and keep the parsed body in `details` or `body`. A network failure or timeout has no HTTP
+// status and keeps the prefix that says what failed.
+function refusalSentence(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || errorCode(error) === undefined) return undefined
+  const candidate = error as { status?: unknown; details?: unknown; body?: unknown }
+  const refused =
+    error instanceof AgentTaskTurnError ||
+    (typeof candidate.status === "number" && candidate.status >= 400)
+  if (!refused) return undefined
+  const sentence =
+    asObject(candidate.details)?.message ?? asObject(candidate.body)?.message ?? errorMessage(error)
+  return typeof sentence === "string" && sentence.trim() ? sentence : undefined
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
@@ -1437,7 +1453,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const dispatch = this.dispatchSend(prompt, options, clientMessageId, handedOver, waiter)
       .catch((error: unknown) => {
         waiter?.reject(error)
-        this.emitError("Failed to send Agent prompt", error)
+        this.emitSendError(error)
         if (this._status === "streaming") {
           this.settleSteers((steered) => steered.reject(error))
           this.setStatus("idle")
@@ -1528,7 +1544,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       taken = await admitted
     } catch (error) {
       handedOver()
-      this.emitError("Failed to send Agent prompt", error)
+      this.emitSendError(error)
       return fail(error)
     }
     if (!taken) {
@@ -1610,7 +1626,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .catch((error: unknown) => {
         this.forgetSteer(steered)
         waiter?.reject(error)
-        this.emitError("Failed to send Agent prompt", error)
+        this.emitSendError(error)
       })
       .finally(() => {
         this.pendingSteers -= 1
@@ -2779,6 +2795,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(code ? { code } : {}),
       error: `${prefix}: ${errorMessage(error)}`,
     })
+  }
+
+  private emitSendError(error: unknown): void {
+    const sentence = refusalSentence(error)
+    if (sentence === undefined) {
+      this.emitError("Failed to send Agent prompt", error)
+      return
+    }
+    const code = errorCode(error)
+    this.emit("error", { ...(code ? { code } : {}), error: sentence })
   }
 
   private setStatus(status: AgentTaskSessionStatus): void {

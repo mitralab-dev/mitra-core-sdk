@@ -476,6 +476,40 @@ describe("Agent task session", () => {
     expect(session.status).toBe("streaming")
   })
 
+  it("reports the Copilot's typed refusal with its own sentence, as the box path does", async () => {
+    const { session, tasks } = createSession()
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+    const body = {
+      error_code: "ACCOUNT_CREDENTIAL_EXPIRED",
+      message:
+        "Your Anthropic credential has expired or was revoked. Reconnect Anthropic before continuing.",
+    }
+    // A transport that wraps the answer in its own text and keeps the parsed body beside it.
+    const refusal = Object.assign(
+      new Error(`HTTP 400 POST /agent-tasks/task-1/inputs: ${JSON.stringify(body)}`),
+      { status: 400, code: body.error_code, body },
+    )
+    tasks.sendInput.mockRejectedValueOnce(refusal)
+
+    await expect(session.sendAndWait("hello")).rejects.toBe(refusal)
+    expect(errors).toEqual([{ code: "ACCOUNT_CREDENTIAL_EXPIRED", error: body.message }])
+  })
+
+  it("keeps the send prefix on a coded failure that never got an HTTP answer", async () => {
+    const { session, tasks } = createSession()
+    const errors: { code?: string; error: string }[] = []
+    session.on("error", (error) => errors.push(error))
+    tasks.sendInput.mockRejectedValueOnce(
+      Object.assign(new Error("Mitra request timed out"), { status: 0, code: "REQUEST_TIMEOUT" }),
+    )
+
+    await expect(session.sendAndWait("hello")).rejects.toThrow("Mitra request timed out")
+    expect(errors).toEqual([
+      { code: "REQUEST_TIMEOUT", error: "Failed to send Agent prompt: Mitra request timed out" },
+    ])
+  })
+
   it("does not deliver a steer the close rejected while it waited for the first message", async () => {
     let created!: () => void
     const tasks = createTasks({

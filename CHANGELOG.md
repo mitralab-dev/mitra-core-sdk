@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Behaviour change: a send the server refuses with a code and its own sentence (the box's refusal,
+  or the Copilot's error answer such as `ACCOUNT_CREDENTIAL_EXPIRED`) emits `error` with that
+  sentence alone, without the `Failed to send Agent prompt:` prefix, so both paths read the same.
+  Network failures and timeouts keep the prefix.
 - A reread of the history while a turn runs (the recovery reads the newest 100 rows every second)
   no longer drops the older pages the session already read: when the page's oldest row is in
   `history`, what comes before it stays and `hasOlder` keeps its value; a page that does not reach
