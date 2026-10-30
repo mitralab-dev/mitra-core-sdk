@@ -1624,6 +1624,110 @@ describe("Agent older history", () => {
       expect(session.history[1]).toMatchObject({ kind: "agent", text: "Hello there" })
       session.close()
     })
+
+    // Dev, Codex (task 854281e7): a turn longer than the page, read to the start with `loadOlder`.
+    // The reread page then starts at a piece the session holds live, under its `live:` id.
+    it("keeps the older pages when the page starts at a piece the session holds live", async () => {
+      const newest = { page: olderPage([boxRow("r4", 4), boxRow("r3", 3)], 2) }
+      const { session, source } = openRunningTurn([boxRow("r2", 2), boxRow("r1", 1)], newest)
+      await startTurn(session, source)
+      for (const sequence of [5, 6, 7]) {
+        source.emit({
+          ...event("textDelta", { itemId: `t-${sequence}`, text: `text ${sequence}` }),
+          sequence,
+        })
+      }
+      await session.loadOlder()
+      const live = ["live:agent:t-5", "live:agent:t-6", "live:agent:t-7"]
+      expect(session.history.map((item) => item.id)).toEqual(["r1", "r2", "r3", "r4", ...live])
+      expect(session.hasOlder).toBe(false)
+
+      const recorded = (sequence: number) => ({
+        ...boxRow(`a${sequence}`, sequence, { type: "TEXT", itemId: `t-${sequence}` }),
+        content: `text ${sequence}`,
+      })
+      newest.page = olderPage([recorded(7), recorded(6)], 5)
+      await session.loadHistory({ limit: 2 })
+
+      const ids = session.history.map((item) => item.id)
+      expect(ids).toEqual(["r1", "r2", "r3", "r4", "live:agent:t-5", "a6", "a7"])
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    it("keeps the older pages when the page starts at the question the session holds live", async () => {
+      const newest = { page: olderPage([boxRow("r4", 4), boxRow("r3", 3)], 2) }
+      const { session, source } = openRunningTurn([boxRow("r2", 2), boxRow("r1", 1)], newest)
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({
+        ...event("stepStart", {
+          text: "question",
+          lifecycle: { turnId: "turn-q", clientMessageId: "cm-q" },
+        }),
+        sequence: 5,
+      })
+      source.emit({ ...event("textDelta", { itemId: "t-6", text: "answer" }), sequence: 6 })
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual([
+        "r1",
+        "r2",
+        "r3",
+        "r4",
+        "live:user:cm-q",
+        "live:agent:t-6",
+      ])
+      expect(session.hasOlder).toBe(false)
+
+      // The Copilot's question row has no item id, only the `clientMessageId`.
+      const question = {
+        ...message("q", "USER", "question"),
+        sequence: 5,
+        boxLog: 0,
+        clientMessageId: "cm-q",
+      }
+      const answer = {
+        ...boxRow("a6", 6, { type: "TEXT", itemId: "t-6" }),
+        content: "answer",
+      }
+      newest.page = olderPage([answer, question], 4)
+      await session.loadHistory({ limit: 2 })
+
+      const ids = session.history.map((item) => item.id)
+      expect(ids).toEqual(["r1", "r2", "r3", "r4", "q", "a6"])
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    // Dev, Codex (task 7ef315c3, 239 rows): the Copilot updates the plan's row in place, so it
+    // keeps the place of the plan's first version, behind the page of a long turn. The updates
+    // the session hears while that row is not loaded make a live item at the end.
+    it("puts a piece held live in the place of its row when an older page brings it", async () => {
+      const steps = (status: string) => [{ id: "s1", text: "Read", status }]
+      const planRow = {
+        ...boxRow("p", 3, { type: "PLAN", itemId: "p-1", lastSequence: 9 }),
+        content: JSON.stringify({ itemId: "p-1", planId: "plan-1", steps: steps("running") }),
+      }
+      const newest = { page: olderPage([boxRow("r21", 21), boxRow("r20", 20)], 1) }
+      const { session, source } = openRunningTurn([planRow], newest)
+      await startTurn(session, source)
+      source.emit({
+        ...event("plan", { itemId: "p-1", planId: "plan-1", steps: steps("completed") }),
+        sequence: 12,
+      })
+      expect(session.history.map((item) => item.id)).toEqual(["r20", "r21", "live:plan:p-1"])
+
+      await session.loadOlder()
+      expect(session.history.map((item) => item.id)).toEqual(["p", "r20", "r21"])
+      expect(session.history[0]).toMatchObject({ kind: "plan", steps: steps("completed") })
+
+      await session.loadHistory()
+      expect(session.history.map((item) => item.id)).toEqual(["p", "r20", "r21"])
+      expect(session.history[0]).toMatchObject({ kind: "plan", steps: steps("completed") })
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
   })
 
   // mitra-core-sdk#140: a long turn with 121 rows after its question, reopened with a page of

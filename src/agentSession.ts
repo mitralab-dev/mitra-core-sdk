@@ -681,10 +681,15 @@ const SUBAGENT_END_STATUSES: ReadonlySet<string> = new Set([
 ])
 
 // The same piece of T3 in two reads: the same row, or the live item of the row's T3 item. A tool
-// call and its result share the item id and are two pieces.
+// call and its result share the item id and are two pieces. A question has no item id: the live
+// one is the row with its `clientMessageId`.
 function samePiece(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
   if (held.id === row.id) return true
-  if (!held.id.startsWith("live:") || row.itemId === undefined) return false
+  if (!held.id.startsWith("live:")) return false
+  if (held.kind === "user" && row.kind === "user" && held.clientMessageId !== undefined) {
+    return held.clientMessageId === row.clientMessageId
+  }
+  if (row.itemId === undefined) return false
   if (held.kind !== row.kind || held.itemId !== row.itemId) return false
   return held.kind !== "tool" || (row.kind === "tool" && held.tool.phase === row.tool.phase)
 }
@@ -696,6 +701,13 @@ function heldIsNewer(held: AgentTimelineItem, row: AgentTimelineItem): boolean {
   if (heldLast === undefined || rowLast === undefined) return false
   if (held.boxLog !== undefined && held.boxLog !== row.boxLog) return false
   return heldLast > rowLast
+}
+
+// The row of a piece the session also holds: the held item stays, under the row's id, only when
+// it is newer and counts in the rows' log.
+function rowOrHeld(held: AgentTimelineItem, row: AgentTimelineItem, liveComparable: boolean) {
+  if (!liveComparable || !heldIsNewer(held, row)) return row
+  return { ...held, id: row.id, ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }) }
 }
 
 // The Copilot counts the rows before the cursor (or all of them, on the newest page), so a page
@@ -1145,9 +1157,25 @@ class CoreAgentTaskSession implements AgentTaskSession {
       throw error
     }
     if (generation !== this.historyGeneration || this.isClosed()) return []
-    const older = [...page.content].reverse().map(toAgentTimelineItem)
+    const rows = [...page.content].reverse().map(toAgentTimelineItem)
+    const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
+    const liveComparable =
+      this.rowsInChannelLog &&
+      (this.channelLog === undefined || rowsLog === undefined || rowsLog === this.channelLog)
+    // A frame of a piece whose row was not loaded yet made a live item at the end: the plan the
+    // Copilot updates in place keeps the row of its first version, behind a long turn's page.
+    // The row takes it in, or the reread drops it and the piece shows twice until then (#145).
+    const taken = new Set<AgentTimelineItem>()
+    const older = rows.map((row) => {
+      const held = this._history.find(
+        (item) => !taken.has(item) && item.id.startsWith("live:") && samePiece(item, row),
+      )
+      if (held === undefined) return row
+      taken.add(held)
+      return rowOrHeld(held, row, liveComparable)
+    })
     this._hasOlder = hasOlderRows(page)
-    this._history = [...older, ...this._history]
+    this._history = [...older, ...this._history.filter((item) => !taken.has(item))]
     this.emit("historyLoaded", { history: this.history })
     return older
   }
@@ -1163,11 +1191,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.rowsInChannelLog &&
       (this.channelLog === undefined || rowsLog === undefined || rowsLog === this.channelLog)
     this.rowsInChannelLog = true
-    const anchor = rows[0] ? this._history.findIndex((item) => item.id === rows[0]?.id) : -1
-    const rowIds = new Set(rows.map((item) => item.id))
-    // A row the Copilot moved into the page (a question placed at its stepStart) is not kept twice.
+    // The oldest row may be a piece the session holds live, under its `live:` id: a live turn
+    // longer than the page (dev, Codex: 235 items back to 50 and `hasOlder` true again).
+    const first = rows[0]
+    const anchor = first ? this._history.findIndex((item) => samePiece(item, first)) : -1
+    // A row the Copilot moved into the page (a question placed at its stepStart), or a piece
+    // held live whose row the page brings, is not kept twice.
     const kept =
-      anchor < 0 ? [] : this._history.slice(0, anchor).filter((item) => !rowIds.has(item.id))
+      anchor < 0
+        ? []
+        : this._history.slice(0, anchor).filter((item) => !rows.some((row) => samePiece(item, row)))
     const replaced = anchor < 0 ? this._history : this._history.slice(anchor)
     if (anchor < 0) this._hasOlder = hasOlderRows(page)
     // The box hands the Copilot its events in batches (200 ms plus the request), so a row read
@@ -1175,11 +1208,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
     // plan the Copilot updates in place went back to its first version (#145).
     const used = new Set<AgentTimelineItem>()
     const merged = rows.map((row) => {
-      const held = replaced.find((item) => !used.has(item) && samePiece(item, row))
+      const held = this._history.find((item) => !used.has(item) && samePiece(item, row))
       if (held === undefined) return row
       used.add(held)
-      if (!liveComparable || !heldIsNewer(held, row)) return row
-      return { ...held, id: row.id, ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }) }
+      return rowOrHeld(held, row, liveComparable)
     })
     // A live piece that starts after every row read is not recorded yet; dropped, its next frames
     // would rebuild it from where they come.
