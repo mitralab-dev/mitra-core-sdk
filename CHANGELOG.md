@@ -21,6 +21,16 @@ All notable changes to this project are documented in this file.
   kept over its row only when the session heard it from its first chunk; one heard from the middle
   gives way to the row, which carries the start. A live piece that starts after every row read
   stays at the end of `history` instead of being dropped (mitra-core-sdk#145).
+- A live plan whose row sits behind the reread page (the Copilot keeps the row where the plan's
+  first version came) stays at the end of `history` through the reread, instead of being dropped
+  as recorded; a `loadOlder` read before its last update then no longer lands the plan at an
+  earlier version, and the row it brings takes the live state with the row's `sequence`
+  (mitra-core-sdk#145).
+- A reread whose page starts at a piece held live, with live pieces before it that the page has no
+  row for (the Copilot wrote more than a page between two rereads), reads the rows before the page
+  with the same call and size `loadOlder` uses, until those pieces have their rows or the page
+  reaches a row `history` holds, and then merges. Those pieces no longer stay live without their
+  rows. A read that ends after `history` was replaced lands nowhere (mitra-core-sdk#145).
 
 ## 0.3.8
 

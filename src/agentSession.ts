@@ -715,9 +715,19 @@ function oldestRowOf(history: readonly AgentTimelineItem[]): AgentTimelineItem |
   return history.find((item) => !item.id.startsWith("live:"))
 }
 
+// The held state under the row's identity: a plan first heard from a late update carries that
+// update's sequence, while its row sits where the first version came.
 function rowOrHeld(held: AgentTimelineItem, row: AgentTimelineItem, liveComparable: boolean) {
   if (!liveComparable || !heldIsNewer(held, row) || !heldHasRow(held, row)) return row
-  return { ...held, id: row.id, ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }) }
+  return {
+    ...held,
+    id: row.id,
+    ...(row.sequence === undefined ? {} : { sequence: row.sequence }),
+    ...(held.lastSequence === undefined && held.sequence === undefined
+      ? {}
+      : { lastSequence: held.lastSequence ?? held.sequence }),
+    ...(row.boxLog === undefined ? {} : { boxLog: row.boxLog }),
+  }
 }
 
 // The Copilot counts the rows before the cursor (or all of them, on the newest page), so a page
@@ -1127,7 +1137,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       include: "plan",
     })
     this.historyLimit = options.limit
-    this.replaceHistory(page)
+    await this.rereadHistory(page)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
@@ -1189,6 +1199,56 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return older
   }
 
+  // A page that starts at a piece held live, with live pieces before it that no row of the page
+  // takes, skipped rows the Copilot wrote between two rereads (more than a page of them): kept as
+  // they are, those pieces never get their rows, and `loadOlder` only reads before the oldest row.
+  // The rows before the page are read as `loadOlder` reads them, until the page reaches a row the
+  // history holds or the gap's pieces all have their rows. A read of a history since replaced
+  // lands nowhere (#145).
+  private async rereadHistory(page: Page<AgentMessage>): Promise<void> {
+    const generation = this.historyGeneration
+    let current = page
+    let extended = false
+    while (this._taskId && hasOlderRows(current) && this.skipsRows(current, extended)) {
+      const oldest = current.content[current.content.length - 1]
+      if (!oldest) break
+      let older: Page<AgentMessage>
+      try {
+        older = await this.dependencies.tasks.listMessages(this._taskId, {
+          before: oldest.id,
+          ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
+          sort: "createdAt,desc",
+          kinds: "all",
+          include: "plan",
+        })
+      } catch (error) {
+        if (generation !== this.historyGeneration || this.isClosed()) return
+        throw error
+      }
+      if (generation !== this.historyGeneration || this.isClosed()) return
+      current = { content: [...current.content, ...older.content], page: older.page }
+      extended = true
+    }
+    this.replaceHistory(current)
+  }
+
+  // Newest first, as the Copilot answers. Once rows before the page were read, a row the history
+  // does not hold at all (one the session never heard) is still inside the gap.
+  private skipsRows(page: Page<AgentMessage>, extended: boolean): boolean {
+    const rows = page.content.map(toAgentTimelineItem)
+    const first = rows[rows.length - 1]
+    if (!first) return false
+    const anchor = this._history.findIndex((item) => samePiece(item, first))
+    if (anchor < 0) return extended
+    if (!this._history[anchor]?.id.startsWith("live:")) return false
+    for (let index = anchor - 1; index >= 0; index -= 1) {
+      const held = this._history[index]
+      if (!held?.id.startsWith("live:")) return false
+      if (!rows.some((row) => samePiece(held, row))) return true
+    }
+    return false
+  }
+
   // The recovery rereads only the newest 100 rows while the turn runs: the older pages already
   // read stay, or what sits in them (the cards of subagents still running) vanishes until
   // `loadOlder` (#145). A page that does not reach the history it already has replaces it.
@@ -1222,7 +1282,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
       return rowOrHeld(held, row, liveComparable)
     })
     // A live piece that starts after every row read is not recorded yet; dropped, its next frames
-    // would rebuild it from where they come.
+    // would rebuild it from where they come. A plan no row of the page took is recorded behind
+    // the page, at its first version's place: dropped, its last update has no frame left to come
+    // back, and the `loadOlder` read before it lands that row older.
     const cursor = liveComparable ? historyCursorOf(rows) : undefined
     const unrecorded =
       cursor === undefined
@@ -1232,7 +1294,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
               !used.has(item) &&
               item.id.startsWith("live:") &&
               item.sequence !== undefined &&
-              item.sequence > cursor.sequence,
+              (item.kind === "plan" || item.sequence > cursor.sequence),
           )
     this._history = [...kept, ...merged, ...unrecorded]
     // A `loadOlder` in flight reads before the oldest row: it still fits while that row stays.
@@ -1779,7 +1841,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       kinds: "all",
       include: "plan",
     })
-    this.replaceHistory(page)
+    await this.rereadHistory(page)
     this.emit("historyLoaded", { history: this.history })
     // The Copilot writes a turn's rows while it runs (dev, 2026-10-19), and an earlier turn's
     // answer can land after the baseline was taken: a new row is not this turn's end. Only the

@@ -1626,10 +1626,11 @@ describe("Agent older history", () => {
     })
 
     // Dev, Codex (task 854281e7): a turn longer than the page, read to the start with `loadOlder`.
-    // The reread page then starts at a piece the session holds live, under its `live:` id.
+    // The reread page then starts at a piece the session holds live, under its `live:` id, and
+    // the live piece before it has its row before the page: it is read as `loadOlder` reads.
     it("keeps the older pages when the page starts at a piece the session holds live", async () => {
       const newest = { page: olderPage([boxRow("r4", 4), boxRow("r3", 3)], 2) }
-      const { session, source } = openRunningTurn([boxRow("r2", 2), boxRow("r1", 1)], newest)
+      const { session, source, tasks } = openRunningTurn([boxRow("r2", 2), boxRow("r1", 1)], newest)
       await startTurn(session, source)
       for (const sequence of [5, 6, 7]) {
         source.emit({
@@ -1647,12 +1648,111 @@ describe("Agent older history", () => {
         content: `text ${sequence}`,
       })
       newest.page = olderPage([recorded(7), recorded(6)], 5)
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (query?.before === "a6") return olderPage([recorded(5), boxRow("r4", 4)], 3)
+        return newest.page
+      })
       await session.loadHistory({ limit: 2 })
 
+      expect(tasks.listMessages).toHaveBeenLastCalledWith("task-1", {
+        before: "a6",
+        size: 2,
+        sort: "createdAt,desc",
+        kinds: "all",
+        include: "plan",
+      })
       const ids = session.history.map((item) => item.id)
-      expect(ids).toEqual(["r1", "r2", "r3", "r4", "live:agent:t-5", "a6", "a7"])
+      expect(ids).toEqual(["r1", "r2", "r3", "r4", "a5", "a6", "a7"])
       expect(new Set(ids).size).toBe(ids.length)
       expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    // Dev, Codex (tasks bf497bf8, 854281e7, 7ef315c3, replayed): the Copilot wrote more than a
+    // page between two rereads, so the page starts at a piece held live with more than a page of
+    // live pieces before it.
+    it("reads a gap bigger than one page before a page that starts at a piece held live", async () => {
+      const recorded = (sequence: number) => ({
+        ...boxRow(`a${sequence}`, sequence, { type: "TEXT", itemId: `t-${sequence}` }),
+        content: `text ${sequence}`,
+      })
+      const newest = { page: olderPage([boxRow("r2", 2), boxRow("r1", 1)]) }
+      const { session, source, tasks } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      for (const sequence of [3, 4, 5, 6, 7, 8]) {
+        source.emit({
+          ...event("textDelta", { itemId: `t-${sequence}`, text: `text ${sequence}` }),
+          sequence,
+        })
+      }
+      await session.loadHistory({ limit: 2 })
+      expect(session.history.map((item) => item.id)).toEqual(
+        ["r1", "r2", 3, 4, 5, 6, 7, 8].map((id) =>
+          typeof id === "number" ? `live:agent:t-${id}` : id,
+        ),
+      )
+
+      newest.page = olderPage([recorded(8), recorded(7)], 6)
+      const before: Record<string, AgentMessage[]> = {
+        a7: [recorded(6), recorded(5)],
+        a5: [recorded(4), recorded(3)],
+      }
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return newest.page
+        const rows = before[query.before] ?? []
+        return olderPage(rows, 2)
+      })
+      await session.loadHistory({ limit: 2 })
+
+      const befores = tasks.listMessages.mock.calls.map(([, query]) => query?.before)
+      // The second read reaches the piece after the rows the history holds: the gap is closed.
+      expect(befores.slice(-3)).toEqual([undefined, "a7", "a5"])
+      const ids = session.history.map((item) => item.id)
+      expect(ids).toEqual(["r1", "r2", "a3", "a4", "a5", "a6", "a7", "a8"])
+      expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    it("drops the gap's rows when the history was replaced while they were read", async () => {
+      const recorded = (sequence: number) => ({
+        ...boxRow(`a${sequence}`, sequence, { type: "TEXT", itemId: `t-${sequence}` }),
+        content: `text ${sequence}`,
+      })
+      const newest = { page: olderPage([boxRow("r2", 2), boxRow("r1", 1)]) }
+      const { session, source, tasks } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      for (const sequence of [3, 4, 5]) {
+        source.emit({
+          ...event("textDelta", { itemId: `t-${sequence}`, text: `text ${sequence}` }),
+          sequence,
+        })
+      }
+      newest.page = olderPage([recorded(5), recorded(4)], 3)
+      let answerGap: () => void = () => undefined
+      const answered = new Promise<void>((resolve) => {
+        answerGap = resolve
+      })
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return newest.page
+        await answered
+        return olderPage([recorded(3)], 2)
+      })
+      const stale = session.loadHistory({ limit: 2 })
+      await vi.waitFor(() =>
+        expect(tasks.listMessages).toHaveBeenLastCalledWith(
+          "task-1",
+          expect.objectContaining({ before: "a4" }),
+        ),
+      )
+
+      // A page that does not reach the history replaces it meanwhile.
+      newest.page = olderPage([boxRow("r9", 9)], 8)
+      tasks.listMessages.mockImplementation(async () => newest.page)
+      await session.loadHistory({ limit: 2 })
+      answerGap()
+      await stale
+
+      expect(session.history.map((item) => item.id)).toEqual(["r9"])
       session.close()
     })
 
@@ -1858,6 +1958,97 @@ describe("Agent older history", () => {
       await expect(older).resolves.toEqual([expect.objectContaining({ id: "r2" })])
       expect(session.history.map((item) => item.id)).toEqual(["r2", "r3", "r4", "r5"])
       expect(session.hasOlder).toBe(false)
+      session.close()
+    })
+
+    // Dev, Codex (task bf497bf8, 238 rows): the plan's row keeps the place of its first version
+    // (sequence 20), 225 rows behind the newest. The session heard its last update (249) live, a
+    // `loadOlder` read the row while the Copilot had it at 188, and a reread after the turn
+    // (cursor 250) dropped the live plan as recorded. The read then landed the plan at 2/3.
+    const planSteps = (done: number) =>
+      ["Read", "Edit", "Test"].map((text, index) => ({
+        id: `s${index}`,
+        text,
+        status: index < done ? "completed" : "running",
+      }))
+    const planRowAt = (lastSequence: number, done: number) => ({
+      ...boxRow("p", 20, { type: "PLAN", itemId: "p-1", lastSequence }),
+      content: JSON.stringify({ itemId: "p-1", planId: "plan-1", steps: planSteps(done) }),
+    })
+    const planFrame = (sequence: number, done: number) => ({
+      ...event("plan", { itemId: "p-1", planId: "plan-1", steps: planSteps(done) }),
+      sequence,
+    })
+
+    it("keeps a newer live plan whose row is behind the page over a loadOlder read before it", async () => {
+      const newest = { page: olderPage([boxRow("r201", 201), boxRow("r200", 200)], 2) }
+      const { session, source, tasks } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      let answerOlder: () => void = () => undefined
+      const answered = new Promise<void>((resolve) => {
+        answerOlder = resolve
+      })
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return newest.page
+        await answered
+        return olderPage([boxRow("r21", 21), planRowAt(188, 2), boxRow("r19", 19)])
+      })
+      const older = session.loadOlder()
+      source.emit(planFrame(249, 3))
+      expect(session.history.map((item) => item.id)).toEqual(["r200", "r201", "live:plan:p-1"])
+
+      newest.page = olderPage([boxRow("r250", 250), boxRow("r248", 248), boxRow("r201", 201)], 4)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+      expect(session.history.map((item) => item.id)).toEqual([
+        "r200",
+        "r201",
+        "r248",
+        "r250",
+        "live:plan:p-1",
+      ])
+      answerOlder()
+      await older
+
+      const ids = ["r19", "p", "r21", "r200", "r201", "r248", "r250"]
+      expect(session.history.map((item) => item.id)).toEqual(ids)
+      expect(session.history[1]).toMatchObject({
+        kind: "plan",
+        sequence: 20,
+        lastSequence: 249,
+        steps: planSteps(3),
+      })
+      session.close()
+    })
+
+    it("keeps a newer live plan through a reread and takes its row when it arrives", async () => {
+      const newest = { page: olderPage([boxRow("r201", 201), boxRow("r200", 200)], 2) }
+      const { session, source, tasks } = openRunningTurn([], newest)
+      await startTurn(session, source)
+      source.emit(planFrame(249, 3))
+
+      newest.page = olderPage([boxRow("r250", 250), boxRow("r248", 248), boxRow("r201", 201)], 4)
+      const read = reread(session)
+      source.disconnect(new Error("network"), 0)
+      await read
+      expect(session.history.at(-1)).toMatchObject({ id: "live:plan:p-1", steps: planSteps(3) })
+
+      tasks.listMessages.mockImplementation(async (_taskId, query) =>
+        query?.before ? olderPage([planRowAt(249, 3)]) : newest.page,
+      )
+      await session.loadOlder()
+      const ids = ["p", "r200", "r201", "r248", "r250"]
+      expect(session.history.map((item) => item.id)).toEqual(ids)
+      expect(session.history[0]).toMatchObject({
+        sequence: 20,
+        lastSequence: 249,
+        steps: planSteps(3),
+      })
+
+      await session.loadHistory()
+      expect(session.history.map((item) => item.id)).toEqual(ids)
+      expect(session.history[0]).toMatchObject({ lastSequence: 249, steps: planSteps(3) })
       session.close()
     })
   })
