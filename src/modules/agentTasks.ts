@@ -125,9 +125,7 @@ export function createAgentTasksModule(
       return expectAgentTask(
         await transport.request<unknown>(`${path(id)}/instructions`, {
           method: "PUT",
-          // The Copilot answers 400 to a body without the key, and JSON drops `undefined`: an
-          // untyped caller that passes none still clears the text.
-          body: { instructions: instructions ?? null },
+          body: { instructions },
         }),
         "Agent task instructions response",
         errors,

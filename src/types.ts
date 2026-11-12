@@ -1178,9 +1178,11 @@ export interface AgentTaskCreateInput {
    * otherwise, and fixed once the chat exists. Chats created with the same key for the same app,
    * agent and owner share one folder and one set of instructions: `instructions` sent here
    * replaces the text of all of them, and a chat created without `instructions` takes the text
-   * the others have. A chat with a key always has its own folder, so its `instructions` come
-   * back `""` when there is no text and `agentTasks.setInstructions` accepts it. An ownerless
-   * chat shares with no other.
+   * the others have. The files are shared only among the chats that run on the same box (same
+   * person, app, provider harness and credential profile): chats with the same key on different
+   * boxes share the instructions but not the files. A chat with a key always has its own folder,
+   * so its `instructions` come back `""` when there is no text and `agentTasks.setInstructions`
+   * accepts it. An ownerless chat shares with no other.
    */
   folderKey?: string
 }

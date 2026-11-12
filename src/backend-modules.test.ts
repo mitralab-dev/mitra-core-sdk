@@ -1050,12 +1050,19 @@ describe("agent and workflow modules", () => {
     }
   })
 
-  it("still sends the instructions key when an untyped caller passes none", async () => {
-    const transport = new QueueTransport([{ ...agentTask, instructions: "" }])
+  it("sends no instructions key when an untyped caller passes none, and null only when asked", async () => {
+    const cleared = { ...agentTask, instructions: "" }
+    const transport = new QueueTransport([cleared, cleared])
     const tasks = createAgentTasksModule(transport)
+    // What reaches the Copilot is the JSON, where an `undefined` field does not exist.
+    const sentBody = (index: number): unknown =>
+      JSON.parse(JSON.stringify(transport.requests[index]?.options.body))
 
     await tasks.setInstructions?.("task-1", undefined as unknown as null)
-    expect(transport.requests[0]?.options.body).toHaveProperty("instructions", null)
+    expect(sentBody(0)).toEqual({})
+
+    await tasks.setInstructions?.("task-1", null)
+    expect(sentBody(1)).toEqual({ instructions: null })
   })
 
   it("sends the folder key on create and reads it back on every task", async () => {

@@ -31,7 +31,10 @@ All notable changes to this project are documented in this file.
 - Added the folder chosen at creation (mitra-copilot#589): `AgentTaskCreateInput.folderKey`, sent
   on `POST /api/v1/tasks`, and `AgentTask.folderKey`. Chats created with the same key for the
   same app, agent and owner share one folder on the box and one set of instructions, so
-  `setInstructions` on one changes the text for all of them. The key is 1 to 64 characters of
+  `setInstructions` on one changes the text for all of them. The files are shared only among
+  the chats that run on the same box (same person, app, provider harness and credential
+  profile): chats with the same key on different boxes share the instructions but not the
+  files. The key is 1 to 64 characters of
   `[A-Za-z0-9_-]` and cannot change after creation; a chat with a key always has its own folder,
   so it carries `instructions` (`""` with no text) and accepts `setInstructions`.
   `folderKey` is absent on a chat created without one; a value that is not text is treated as
