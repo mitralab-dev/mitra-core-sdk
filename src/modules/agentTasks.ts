@@ -53,6 +53,19 @@ export interface AgentTasksModule {
    * no partial answer. Optional so hand-written modules keep compiling.
    */
   turnStates?(ids: string[]): Promise<AgentTaskTurnState[]>
+  /**
+   * Replaces the chat's own instructions with `PUT /api/v1/tasks/{id}/instructions`, at most
+   * 32,768 characters, and answers the task. `null` or blank text clears them (`instructions`
+   * comes back `""`) and the chat can get text again. Only a chat created with instructions
+   * or with a `folderKey` accepts it: one created without either is refused with 409
+   * `TASK_INSTRUCTIONS_NEED_A_NEW_CHAT`, and needs a new chat. Who may rename a chat may change
+   * them. The box gets the new text before the chat's next turn, but the conversation under way
+   * only uses it after a compaction (or in a new conversation), as with the agent's
+   * instructions; to apply it at once, set it and send `/compact`. On a chat created with a
+   * `folderKey` the text belongs to the folder: it changes for every chat of the same app, agent
+   * and owner created with that key. Optional so hand-written modules keep compiling.
+   */
+  setInstructions?(id: string, instructions: string | null): Promise<AgentTask>
 }
 
 // The Copilot refuses a request that names more than this many chats.
@@ -105,6 +118,16 @@ export function createAgentTasksModule(
       return expectAgentTask(
         await transport.request<unknown>(path(id), { method: "PATCH", body: { title } }),
         "Rename agent task response",
+        errors,
+      )
+    },
+    async setInstructions(id, instructions) {
+      return expectAgentTask(
+        await transport.request<unknown>(`${path(id)}/instructions`, {
+          method: "PUT",
+          body: { instructions },
+        }),
+        "Agent task instructions response",
         errors,
       )
     },

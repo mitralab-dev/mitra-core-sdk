@@ -1165,6 +1165,26 @@ export interface AgentTaskCreateInput {
    * agent holding a connection; mutually exclusive with `userId`.
    */
   autonomous?: boolean
+  /**
+   * The chat's own instructions, added to the agent's, at most 32,768 characters. They are set
+   * at creation: a chat opened without them (or with blank text) can never get them later, and
+   * `agentTasks.setInstructions` refuses it with 409 `TASK_INSTRUCTIONS_NEED_A_NEW_CHAT`, unless
+   * it was created with a `folderKey`. To give a chat instructions later, open it with some text
+   * or with a `folderKey`.
+   */
+  instructions?: string
+  /**
+   * Names the chat's folder on the box: 1 to 64 characters of `[A-Za-z0-9_-]`, refused with 400
+   * otherwise, and fixed once the chat exists. Chats created with the same key for the same app,
+   * agent and owner share one folder and one set of instructions: `instructions` sent here
+   * replaces the text of all of them, and a chat created without `instructions` takes the text
+   * the others have. The files are shared only among the chats that run on the same box (same
+   * person, app, provider harness and credential profile): chats with the same key on different
+   * boxes share the instructions but not the files. A chat with a key always has its own folder,
+   * so its `instructions` come back `""` when there is no text and `agentTasks.setInstructions`
+   * accepts it. An ownerless chat shares with no other.
+   */
+  folderKey?: string
 }
 
 export interface AgentTask {
@@ -1186,6 +1206,20 @@ export interface AgentTask {
    * that predates it.
    */
   turn?: AgentTaskTurn | null
+  /**
+   * The chat's own instructions. Absent on a chat created without them, which never has them,
+   * unless it was created with a `folderKey`: that one always carries them, `""` or the text its
+   * folder already had. Also absent from the listing and from a Copilot that predates them. `""`
+   * on a chat whose text was cleared, which can get text again. A value that is not text is left
+   * out, with no error.
+   */
+  instructions?: string
+  /**
+   * The folder key the chat was created with, which never changes. Absent on a chat created
+   * without one and from a Copilot that predates it; the listing may leave it out. A value that
+   * is not text is left out, with no error.
+   */
+  folderKey?: string
 }
 
 /**
