@@ -1050,6 +1050,57 @@ describe("agent and workflow modules", () => {
     }
   })
 
+  it("still sends the instructions key when an untyped caller passes none", async () => {
+    const transport = new QueueTransport([{ ...agentTask, instructions: "" }])
+    const tasks = createAgentTasksModule(transport)
+
+    await tasks.setInstructions?.("task-1", undefined as unknown as null)
+    expect(transport.requests[0]?.options.body).toHaveProperty("instructions", null)
+  })
+
+  it("sends the folder key on create and reads it back on every task", async () => {
+    const keyed: AgentTask = { ...agentTask, instructions: "", folderKey: "crew-bot_1" }
+    const transport = new QueueTransport([keyed, keyed, keyed, springPage([keyed, agentTask])])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(
+      tasks.create({ agentType: "CLAUDE", agentId: "agent-1", folderKey: "crew-bot_1" }),
+    ).resolves.toEqual(keyed)
+    await expect(tasks.get("task-1")).resolves.toEqual(keyed)
+    await expect(tasks.setInstructions?.("task-1", null)).resolves.toEqual(keyed)
+    const listed = (await tasks.list()).content
+    expect(listed).toEqual([keyed, agentTask])
+    expect(listed[1]).not.toHaveProperty("folderKey")
+    expect(transport.requests[0]).toEqual({
+      path: "/api/v1/tasks",
+      options: {
+        method: "POST",
+        body: { agentType: "CLAUDE", agentId: "agent-1", folderKey: "crew-bot_1" },
+      },
+    })
+  })
+
+  it.each([
+    ["null", null],
+    ["a number", 7],
+    ["an object", { key: "crew-bot_1" }],
+  ])("returns the task without a folder key that comes as %s", async (_shape, folderKey) => {
+    const unreadable = { ...agentTask, folderKey }
+    const tasks = createAgentTasksModule(
+      new QueueTransport([unreadable, unreadable, unreadable, springPage([unreadable])]),
+    )
+
+    for (const task of [
+      await tasks.get("task-1"),
+      await tasks.create({ agentType: "CLAUDE" }),
+      await tasks.setInstructions?.("task-1", "You are Ana."),
+      ...(await tasks.list()).content,
+    ]) {
+      expect(task).toEqual(agentTask)
+      expect(task).not.toHaveProperty("folderKey")
+    }
+  })
+
   it("reads the turn state of several chats in one request", async () => {
     const states = [
       { taskId: "task-1", turn: agentTaskTurn },

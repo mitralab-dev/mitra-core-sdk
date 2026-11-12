@@ -131,7 +131,9 @@ void onPlan
 void planStepsOf
 const turnOf = async (): Promise<AgentTaskTurn | null> => (await core.agentTasks.get("task-1")).turn ?? null
 const turnStatesOf = async (): Promise<AgentTaskTurnState[]> => (await core.agentTasks.turnStates?.(["task-1"])) ?? []
-const instructionsOf = async (): Promise<string | undefined> => (await core.agentTasks.setInstructions?.("task-1", null))?.instructions ?? (await core.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
+const clearedInstructionsOf = async (): Promise<string | undefined> => (await core.agentTasks.setInstructions?.("task-1", null))?.instructions
+const createdInstructionsOf = async (): Promise<string | undefined> => (await core.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
+const folderKeyOf = async (): Promise<string | undefined> => (await core.agentTasks.create({ agentType: "CLAUDE", folderKey: "crew-bot-1" })).folderKey
 const onCompaction = (session: AgentTaskSession): void => {
   session.on("contextCompacted", (compaction) => { const before: number | null = compaction.tokensBefore; void before })
   session.on("turnEnd", (turn) => { const compactions: AgentTurnCompaction[] = turn.compactions ?? []; void compactions })
@@ -143,7 +145,9 @@ const turnEventStatusOf = (input: unknown): string | null => {
 }
 void turnOf
 void turnStatesOf
-void instructionsOf
+void clearedInstructionsOf
+void createdInstructionsOf
+void folderKeyOf
 void onCompaction
 void turnEventStatusOf
 void core.integration.executeByAlias
@@ -249,7 +253,9 @@ void onPlan
 void planStepsOf
 const turnOf = async (): Promise<core.AgentTaskTurn | null> => (await client.agentTasks.get("task-1")).turn ?? null
 const turnStatesOf = async (): Promise<core.AgentTaskTurnState[]> => (await client.agentTasks.turnStates?.(["task-1"])) ?? []
-const instructionsOf = async (): Promise<string | undefined> => (await client.agentTasks.setInstructions?.("task-1", null))?.instructions ?? (await client.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
+const clearedInstructionsOf = async (): Promise<string | undefined> => (await client.agentTasks.setInstructions?.("task-1", null))?.instructions
+const createdInstructionsOf = async (): Promise<string | undefined> => (await client.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
+const folderKeyOf = async (): Promise<string | undefined> => (await client.agentTasks.create({ agentType: "CLAUDE", folderKey: "crew-bot-1" })).folderKey
 const onCompaction = (session: core.AgentTaskSession): void => {
   session.on("contextCompacted", (compaction) => { const before: number | null = compaction.tokensBefore; void before })
   session.on("turnEnd", (turn) => { const compactions: core.AgentTurnCompaction[] = turn.compactions ?? []; void compactions })
@@ -261,7 +267,9 @@ const turnEventStatusOf = (input: unknown): string | null => {
 }
 void turnOf
 void turnStatesOf
-void instructionsOf
+void clearedInstructionsOf
+void createdInstructionsOf
+void folderKeyOf
 void onCompaction
 void turnEventStatusOf
 void client.integration.executeByAlias
