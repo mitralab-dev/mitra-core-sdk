@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Added `turn` to `AgentTask` (`AgentTaskTurn`, with `AgentTaskLastTurn`): where the chat's turn
+  stands, as `GET /api/v1/tasks/{id}` answers for a chat on an agent box. Optional and nullable:
+  absent from the listing, from the writes, from other runtimes and from an older Copilot. A
+  `turn` this version cannot read is treated as absent, with no error, on every method that
+  answers a task: the session opens a chat through `get`, and a change in the block must not keep
+  a chat from opening. `state` and `status` accept future values (mitra-copilot#585).
+- Added `agentTasks.turnStates(ids)`, backed by `GET /api/v1/tasks/turn-states?taskIds=<id>,<id>` (one comma-separated
+  value): it answers
+  `AgentTaskTurnState[]` (`{ taskId, turn }`, `turn` null for a chat that does not run on an agent
+  box). No ids, no request; the ids go in lower case and a repeated one is sent once; more than
+  100 ids go in requests of 100, one after the other, and the answers are joined as they came. A
+  request that fails rejects the whole call. An answer that is not a list, or an entry with no
+  `taskId`, is refused; an entry whose `turn` cannot be read answers `turn: null`. Optional on
+  `AgentTasksModule`, as `channel`, so hand-written modules keep compiling.
+- The agent session emits `contextCompacted` (`AgentTurnCompaction` with the frame's `sequence`,
+  `itemId` and `turnId`) when the box says the provider compacted the context; the frame still
+  comes as `raw`. A subagent's own compaction carries `parentToolId`.
+- Behaviour change: `turnEnd` and the result of `sendAndWait` now always carry `compactions`, the
+  list the box sent on the frame that ended the turn, empty when it sent none. A deep comparison
+  of the whole result against a literal needs the new field. The type keeps it optional so a
+  result built by hand still compiles.
+- Behaviour change: a turn that ends with an error hands its list in
+  `AgentTaskTurnError.compactions` and in `compactions` of the `error` event that ended it, both
+  always set and empty when the box sent none. An `error` event that ends no turn has no such
+  field.
+- Exported `AgentTurnEvent` (`AgentTurnStartedEvent` or `AgentTurnEndedEvent`),
+  `AgentTurnEventUsage`, `AgentTurnEventCompaction` and the guard `isAgentTurnEvent`: the input of
+  the Server Function an app registers as its agent turn hook, as `mitra-functions` delivers it.
+  Types and a guard only, no request.
+
 ## 0.3.9
 
 This release includes the agent session's history reread fix (#148): a reread no longer drops the

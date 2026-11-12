@@ -6,7 +6,12 @@ import {
 } from "./agentChannel"
 import { AgentTaskTurnError } from "./agentTurnError"
 import type { AgentTasksModule } from "./modules/agentTasks"
-import { agentTurnUsageOf, expectCredentialUsage } from "./response"
+import {
+  agentTurnCompactionOf,
+  agentTurnCompactionsOf,
+  agentTurnUsageOf,
+  expectCredentialUsage,
+} from "./response"
 import type {
   AgentCredentialScope,
   AgentMessage,
@@ -15,6 +20,7 @@ import type {
   AgentTaskEvent,
   AgentTaskInput,
   AgentTaskRuntime,
+  AgentTurnCompaction,
   AgentTurnUsage,
   CopilotProvider,
   CredentialUsage,
@@ -345,6 +351,13 @@ export interface AgentTurnResult {
   sequence?: number
   /** The `lifecycle.turnId` of that `stepFinish`. */
   turnId?: string
+  /**
+   * The times the provider compacted the context during the turn, oldest first, as the box listed
+   * them on the frame that ended it; a subagent's own compactions are not among them. The session
+   * always sets it, empty for a turn that compacted nothing, for a box that does not report it and
+   * for a turn closed from the history. Optional so a result built by hand keeps compiling.
+   */
+  compactions?: AgentTurnCompaction[]
 }
 
 export interface AgentTaskSessionEventMap {
@@ -413,7 +426,17 @@ export interface AgentTaskSessionEventMap {
   } & AgentPieceIdentity
   /** A tool a subagent called, in its own thread. It also comes as `tool`, as in 0.2.13. */
   subagentTool: AgentToolEvent & { parentToolId: string }
-  error: { code?: string; error: string; sequence?: number }
+  /**
+   * `compactions` comes on the error that ended a turn, and there the session always sets it, as
+   * on `turnEnd`: the list the box sent with the error, empty when it sent none. An error that
+   * ended no turn (a refused steer, a failure to open or to send) has no such field.
+   */
+  error: { code?: string; error: string; sequence?: number; compactions?: AgentTurnCompaction[] }
+  /**
+   * The provider compacted the conversation's context. On a subagent's own thread, `parentToolId`
+   * is the tool call that spawned it, and the compaction is not in the turn's `compactions`.
+   */
+  contextCompacted: AgentTurnCompaction & AgentPieceIdentity & { parentToolId?: string }
   /**
    * The subscription window the chat's harness reported during a turn. It comes only on the
    * direct channel of a business agent chat, and only when the turn runs on the person's or the
@@ -966,6 +989,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private recoveryGeneration = 0
   private recoveredTerminalReason: string | undefined
   private recoveredTerminalUsage: AgentTurnUsage | undefined
+  private recoveredTerminalCompactions: AgentTurnCompaction[] | undefined
   // Polls that found no closing row although a terminal with usage was heard.
   private endedPollsWithoutRow = 0
   // The turn ids the running turn went by, and the highest box sequence seen in it. The Copilot
@@ -1112,7 +1136,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
           const error = new AgentTaskTurnError(
             "Agent turn cancellation was not acknowledged before the safety timeout.",
           )
-          this.emit("error", { error: error.message })
+          this.emit("error", { error: error.message, compactions: [] })
           this.failTurn(error)
         }
       }, CANCEL_SAFETY_MS)
@@ -1505,6 +1529,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.recoveryUsed = false
     this.recoveredTerminalReason = undefined
     this.recoveredTerminalUsage = undefined
+    this.recoveredTerminalCompactions = undefined
     this.recoveryGeneration += 1
     this.activeWaiter = waiter
     this.setStatus("streaming")
@@ -1712,6 +1737,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.recoveryUsed = false
       this.recoveredTerminalReason = undefined
       this.recoveredTerminalUsage = undefined
+      this.recoveredTerminalCompactions = undefined
       this.recoveryGeneration += 1
       // What the history held before this turn, so a recovery finds this turn's answer and not
       // the one before it. The history already loaded is that, up to the turn just ended.
@@ -1887,18 +1913,28 @@ class CoreAgentTaskSession implements AgentTaskSession {
       )
       if (!newest) return false
       this._content = newest.content
-      this.finishTurn(reason, this.recoveredTerminalUsage)
+      this.finishTurn(reason, this.recoveredTerminalUsage, this.recoveredTerminalEnd())
       return true
     }
     if (recovered.type === "ERROR") {
       const error = new AgentTaskTurnError(recovered.content)
-      this.emit("error", { error: error.message })
+      this.emit("error", { error: error.message, compactions: [] })
       this.failTurn(error)
       return true
     }
     this._content = recovered.content
-    this.finishTurn(reason, recovered.usage ?? this.recoveredTerminalUsage)
+    this.finishTurn(
+      reason,
+      recovered.usage ?? this.recoveredTerminalUsage,
+      this.recoveredTerminalEnd(),
+    )
     return true
+  }
+
+  // The history rows carry no compactions: only a terminal heard live has the turn's list.
+  private recoveredTerminalEnd(): { compactions?: AgentTurnCompaction[] } {
+    const compactions = this.recoveredTerminalCompactions
+    return compactions ? { compactions } : {}
   }
 
   private closesThisTurn(message: AgentMessage): boolean {
@@ -2115,9 +2151,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
         // The box answers a stop with `interrupted` and `interruptTerminal`: that is the
         // acknowledgement the cancel timer waits for. Ignoring it (dev, 2026-09-13) ended every
         // cancel on the safety timeout with the turn already gone on the server.
+        const compactions = agentTurnCompactionsOf(payload?.compactions)
         const end = {
           ...sequenceOf(event),
           ...(finished === undefined ? {} : { turnId: finished }),
+          compactions,
         }
         if (reason === "interrupted" || lifecycle?.interruptTerminal === true) {
           this.rememberFinishedTurn(lifecycle)
@@ -2129,6 +2167,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
           if (this.recoveryUsed) {
             this.recoveredTerminalReason = reason
             this.recoveredTerminalUsage = usage
+            this.recoveredTerminalCompactions = compactions
             if (!this.recoveryPromise) {
               const generation = this.recoveryGeneration
               this.recoveryPromise = this.recoverTurn(generation).finally(() => {
@@ -2145,29 +2184,23 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const code = typeof payload?.code === "string" ? payload.code : undefined
         const message =
           typeof payload?.message === "string" ? payload.message : "Agent returned an error."
-        this.emit("error", { ...(code ? { code } : {}), error: message, ...sequenceOf(event) })
-        // The box refused an answer to a T3 input request, or a queue command: T3 still waits on
-        // that request, the queued message stays where it is, and no turn ends.
-        if (!payload?.lifecycle && payload?.requestId !== undefined) break
-        if (typeof payload?.command === "string") break
-        // A refusal names no turn. One naming a message other than the turn's opening one is
-        // that message's: the box refused it and the turn goes on. A box that names none:
-        // once the turn that runs was accepted, one arriving with a steer pending is the steer's.
-        const refused = payload?.lifecycle ? undefined : payload?.clientMessageId
-        if (typeof refused === "string") {
-          if (refused !== this.openingMessageId) {
-            const steered = [...this.steers, ...this.strayedSteers].find(
-              (pending) => pending.clientMessageId === refused,
-            )
-            if (steered) steered.refusal = new AgentTaskTurnError(message, code)
-            break
-          }
-        } else if (!payload?.lifecycle && !this.dispatching && this.pendingSteers > 0) break
-        if (this._status === "streaming" || this._status === "cancelled") {
-          this.failTurn(new AgentTaskTurnError(message, code))
-        }
+        const compactions = agentTurnCompactionsOf(payload?.compactions)
+        // The error that ends the turn carries the turn's list, as a `turnEnd` would; a refusal
+        // that leaves the turn running is about no turn's end and carries none.
+        const endsTurn = this.boxErrorEndsTurn(payload, message, code)
+        this.emit("error", {
+          ...(code ? { code } : {}),
+          error: message,
+          ...sequenceOf(event),
+          ...(endsTurn ? { compactions } : {}),
+        })
+        if (endsTurn) this.failTurn(new AgentTaskTurnError(message, code, compactions))
         break
       }
+      case "contextCompacted":
+        // Its turn already ended here, so this is a repeat of a compaction that end listed.
+        if (!this.isFinishedTurnFrame(lifecycle)) this.emitCompaction(event, payload)
+        break
       case "approval":
       case "user_input_request":
         this.liveRequest(event, payload)
@@ -2343,6 +2376,32 @@ class CoreAgentTaskSession implements AgentTaskSession {
     }
     this.turnIds.add(turnId)
     return false
+  }
+
+  // A refused steer is handed its refusal here, for the send that waits on it.
+  private boxErrorEndsTurn(
+    payload: Record<string, unknown> | null,
+    message: string,
+    code: string | undefined,
+  ): boolean {
+    // The box refused an answer to a T3 input request, or a queue command: T3 still waits on
+    // that request, the queued message stays where it is, and no turn ends.
+    if (!payload?.lifecycle && payload?.requestId !== undefined) return false
+    if (typeof payload?.command === "string") return false
+    // A refusal names no turn. One naming a message other than the turn's opening one is
+    // that message's: the box refused it and the turn goes on. A box that names none:
+    // once the turn that runs was accepted, one arriving with a steer pending is the steer's.
+    const refused = payload?.lifecycle ? undefined : payload?.clientMessageId
+    if (typeof refused === "string") {
+      if (refused !== this.openingMessageId) {
+        const steered = [...this.steers, ...this.strayedSteers].find(
+          (pending) => pending.clientMessageId === refused,
+        )
+        if (steered) steered.refusal = new AgentTaskTurnError(message, code)
+        return false
+      }
+    } else if (!payload?.lifecycle && !this.dispatching && this.pendingSteers > 0) return false
+    return this._status === "streaming" || this._status === "cancelled"
   }
 
   private isFinishedTurnFrame(lifecycle: Record<string, unknown> | null): boolean {
@@ -2631,9 +2690,26 @@ class CoreAgentTaskSession implements AgentTaskSession {
       case "user_input_request":
         this.liveRequest(event, payload, parentToolId)
         break
+      case "contextCompacted":
+        this.emitCompaction(event, payload, parentToolId)
+        break
       default:
         break
     }
+  }
+
+  private emitCompaction(
+    event: AgentTaskEvent,
+    payload: Record<string, unknown> | null,
+    parentToolId?: string,
+  ): void {
+    const compaction = agentTurnCompactionOf(payload)
+    if (!compaction) return
+    this.emit("contextCompacted", {
+      ...compaction,
+      ...pieceIdentityOf(event, payload),
+      ...parentToolIdOf(parentToolId),
+    })
   }
 
   private applySubagent(event: AgentTaskEvent, payload: Record<string, unknown> | null): void {
@@ -2693,7 +2769,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private finishTurn(
     reason: string,
     usage?: AgentTurnUsage,
-    end: { sequence?: number; turnId?: string } = {},
+    end: { sequence?: number; turnId?: string; compactions?: AgentTurnCompaction[] } = {},
   ): void {
     if (this._status !== "streaming" && this._status !== "cancelled") return
     if (this.cancelTimer) clearTimeout(this.cancelTimer)
@@ -2714,6 +2790,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       reason,
       ...(usage ? { usage } : {}),
       ...end,
+      compactions: end.compactions ?? [],
     }
     this.emit("turnEnd", result)
     this.activeWaiter?.resolve(result)

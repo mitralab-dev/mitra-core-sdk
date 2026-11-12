@@ -9,6 +9,9 @@ import type {
   AgentReadyProvider,
   AgentTask,
   AgentTaskChannel,
+  AgentTaskTurn,
+  AgentTaskTurnState,
+  AgentTurnCompaction,
   AgentTurnUsage,
   AgentTurnUsageRequest,
   AiProviders,
@@ -1289,7 +1292,43 @@ export function expectAgentTask(
   if (typeof task.archived !== "boolean") invalidField(context, "archived", errors)
   if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof task.updatedAt !== "string") invalidField(context, "updatedAt", errors)
-  return task as unknown as AgentTask
+  if (!("turn" in task) || task.turn === null) return task as unknown as AgentTask
+  const { turn: rawTurn, ...rest } = task
+  const turn = agentTaskTurnOf(rawTurn)
+  return { ...rest, ...(turn ? { turn } : {}) } as unknown as AgentTask
+}
+
+// Lenient on purpose: `turn` is an optional block riding on the task, and the session opens a chat
+// through `get`. A block this client cannot read is left out, so a change in it never keeps a chat
+// from opening in an app pinned to this version. `state` and `status` are checked as strings only:
+// a value the Copilot adds later is passed on.
+export function agentTaskTurnOf(value: unknown): AgentTaskTurn | undefined {
+  if (!isObject(value)) return undefined
+  if (typeof value.state !== "string") return undefined
+  if (!isNullableString(value.currentTurnId) || !isCount(value.queuedCount)) return undefined
+  if (value.lastTurn === null) return value as unknown as AgentTaskTurn
+  const lastTurn = value.lastTurn
+  if (!isObject(lastTurn)) return undefined
+  if (typeof lastTurn.turnId !== "string" || typeof lastTurn.status !== "string") return undefined
+  if (!isStringArray(lastTurn.messageIds)) return undefined
+  const nullableTexts = ["finishReason", "errorCode", "startedAt", "endedAt"] as const
+  if (!nullableTexts.every((field) => isNullableString(lastTurn[field]))) return undefined
+  return value as unknown as AgentTaskTurn
+}
+
+// The list and each entry's `taskId` are checked strictly: without them there is no answer to
+// give. An entry's `turn` this client cannot read becomes null, so one chat never fails the batch.
+export function expectAgentTaskTurnStates(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): AgentTaskTurnState[] {
+  return expectObjectArray<JsonObject>(value, context, errors).map((state, position) => {
+    if (typeof state.taskId !== "string") {
+      invalidField(`${context} item ${position}`, "taskId", errors)
+    }
+    return { ...state, turn: agentTaskTurnOf(state.turn) ?? null } as unknown as AgentTaskTurnState
+  })
 }
 
 /** A 202 or an empty body is a Copilot that offers no channel for this chat. */
@@ -1381,6 +1420,25 @@ export function agentTurnUsageOf(value: unknown): AgentTurnUsage | undefined {
     })
   }
   return usage
+}
+
+// Lenient as the usage it rides with: an entry this client cannot read is dropped, never the turn.
+export function agentTurnCompactionsOf(value: unknown): AgentTurnCompaction[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const compaction = agentTurnCompactionOf(item)
+    return compaction ? [compaction] : []
+  })
+}
+
+export function agentTurnCompactionOf(value: unknown): AgentTurnCompaction | undefined {
+  if (!isObject(value) || typeof value.trigger !== "string") return undefined
+  return {
+    trigger: value.trigger,
+    tokensBefore: isCount(value.tokensBefore) ? value.tokensBefore : null,
+    tokensAfter: isCount(value.tokensAfter) ? value.tokensAfter : null,
+    at: typeof value.at === "string" ? value.at : null,
+  }
 }
 
 // An item with no field this client can read is dropped from the list, not kept as `{}`.

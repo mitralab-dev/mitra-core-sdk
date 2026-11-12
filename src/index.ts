@@ -44,6 +44,14 @@ export type {
   AgentWebSocket,
   AgentWebSocketConstructor,
 } from "./agentChannel"
+export { isAgentTurnEvent } from "./agentTurnEvent"
+export type {
+  AgentTurnEndedEvent,
+  AgentTurnEvent,
+  AgentTurnEventCompaction,
+  AgentTurnEventUsage,
+  AgentTurnStartedEvent,
+} from "./agentTurnEvent"
 export {
   SdkCoreConfigurationError,
   SdkCoreResponseError,
@@ -152,8 +160,12 @@ export type {
   AgentTaskCreateInput,
   AgentTaskEvent,
   AgentTaskInput,
+  AgentTaskLastTurn,
   AgentTaskListOptions,
   AgentTaskRuntime,
+  AgentTaskTurn,
+  AgentTaskTurnState,
+  AgentTurnCompaction,
   AgentTurnUsage,
   AgentTurnUsageRequest,
   AgentUpdateItem,
