@@ -982,6 +982,74 @@ describe("agent and workflow modules", () => {
     }
   })
 
+  it("sends the chat's own instructions on create and reads them back", async () => {
+    const created: AgentTask = { ...agentTask, instructions: "You are Ana." }
+    const cleared: AgentTask = { ...agentTask, instructions: "" }
+    const transport = new QueueTransport([created, cleared, agentTask])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(
+      tasks.create({ agentType: "CLAUDE", agentId: "agent-1", instructions: "You are Ana." }),
+    ).resolves.toEqual(created)
+    await expect(tasks.get("task-1")).resolves.toEqual(cleared)
+    expect(await tasks.get("task-1")).not.toHaveProperty("instructions")
+    expect(transport.requests[0]?.options.body).toEqual({
+      agentType: "CLAUDE",
+      agentId: "agent-1",
+      instructions: "You are Ana.",
+    })
+  })
+
+  it("replaces or clears the chat's own instructions", async () => {
+    const replaced: AgentTask = { ...agentTask, instructions: "You are Bia." }
+    const cleared: AgentTask = { ...agentTask, instructions: "" }
+    const transport = new QueueTransport([replaced, cleared])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(tasks.setInstructions?.("task/1", "You are Bia.")).resolves.toEqual(replaced)
+    await expect(tasks.setInstructions?.("task/1", null)).resolves.toEqual(cleared)
+    expect(transport.requests).toEqual([
+      {
+        path: "/api/v1/tasks/task%2F1/instructions",
+        options: { method: "PUT", body: { instructions: "You are Bia." } },
+      },
+      {
+        path: "/api/v1/tasks/task%2F1/instructions",
+        options: { method: "PUT", body: { instructions: null } },
+      },
+    ])
+  })
+
+  it("rejects the instructions of a chat created without them with the Copilot's 409", async () => {
+    const refusal = Object.assign(new Error("TASK_INSTRUCTIONS_NEED_A_NEW_CHAT"), { status: 409 })
+    const transport: Transport = { request: () => Promise.reject(refusal) }
+
+    await expect(
+      createAgentTasksModule(transport).setInstructions?.("task-1", "You are Ana."),
+    ).rejects.toBe(refusal)
+  })
+
+  it.each([
+    ["null", null],
+    ["a number", 7],
+    ["an object", { text: "You are Ana." }],
+  ])("returns the task without instructions that come as %s", async (_shape, instructions) => {
+    const unreadable = { ...agentTask, instructions }
+    const tasks = createAgentTasksModule(
+      new QueueTransport([unreadable, unreadable, unreadable, unreadable]),
+    )
+
+    for (const task of [
+      await tasks.get("task-1"),
+      await tasks.create({ agentType: "CLAUDE" }),
+      await tasks.rename("task-1", "Renamed"),
+      await tasks.setInstructions?.("task-1", "You are Ana."),
+    ]) {
+      expect(task).toEqual(agentTask)
+      expect(task).not.toHaveProperty("instructions")
+    }
+  })
+
   it("reads the turn state of several chats in one request", async () => {
     const states = [
       { taskId: "task-1", turn: agentTaskTurn },

@@ -1165,6 +1165,13 @@ export interface AgentTaskCreateInput {
    * agent holding a connection; mutually exclusive with `userId`.
    */
   autonomous?: boolean
+  /**
+   * The chat's own instructions, added to the agent's, at most 32,768 characters. They are set
+   * at creation: a chat opened without them (or with blank text) can never get them later, and
+   * `agentTasks.setInstructions` refuses it with 409 `TASK_INSTRUCTIONS_NEED_A_NEW_CHAT`. To
+   * give a chat instructions later, open it with some text.
+   */
+  instructions?: string
 }
 
 export interface AgentTask {
@@ -1186,6 +1193,12 @@ export interface AgentTask {
    * that predates it.
    */
   turn?: AgentTaskTurn | null
+  /**
+   * The chat's own instructions. Absent on a chat created without them, which never has them,
+   * from the listing and from a Copilot that predates them; `""` on a chat whose text was
+   * cleared, which can get text again. A value that is not text is left out, with no error.
+   */
+  instructions?: string
 }
 
 /**

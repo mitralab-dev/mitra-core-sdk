@@ -1292,10 +1292,16 @@ export function expectAgentTask(
   if (typeof task.archived !== "boolean") invalidField(context, "archived", errors)
   if (!isNullableString(task.createdAt)) invalidField(context, "createdAt", errors)
   if (typeof task.updatedAt !== "string") invalidField(context, "updatedAt", errors)
-  if (!("turn" in task) || task.turn === null) return task as unknown as AgentTask
-  const { turn: rawTurn, ...rest } = task
-  const turn = agentTaskTurnOf(rawTurn)
-  return { ...rest, ...(turn ? { turn } : {}) } as unknown as AgentTask
+  const { turn: rawTurn, instructions: rawInstructions, ...rest } = task
+  const turn = rawTurn === null ? null : agentTaskTurnOf(rawTurn)
+  // Lenient like `turn`: an `instructions` that is not text is left out rather than failing the
+  // task, so a change in the field never keeps a chat from opening.
+  const instructions = typeof rawInstructions === "string" ? rawInstructions : undefined
+  return {
+    ...rest,
+    ...(turn !== undefined ? { turn } : {}),
+    ...(instructions !== undefined ? { instructions } : {}),
+  } as unknown as AgentTask
 }
 
 // Lenient on purpose: `turn` is an optional block riding on the task, and the session opens a chat

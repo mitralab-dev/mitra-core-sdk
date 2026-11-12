@@ -18,6 +18,15 @@ All notable changes to this project are documented in this file.
   request that fails rejects the whole call. An answer that is not a list, or an entry with no
   `taskId`, is refused; an entry whose `turn` cannot be read answers `turn: null`. Optional on
   `AgentTasksModule`, as `channel`, so hand-written modules keep compiling.
+- Added the chat's own instructions (mitra-copilot#589): `AgentTaskCreateInput.instructions`
+  (at most 32,768 characters), `AgentTask.instructions` and `agentTasks.setInstructions(id,
+instructions | null)`, backed by `PUT /api/v1/tasks/{id}/instructions`. They are set at
+  creation: a chat created without them is refused with 409 `TASK_INSTRUCTIONS_NEED_A_NEW_CHAT`;
+  `null` or blank text clears them to `""`. `instructions` is absent on a chat created without
+  them and from the listing; a value that is not text is treated as absent, with no error, as
+  `turn`. A change reaches the box before the next turn, but the conversation under way only uses
+  it after a compaction; send `/compact` to apply it at once. Optional on `AgentTasksModule`, as
+  `turnStates`.
 - The agent session emits `contextCompacted` (`AgentTurnCompaction` with the frame's `sequence`,
   `itemId` and `turnId`) when the box says the provider compacted the context; the frame still
   comes as `raw`. A subagent's own compaction carries `parentToolId`.
