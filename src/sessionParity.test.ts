@@ -20,6 +20,7 @@ const ADDED_FIELDS = new Set([
   "itemDelta",
   "text",
   "title",
+  "compactions",
 ])
 
 function differences(before: unknown, now: unknown, path: string, found: string[]): void {

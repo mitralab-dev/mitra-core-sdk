@@ -32,6 +32,7 @@ try {
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
 import { createAiProvidersModule, type AiProviders, type AiProvidersModule, type IncludedAiQuota, type IncludedAiQuotaWindow, type ManagedAiProfile, type OpencodeAiProvider } from "@mitralab.io/sdk-core"
+import { isAgentTurnEvent, type AgentTaskTurn, type AgentTaskTurnState, type AgentTurnCompaction, type AgentTurnEvent } from "@mitralab.io/sdk-core"
 import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentPlan, type AgentPlanStep, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
@@ -128,6 +129,21 @@ const planStepsOf = (item: AgentTimelineItem): AgentPlanStep[] | undefined => (i
 void turnPlan
 void onPlan
 void planStepsOf
+const turnOf = async (): Promise<AgentTaskTurn | null> => (await core.agentTasks.get("task-1")).turn ?? null
+const turnStatesOf = async (): Promise<AgentTaskTurnState[]> => (await core.agentTasks.turnStates?.(["task-1"])) ?? []
+const onCompaction = (session: AgentTaskSession): void => {
+  session.on("contextCompacted", (compaction) => { const before: number | null = compaction.tokensBefore; void before })
+  session.on("turnEnd", (turn) => { const compactions: AgentTurnCompaction[] = turn.compactions ?? []; void compactions })
+}
+const turnEventStatusOf = (input: unknown): string | null => {
+  if (!isAgentTurnEvent(input)) return null
+  const turnEvent: AgentTurnEvent = input
+  return turnEvent.type === "ENDED" ? turnEvent.status : null
+}
+void turnOf
+void turnStatesOf
+void onCompaction
+void turnEventStatusOf
 void core.integration.executeByAlias
 void core.integrationAdmin.list
 void core
@@ -229,6 +245,21 @@ const planStepsOf = (item: core.AgentTimelineItem): core.AgentPlanStep[] | undef
 void turnPlan
 void onPlan
 void planStepsOf
+const turnOf = async (): Promise<core.AgentTaskTurn | null> => (await client.agentTasks.get("task-1")).turn ?? null
+const turnStatesOf = async (): Promise<core.AgentTaskTurnState[]> => (await client.agentTasks.turnStates?.(["task-1"])) ?? []
+const onCompaction = (session: core.AgentTaskSession): void => {
+  session.on("contextCompacted", (compaction) => { const before: number | null = compaction.tokensBefore; void before })
+  session.on("turnEnd", (turn) => { const compactions: core.AgentTurnCompaction[] = turn.compactions ?? []; void compactions })
+}
+const turnEventStatusOf = (input: unknown): string | null => {
+  if (!core.isAgentTurnEvent(input)) return null
+  const turnEvent: core.AgentTurnEvent = input
+  return turnEvent.type === "ENDED" ? turnEvent.status : null
+}
+void turnOf
+void turnStatesOf
+void onCompaction
+void turnEventStatusOf
 void client.integration.executeByAlias
 void client.integrationAdmin.list
 void client

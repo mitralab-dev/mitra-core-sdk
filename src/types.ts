@@ -1180,6 +1180,53 @@ export interface AgentTask {
   archived: boolean
   createdAt: string | null
   updatedAt: string
+  /**
+   * Where the chat's turn stands. Only `get` carries it, and only for a chat on an agent box:
+   * absent from the listing, from the writes, from a chat on another runtime and from a Copilot
+   * that predates it.
+   */
+  turn?: AgentTaskTurn | null
+}
+
+/**
+ * Where a chat's turn stands, as the Copilot reads it without the live session. The two readings
+ * behind it are not of the same instant: a turn that ends between them can show as `RUNNING` and
+ * as `lastTurn` in one answer, and the next read is right.
+ */
+export interface AgentTaskTurn {
+  /**
+   * `RUNNING` with a box holding a message, `QUEUED` with messages waiting and none running,
+   * `IDLE` otherwise. Open to other strings so a state the Copilot adds later still compiles.
+   */
+  state: "RUNNING" | "QUEUED" | "IDLE" | (string & {})
+  /** The message that opened the turn that runs; null outside `RUNNING`. */
+  currentTurnId: string | null
+  /** Messages waiting for a box to take them. */
+  queuedCount: number
+  /** The turn that last reached a final state; null when none did, or after the retention took it. */
+  lastTurn: AgentTaskLastTurn | null
+}
+
+export interface AgentTaskLastTurn {
+  /** The message that opened the turn. */
+  turnId: string
+  /** Every message the turn closed, oldest first: more than one when it took steers. */
+  messageIds: string[]
+  status: "COMPLETED" | "INTERRUPTED" | "FAILED" | "REJECTED" | "EXPIRED" | "LOST" | (string & {})
+  /** The reason the box closed the turn with; null on a turn that ended with an error or never ran. */
+  finishReason: string | null
+  /** Not a closed set: an unknown value is a generic error. Null on an end without an error. */
+  errorCode: string | null
+  /** ISO instant a box took the turn's first message; null for a message no box took. */
+  startedAt: string | null
+  /** ISO instant; null on a turn that ended before the Copilot recorded it. */
+  endedAt: string | null
+}
+
+/** One chat of `agentTasks.turnStates`; `turn` is null for a chat that does not run on an agent box. */
+export interface AgentTaskTurnState {
+  taskId: string
+  turn: AgentTaskTurn | null
 }
 
 export interface AgentTaskListOptions extends PageOptions {
@@ -1312,6 +1359,20 @@ export interface AgentTurnUsage {
    * from older boxes and older turns.
    */
   contextWindow?: number
+}
+
+/** One time the provider compacted the conversation's context during a turn, as the box sent it. */
+export interface AgentTurnCompaction {
+  /**
+   * `manual` when the person asked for it, `auto` when the provider did it because the context
+   * filled up. Open to other strings so a trigger the box adds later still compiles.
+   */
+  trigger: "auto" | "manual" | (string & {})
+  /** The context's size before it, in tokens; null when the provider reports none. */
+  tokensBefore: number | null
+  tokensAfter: number | null
+  /** ISO instant the compaction finished; null when the box did not say. */
+  at: string | null
 }
 
 export interface AgentMessage {
