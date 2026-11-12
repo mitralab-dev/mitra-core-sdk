@@ -10,7 +10,8 @@ All notable changes to this project are documented in this file.
   `turn` this version cannot read is treated as absent, with no error, on every method that
   answers a task: the session opens a chat through `get`, and a change in the block must not keep
   a chat from opening. `state` and `status` accept future values (mitra-copilot#585).
-- Added `agentTasks.turnStates(ids)`, backed by `POST /api/v1/tasks/turn-states`: it answers
+- Added `agentTasks.turnStates(ids)`, backed by `GET /api/v1/tasks/turn-states?taskIds=<id>,<id>` (one comma-separated
+  value): it answers
   `AgentTaskTurnState[]` (`{ taskId, turn }`, `turn` null for a chat that does not run on an agent
   box). No ids, no request; the ids go in lower case and a repeated one is sent once; more than
   100 ids go in requests of 100, one after the other, and the answers are joined as they came. A

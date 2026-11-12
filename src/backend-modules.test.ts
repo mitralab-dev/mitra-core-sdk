@@ -996,7 +996,7 @@ describe("agent and workflow modules", () => {
     expect(transport.requests).toEqual([
       {
         path: "/api/v1/tasks/turn-states",
-        options: { method: "POST", body: { taskIds: ["task-1", "task-2", "gone"] } },
+        options: { method: "GET", params: { taskIds: "task-1,task-2,gone" } },
       },
     ])
   })
@@ -1006,8 +1006,8 @@ describe("agent and workflow modules", () => {
 
     await createAgentTasksModule(transport).turnStates?.(["Task-A", "task-a", "TASK-B"])
 
-    expect(transport.requests.map(({ options }) => options.body)).toEqual([
-      { taskIds: ["task-a", "task-b"] },
+    expect(transport.requests.map(({ options }) => options.params)).toEqual([
+      { taskIds: "task-a,task-b" },
     ])
   })
 
@@ -1026,10 +1026,10 @@ describe("agent and workflow modules", () => {
 
     const states = await createAgentTasksModule(transport).turnStates?.(ids)
 
-    expect(transport.requests.map(({ options }) => options.body)).toEqual([
-      { taskIds: ids.slice(0, 100) },
-      { taskIds: ids.slice(100, 200) },
-      { taskIds: ids.slice(200) },
+    expect(transport.requests.map(({ options }) => options.params)).toEqual([
+      { taskIds: ids.slice(0, 100).join(",") },
+      { taskIds: ids.slice(100, 200).join(",") },
+      { taskIds: ids.slice(200).join(",") },
     ])
     expect(states?.map(({ taskId }) => taskId)).toEqual([...ids.slice(0, 100), ...ids.slice(200)])
   })

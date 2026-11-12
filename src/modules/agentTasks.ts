@@ -45,7 +45,8 @@ export interface AgentTasksModule {
    */
   channel?(id: string): Promise<AgentTaskChannel | null>
   /**
-   * Reads where the turn of each chat stands without opening a session. One entry per chat the
+   * Reads where the turn of each chat stands without opening a session, with
+   * `GET /api/v1/tasks/turn-states?taskIds=a,b`. One entry per chat the
    * caller may read, in the order asked: an id it may not read, or that does not exist, is left
    * out with no error. `turn` is null for a chat that does not run on an agent box. No ids, no
    * request. Above 100 ids it asks in requests of 100, and one that fails rejects the whole call:
@@ -164,8 +165,10 @@ export function createAgentTasksModule(
         states.push(
           ...expectAgentTaskTurnStates(
             await transport.request<unknown>("/api/v1/tasks/turn-states", {
-              method: "POST",
-              body: { taskIds },
+              method: "GET",
+              // Joined here because a transport may send an array as repeated keys; the Copilot
+              // reads one comma-separated value.
+              params: { taskIds: taskIds.join(",") },
             }),
             "Agent task turn states response",
             errors,
