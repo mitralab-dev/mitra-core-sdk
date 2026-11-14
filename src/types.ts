@@ -937,6 +937,103 @@ export interface ImportExecution {
   errorMessage: string | null
 }
 
+/**
+ * Once confirmed, `TEMPORARY` expires seven days after the upload request and `PERMANENT` never
+ * does. Each kind has its own quota in the app and its own quota per owner; a file without an
+ * owner counts only toward the app's.
+ */
+export type FileKind = "TEMPORARY" | "PERMANENT"
+
+/**
+ * Who gets a read link: `PRIVATE` the owner only, `RESTRICTED` the owner or a Server Function of
+ * the app running for a user (a public execution does not), `APP` anyone with `FILE_READ` on the
+ * app. A file without an owner is always `APP`.
+ */
+export type FileVisibility = "PRIVATE" | "RESTRICTED" | "APP"
+
+/** `PENDING` until the upload is confirmed; only `READY` files can be read. */
+export type FileStatus = "PENDING" | "READY" | "DELETED"
+
+export type FileCreator = "USER" | "FUNCTION"
+
+export interface FileUploadInput {
+  /** Original file name, at most 255 characters and without control characters. */
+  name: string
+  /** Media type such as `image/png`; storage serves the file back with it. */
+  contentType: string
+  /** Exact size in bytes. The upload link is signed with it, so storage refuses any other size. */
+  sizeBytes: number
+  kind: FileKind
+  visibility: FileVisibility
+  /**
+   * Server Functions only: the file belongs to the app instead of the token's user, and must be
+   * `APP`. Any other caller gets `400 INVALID_FILE_REQUEST`.
+   */
+  appOwned?: boolean
+}
+
+/** A `PENDING` file and the signed link that takes its bytes. */
+export interface FileUpload {
+  fileId: string
+  /** Signed storage URL. It authorizes the upload by itself, so it is never logged. */
+  uploadUrl: string
+  /** HTTP method the upload must use. */
+  uploadMethod: string
+  /** Headers the upload must repeat exactly, because the link is signed with them. */
+  uploadHeaders: Record<string, string>
+  /** When the link stops accepting the upload. */
+  expiresAt: string
+}
+
+export interface FileMetadata {
+  id: string
+  name: string
+  contentType: string
+  sizeBytes: number
+  kind: FileKind
+  visibility: FileVisibility
+  status: FileStatus
+  /**
+   * Null for a file of the app: one a Server Function uploaded with `appOwned`, or uploaded by a
+   * Server Function running without a user, such as a public execution.
+   */
+  ownerUserId: string | null
+  createdBy: FileCreator
+  createdAt: string
+  /** Null while the file is `PENDING`. */
+  confirmedAt: string | null
+  /**
+   * When the file stops answering: 24 hours after the request while `PENDING`, of either kind.
+   * Null only for a confirmed `PERMANENT` file.
+   */
+  expiresAt: string | null
+}
+
+export interface FileReadUrlOptions {
+  /**
+   * Requested link validity. Only `APP` files get more than the service default, up to its
+   * ceiling; `expiresAt` in the response carries the validity actually granted.
+   */
+  expiresInSeconds?: number
+}
+
+export interface FileReadUrl {
+  /** Signed storage URL that opens the file by itself, so it is never logged. */
+  url: string
+  expiresAt: string
+}
+
+/**
+ * One item per distinct `fileId`, in the order asked. A file the caller cannot read, for any
+ * reason, comes with `errorCode` (`NOT_FOUND`) instead of a link, without failing the others.
+ */
+export type FileReadUrlItem =
+  { fileId: string; url: string; expiresAt: string } | { fileId: string; errorCode: string }
+
+export interface FileReadUrls {
+  results: FileReadUrlItem[]
+}
+
 export interface AgentInput {
   /** Agent name, 3 to 255 characters. */
   name: string

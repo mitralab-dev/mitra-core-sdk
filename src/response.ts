@@ -27,6 +27,10 @@ import type {
   DataSourceBulkResult,
   DataSourceDefinition,
   DeviceAuthorization,
+  FileMetadata,
+  FileReadUrl,
+  FileReadUrls,
+  FileUpload,
   FunctionBulkDeleteResult,
   FunctionDefinition,
   FunctionExecution,
@@ -930,6 +934,75 @@ export function expectImportExecution(
   if (!isNullableString(execution.completedAt)) invalidField(context, "completedAt", errors)
   if (!isNullableString(execution.errorMessage)) invalidField(context, "errorMessage", errors)
   return execution as unknown as ImportExecution
+}
+
+export function expectFileMetadata(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): FileMetadata {
+  const file = expectObject<JsonObject>(value, context, errors)
+  for (const field of ["id", "name", "contentType", "createdAt"] as const) {
+    if (typeof file[field] !== "string") invalidField(context, field, errors)
+  }
+  if (!isInteger(file.sizeBytes)) invalidField(context, "sizeBytes", errors)
+  if (!isOneOf(file.kind, ["TEMPORARY", "PERMANENT"] as const)) {
+    invalidField(context, "kind", errors)
+  }
+  if (!isOneOf(file.visibility, ["PRIVATE", "RESTRICTED", "APP"] as const)) {
+    invalidField(context, "visibility", errors)
+  }
+  if (!isOneOf(file.status, ["PENDING", "READY", "DELETED"] as const)) {
+    invalidField(context, "status", errors)
+  }
+  if (!isOneOf(file.createdBy, ["USER", "FUNCTION"] as const)) {
+    invalidField(context, "createdBy", errors)
+  }
+  for (const field of ["ownerUserId", "confirmedAt", "expiresAt"] as const) {
+    if (!isNullableString(file[field])) invalidField(context, field, errors)
+  }
+  return file as unknown as FileMetadata
+}
+
+export function expectFileUpload(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): FileUpload {
+  const upload = expectObject<JsonObject>(value, context, errors)
+  for (const field of ["fileId", "uploadUrl", "uploadMethod", "expiresAt"] as const) {
+    if (typeof upload[field] !== "string" || !upload[field]) invalidField(context, field, errors)
+  }
+  if (!isStringRecord(upload.uploadHeaders)) invalidField(context, "uploadHeaders", errors)
+  return upload as unknown as FileUpload
+}
+
+export function expectFileReadUrl(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): FileReadUrl {
+  const read = expectObject<JsonObject>(value, context, errors)
+  if (typeof read.url !== "string" || !read.url) invalidField(context, "url", errors)
+  if (typeof read.expiresAt !== "string") invalidField(context, "expiresAt", errors)
+  return read as unknown as FileReadUrl
+}
+
+export function expectFileReadUrls(
+  value: unknown,
+  context: string,
+  errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
+): FileReadUrls {
+  const response = expectObject<JsonObject>(value, context, errors)
+  expectObjectArray<JsonObject>(response.results, `${context} results`, errors).forEach(
+    (item, position) => {
+      const itemContext = `${context} result ${position}`
+      if (typeof item.fileId !== "string") invalidField(itemContext, "fileId", errors)
+      if (typeof item.errorCode === "string") return
+      expectFileReadUrl(item, itemContext, errors)
+    },
+  )
+  return response as unknown as FileReadUrls
 }
 
 export function expectMessageAccepted(
