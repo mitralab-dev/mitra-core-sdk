@@ -38,6 +38,8 @@ const UNREADABLE_STORAGE_ERROR = "storage failed with an error the Core cannot s
 export interface FilesFetchResponse {
   readonly ok: boolean
   readonly status: number
+  /** Cancelled when the content is not read. */
+  readonly body?: { cancel(): Promise<void> } | null
   blob(): Promise<Blob>
 }
 
@@ -310,6 +312,7 @@ async function putContent(
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     })
+    discardBody(response)
     if (response.ok) return null
     return {
       reason: `storage answered ${response.status}`,
@@ -347,6 +350,7 @@ async function fetchContent(
       { fileId, step: "download", cause: storageCause(error, url) },
     )
   }
+  discardBody(response)
   throw new FileTransferError(
     `File ${fileId} was not downloaded: storage answered ${response.status}`,
     { fileId, step: "download", status: response.status },
@@ -395,6 +399,13 @@ function linkSecrets(link: string): string[] {
   const decoded = [...new URLSearchParams(query).values()]
   const values = [...raw, ...decoded].filter((value) => value.length >= MIN_SECRET_LENGTH)
   return [link, query, ...values].filter((secret) => secret.length > 0)
+}
+
+// undici holds the connection of an unread body until garbage collection, so it is cancelled.
+function discardBody(response: FilesFetchResponse): void {
+  void Promise.resolve()
+    .then(() => response.body?.cancel())
+    .catch(() => undefined)
 }
 
 // Runtimes from before AbortSignal.reason leave it undefined; the caller still gets the AbortError

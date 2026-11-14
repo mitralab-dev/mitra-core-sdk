@@ -1,33 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
-  FileTransferError,
   SdkCoreConfigurationError,
   SdkCoreResponseError,
   createFilesModule,
   createSdkCore,
 } from "./index"
-import type {
-  FileMetadata,
-  FilesFetch,
-  FilesFetchResponse,
-  FileUpload,
-  Transport,
-  TransportRequestOptions,
-} from "./index"
-
-class QueueTransport implements Transport {
-  readonly requests: { path: string; options: TransportRequestOptions }[] = []
-
-  constructor(private readonly responses: unknown[] = []) {}
-
-  async request<T>(path: string, options: TransportRequestOptions = {}): Promise<T> {
-    this.requests.push({ path, options })
-    if (this.responses.length === 0) throw new Error(`No response for ${path}`)
-    const response = this.responses.shift()
-    if (response instanceof Error) throw response
-    return response as T
-  }
-}
+import type { FileMetadata, FilesFetch, FilesFetchResponse, FileUpload } from "./index"
+import {
+  QueueTransport,
+  decodedSessionToken,
+  expectNoSignedLink,
+  fileId,
+  fileMetadata,
+  namedFile,
+  readSignature,
+  rejectionOf,
+  sessionToken,
+  signedLink,
+  uploadSignature,
+} from "./fixtures/files/support"
 
 type StorageCall = { url: string; init: Parameters<FilesFetch>[1] }
 
@@ -61,32 +52,6 @@ function answered(status: number, content: Blob = new Blob([])): FilesFetchRespo
   return { ok: status >= 200 && status < 300, status, blob: async () => content }
 }
 
-// File is a global only from Node 20, and the CI also runs on Node 18. upload reads the name of
-// any Blob that has one, so a named Blob stands for a File.
-function namedFile(text: string, name: string, type?: string): Blob {
-  return Object.assign(new Blob([text], type === undefined ? {} : { type }), { name })
-}
-
-const fileId = "0b6f3c1e-8d2a-4c55-9a77-5f1e2d3c4b5a"
-const uploadSignature = "5e1f".repeat(16)
-const readSignature = "9c2b".repeat(16)
-// A link signed by the role of an ECS task carries this token, and decoding it changes it.
-const sessionToken = "IQoJb3JpZ2luX2VjEA%2FexampleSession%2BToken%3D%3D"
-const decodedSessionToken = "IQoJb3JpZ2luX2VjEA/exampleSession+Token=="
-
-// The query S3 signs, so the redaction meets the values a real link carries.
-function signedLink(signature: string): string {
-  return (
-    "https://files.s3.sa-east-1.amazonaws.com/files/tmp/tenant/t/app/a/key" +
-    "?X-Amz-Algorithm=AWS4-HMAC-SHA256" +
-    "&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20261113%2Fsa-east-1%2Fs3%2Faws4_request" +
-    "&X-Amz-Date=20261113T120000Z&X-Amz-Expires=300" +
-    `&X-Amz-Security-Token=${sessionToken}` +
-    "&X-Amz-SignedHeaders=content-length%3Bcontent-type%3Bhost%3Bif-none-match" +
-    `&X-Amz-Signature=${signature}`
-  )
-}
-
 const uploadUrl = signedLink(uploadSignature)
 const readUrl = signedLink(readSignature)
 
@@ -96,43 +61,6 @@ const fileUpload: FileUpload = {
   uploadMethod: "PUT",
   uploadHeaders: { "content-type": "text/plain", "if-none-match": "*" },
   expiresAt: "2026-11-13T12:05:00Z",
-}
-
-function fileMetadata(overrides: Partial<FileMetadata> = {}): FileMetadata {
-  return {
-    id: fileId,
-    name: "notes.txt",
-    contentType: "text/plain",
-    sizeBytes: 5,
-    kind: "TEMPORARY",
-    visibility: "PRIVATE",
-    status: "READY",
-    ownerUserId: "user-1",
-    createdBy: "USER",
-    createdAt: "2026-11-13T12:00:00Z",
-    confirmedAt: "2026-11-13T12:00:03Z",
-    expiresAt: "2026-11-20T12:00:00Z",
-    ...overrides,
-  }
-}
-
-// Everything reachable from the error, hidden properties included, so a copy of the request, the
-// errors of an AggregateError or a cause that loops cannot keep the signature out of sight.
-function expectNoSignedLink(error: unknown) {
-  const seen = new Set<unknown>()
-  const visit = (value: unknown) => {
-    if (typeof value === "string") {
-      for (const secret of [uploadSignature, readSignature, sessionToken, decodedSessionToken]) {
-        expect(value).not.toContain(secret)
-      }
-      return
-    }
-    if (value === null || (typeof value !== "object" && typeof value !== "function")) return
-    if (seen.has(value)) return
-    seen.add(value)
-    for (const key of Reflect.ownKeys(value)) visit((value as Record<PropertyKey, unknown>)[key])
-  }
-  visit(error)
 }
 
 // V8 writes the stack the first time it is read, with the message of that moment, so reading it
@@ -165,15 +93,6 @@ function mutualCauses(): Error {
   const first = new Error("fetch failed")
   first.cause = new Error(`socket closed for ${uploadUrl}`, { cause: first })
   return first
-}
-
-async function rejectionOf(promise: Promise<unknown>): Promise<FileTransferError> {
-  const error = await promise.then(
-    () => undefined,
-    (reason: unknown) => reason,
-  )
-  expect(error).toBeInstanceOf(FileTransferError)
-  return error as FileTransferError
 }
 
 afterEach(() => {
@@ -381,6 +300,35 @@ describe("files.upload", () => {
       expect(transport.requests.slice(1)).toEqual([
         { path: `/api/v1/files/${fileId}`, options: { method: "DELETE" } },
       ])
+    },
+  )
+
+  it.each<[string, () => Promise<void>]>([
+    ["rejects", () => Promise.reject(new Error(`cancel failed for ${uploadUrl}`))],
+    [
+      "throws",
+      () => {
+        throw new Error(`cancel failed for ${uploadUrl}`)
+      },
+    ],
+    ["never settles", () => new Promise<void>(() => undefined)],
+  ])(
+    "keeps the storage refusal and deletes the pending file when cancelling its body %s",
+    async (_label, cancel) => {
+      const transport = new QueueTransport([fileUpload, undefined])
+      const refusal: FilesFetchResponse = { ...answered(403), body: { cancel } }
+      const files = createFilesModule(transport, { fetch: storage(refusal).fetch })
+
+      const error = await rejectionOf(
+        files.upload(namedFile("hello", "notes.txt", "text/plain"), {
+          kind: "TEMPORARY",
+          visibility: "PRIVATE",
+        }),
+      )
+
+      expect(error).toMatchObject({ step: "send", fileId, status: 403, cleanedUp: true })
+      expect(transport.requests.map(({ options }) => options.method)).toEqual(["POST", "DELETE"])
+      expectNoSignedLink(error)
     },
   )
 

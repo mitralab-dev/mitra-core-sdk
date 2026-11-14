@@ -17,7 +17,8 @@ Functions SDKs expose, over the Data Manager files API (mitra-data-manager#442, 
   `download(fileId)` asks for a read link and returns the content as a `Blob`. Both reach storage
   through the new `files.fetch` option, or `globalThis.fetch`, never through the `Transport`, so
   the platform token does not go to storage, and redirects are refused. `files.fetch` must not add
-  `Authorization` or other headers: the link is already the credential.
+  `Authorization` or other headers: the link is already the credential. A response body the module
+  does not read is cancelled through `FilesFetchResponse.body`, so the connection is not held.
 - `upload` and `download` take a `signal` that aborts only the transfer of the bytes with storage;
   the `Transport` takes none, so the API calls run to the end. An abort rejects with
   `signal.reason`, as fetch does, not with `FileTransferError`, and a signal already aborted
