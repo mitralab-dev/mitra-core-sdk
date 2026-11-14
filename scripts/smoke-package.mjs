@@ -31,6 +31,7 @@ try {
   const installedPackage = join(consumerDirectory, "node_modules", "@mitralab.io", "sdk-core")
   validateContractCorpus(join(installedPackage, "contracts"))
   const source = `
+import { createFilesModule, FileTransferError, type FileMetadata, type FileReadUrlItem, type FilesFetch, type FilesModule } from "@mitralab.io/sdk-core"
 import { createAiProvidersModule, type AiProviders, type AiProvidersModule, type IncludedAiQuota, type IncludedAiQuotaWindow, type ManagedAiProfile, type OpencodeAiProvider } from "@mitralab.io/sdk-core"
 import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentPlan, type AgentPlanStep, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
@@ -87,6 +88,19 @@ const readManagedProfile = async (): Promise<ManagedAiProfile | null> =>
 const quotaOf = (providers: AiProviders): IncludedAiQuota | null => providers.includedAiQuota
 const dayOf = (quota: IncludedAiQuota): IncludedAiQuotaWindow | undefined => quota.windows.day
 const opencodeOf = (providers: AiProviders): OpencodeAiProvider => providers.opencode
+const storageFetch: FilesFetch = fetch
+const files: FilesModule = createFilesModule(transport, { fetch: storageFetch })
+const uploadFile = (blob: Blob): Promise<FileMetadata> => core.files.upload(blob, { kind: "TEMPORARY", visibility: "PRIVATE" })
+const linkOf = (item: FileReadUrlItem): string | null => ("url" in item ? item.url : null)
+const failedStepOf = (error: unknown): string | undefined => (error instanceof FileTransferError ? error.step : undefined)
+const cleanedUpOf = (error: unknown): boolean | undefined => (error instanceof FileTransferError ? error.cleanedUp : undefined)
+const downloadUntil = (signal: AbortSignal): Promise<Blob> => files.download("file-1", { signal })
+void cleanedUpOf
+void downloadUntil
+void files
+void uploadFile
+void linkOf
+void failedStepOf
 void readAiProviders
 void readManagedProfile
 void quotaOf
@@ -191,6 +205,12 @@ const aiProviders: core.AiProvidersModule = core.createAiProvidersModule(transpo
 const readAiProviders = (): Promise<core.AiProviders> => client.aiProviders.get()
 const readManagedProfile = async (): Promise<core.ManagedAiProfile | null> =>
   (await aiProviders.get()).managedAiProfile ?? null
+const files: core.FilesModule = core.createFilesModule(transport, { fetch })
+const uploadFile = (blob: Blob): Promise<core.FileMetadata> => client.files.upload(blob, { kind: "PERMANENT", visibility: "APP" })
+const failedFileOf = (error: unknown): string | undefined => (error instanceof core.FileTransferError ? error.fileId : undefined)
+void files
+void uploadFile
+void failedFileOf
 void readAiProviders
 void readManagedProfile
 const readOlderMessages = (): Promise<core.Page<core.AgentMessage>> =>

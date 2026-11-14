@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.3.10
+
+This release includes the `files` module (#154), the common base of the app files the platform and
+Functions SDKs expose, over the Data Manager files API (mitra-data-manager#442, RFC #1452).
+
+- Added `files` to `createSdkCore`, on the `dataManager` transport, and the standalone
+  `createFilesModule` factory: `requestUpload`, `confirmUpload`, `getUrl`, `getUrls` (1 to 100 ids,
+  a file the caller cannot read comes back with `errorCode` instead of failing the batch), `get`
+  and `delete`.
+- `upload(blob, options)` requests the upload, sends the bytes to the signed link with the method
+  and headers the API returned, and confirms; it resolves with the `READY` file. Content without
+  a type is declared as `application/octet-stream`; a `Blob` that is not a `File` needs `name`.
+  `download(fileId)` asks for a read link and returns the content as a `Blob`. Both reach storage
+  through the new `files.fetch` option, or `globalThis.fetch`, never through the `Transport`, so
+  the platform token does not go to storage, and redirects are refused. `files.fetch` must not add
+  `Authorization` or other headers: the link is already the credential.
+- `upload` and `download` take a `signal` that aborts only the transfer of the bytes with storage;
+  the `Transport` takes none, so the API calls run to the end. An abort rejects with
+  `signal.reason`, as fetch does, not with `FileTransferError`, and a signal already aborted
+  rejects before any request. The transfer has no deadline of its own; `AbortSignal.timeout(ms)`
+  gives it one.
+- When the bytes do not reach storage (network failure, storage error status or abort), `upload`
+  deletes the `PENDING` file, best effort, so a retrying client does not use up its pending
+  uploads. Any failed send deletes it, a `412` or a lost response included: `upload` does not try
+  to confirm first, and the caller uploads again. A failed confirmation deletes nothing: the
+  bytes may already be in storage, and the confirmation can be repeated.
+- Added `FileTransferError`: a failure after the upload request (`send`, `confirm`) or of the
+  download from storage (`download`) carries the step, the `fileId`, the storage status when it
+  answered, a `cause` and `cleanedUp`, true when a failed send deleted the `PENDING` file. In
+  `send` and `download` the `cause` is never the fetch error itself but a new `Error` with its
+  name, message, stack and text `code`, with the signed link, its query and each long query value,
+  raw or decoded, cut out, and its causes rebuilt the same way up to five levels; in `confirm` it
+  is the `Transport` error.
+  A failed delete never replaces the send failure. Messages carry the `fileId`, never the signed
+  link.
+- Exported the contract types `FileMetadata`, `FileKind`, `FileVisibility`, `FileStatus`,
+  `FileCreator`, `FileUploadInput`, `FileUpload`, `FileReadUrlOptions`, `FileReadUrl`,
+  `FileReadUrlItem` and `FileReadUrls`, and `FilesModule`, `FilesModuleOptions`,
+  `FileUploadOptions`, `FileDownloadOptions`, `FilesFetch`, `FilesFetchResponse`,
+  `FileTransferStep` and `FileTransferErrorDetails`.
+
 ## 0.3.9
 
 This release includes the agent session's history reread fix (#148): a reread no longer drops the
