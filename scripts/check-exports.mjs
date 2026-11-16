@@ -47,6 +47,7 @@ const expectedRuntimeExports = {
   expectPage: "function",
   expectStringArray: "function",
   FileTransferError: "function",
+  isAgentTurnEvent: "function",
   isWorkspaceSession: "function",
   readTokenAppId: "function",
   readTokenExpiry: "function",

@@ -261,7 +261,7 @@ describe("Agent direct channel", () => {
 
     await expect(result).rejects.toEqual(new AgentTaskTurnError("Plan limit reached", "PLAN_LIMIT"))
     await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(errors).toEqual([{ code: "PLAN_LIMIT", error: "Plan limit reached" }])
+    expect(errors).toEqual([{ code: "PLAN_LIMIT", error: "Plan limit reached", compactions: [] }])
     expect(accepted).not.toHaveBeenCalled()
     expect(tasks.sendInput).not.toHaveBeenCalled()
     expect(session.status).toBe("idle")

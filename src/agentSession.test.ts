@@ -10,6 +10,7 @@ import type {
   AgentTaskEventSource,
   AgentTaskSession,
 } from "./agentSession"
+import { createAgentTasksModule } from "./modules/agentTasks"
 import type { AgentTasksModule } from "./modules/agentTasks"
 import type { AgentMessage, AgentTask, AgentTaskEvent, Page } from "./types"
 
@@ -180,6 +181,7 @@ describe("Agent task session", () => {
       task: TASK,
       content: "Hello world",
       reason: "endTurn",
+      compactions: [],
     })
     expect(session.status).toBe("idle")
     expect(session.content).toBe("Hello world")
@@ -283,6 +285,20 @@ describe("Agent task session", () => {
       ["task-1", { type: "message", content: "hi", clientMessageId: id }],
     ])
     expect(source.taskIds).toEqual([])
+  })
+
+  it("opens a chat whose task carries a turn block this client cannot read", async () => {
+    const request = vi.fn(async () => ({ ...TASK, turn: { state: 7, lastTurn: "none" } }))
+    const { get } = createAgentTasksModule({ request } as never)
+    const manager = createAgentTaskSessionManager({
+      tasks: createTasks({ get }),
+      eventSource: new FakeEventSource(),
+    })
+
+    const session = manager.session({ taskId: "task-1" })
+
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    expect(session.task).toEqual(TASK)
   })
 
   it("rejects a sendAndWait whose session reopened by task id closes while it opens, after handing it over", async () => {
@@ -2184,7 +2200,7 @@ describe("Agent turn usage", () => {
     source.emit(event("textDelta", { text: "Done" }))
     source.emit(event("stepFinish", { reason: "endTurn", usage }))
 
-    const expected = { task: TASK, content: "Done", reason: "endTurn", usage }
+    const expected = { task: TASK, content: "Done", reason: "endTurn", usage, compactions: [] }
     await expect(result).resolves.toEqual(expected)
     expect(ended).toEqual([expected])
   })
@@ -2260,7 +2276,7 @@ describe("Agent turn usage", () => {
     source.emit(event("stepFinish", { reason: "endTurn" }))
 
     const turn = await result
-    expect(turn).toEqual({ task: TASK, content: "Done", reason: "endTurn" })
+    expect(turn).toEqual({ task: TASK, content: "Done", reason: "endTurn", compactions: [] })
     expect(turn).not.toHaveProperty("usage")
   })
 
@@ -2644,5 +2660,249 @@ describe("Agent queue without the box channel", () => {
         "Failed to edit the queued Agent message: The Agent queued-run.edit was not sent: the box channel is not connected right now.",
       ]),
     )
+  })
+})
+
+describe("Agent context compaction", () => {
+  const compaction = {
+    trigger: "auto",
+    tokensBefore: 27_445,
+    tokensAfter: 1_192,
+    at: "2026-11-11T21:55:00.000Z",
+  }
+  const turn = { lifecycle: { turnId: "turn-1" } }
+
+  async function startTurn() {
+    const created = createSession()
+    const result = created.session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(created.tasks.sendInput).toHaveBeenCalledOnce())
+    return { ...created, result }
+  }
+
+  it("emits contextCompacted for the box frame, which still comes as raw", async () => {
+    const { session, source, result } = await startTurn()
+    const compacted: unknown[] = []
+    const raw: string[] = []
+    session.on("contextCompacted", (value) => compacted.push(value))
+    session.on("raw", ({ type }) => raw.push(type))
+
+    source.emit({
+      ...event("contextCompacted", { itemId: "c-1", ...compaction, ...turn }),
+      sequence: 4,
+    })
+    source.emit(event("contextCompacted", { itemId: "c-2", trigger: "manual", ...turn }))
+    source.emit(event("stepFinish", { reason: "stop", ...turn }))
+    await result
+
+    expect(compacted).toEqual([
+      { ...compaction, itemId: "c-1", turnId: "turn-1", sequence: 4 },
+      {
+        trigger: "manual",
+        tokensBefore: null,
+        tokensAfter: null,
+        at: null,
+        itemId: "c-2",
+        turnId: "turn-1",
+      },
+    ])
+    expect(raw).toEqual(["contextCompacted", "contextCompacted", "stepFinish"])
+  })
+
+  it("passes a trigger it does not know and drops a frame that names none", async () => {
+    const { session, source, result } = await startTurn()
+    const triggers: string[] = []
+    session.on("contextCompacted", ({ trigger }) => triggers.push(trigger))
+
+    source.emit(event("contextCompacted", { ...compaction, trigger: "scheduled", ...turn }))
+    source.emit(event("contextCompacted", { tokensBefore: 10, ...turn }))
+    source.emit(event("stepFinish", { reason: "stop", ...turn }))
+    await result
+
+    expect(triggers).toEqual(["scheduled"])
+  })
+
+  it("puts the compactions the stepFinish lists in turnEnd and sendAndWait", async () => {
+    const { session, source, result } = await startTurn()
+    const ended: unknown[] = []
+    session.on("turnEnd", (value) => ended.push(value))
+    const manual = { trigger: "manual", tokensBefore: null, tokensAfter: null, at: null }
+
+    source.emit(event("contextCompacted", { itemId: "c-1", ...compaction, ...turn }))
+    source.emit(event("textDelta", { text: "Done", ...turn }))
+    source.emit(
+      event("stepFinish", {
+        reason: "stop",
+        compactions: [compaction, { trigger: "manual", tokensBefore: "many" }, 42, { at: "x" }],
+        ...turn,
+      }),
+    )
+
+    const expected = {
+      task: TASK,
+      content: "Done",
+      reason: "stop",
+      turnId: "turn-1",
+      compactions: [compaction, manual],
+    }
+    await expect(result).resolves.toEqual(expected)
+    expect(ended).toEqual([expected])
+  })
+
+  it("takes the turn's list from the frame that ended it, not from the frames heard", async () => {
+    const { source, result } = await startTurn()
+
+    source.emit(event("contextCompacted", { itemId: "c-1", ...compaction, ...turn }))
+    source.emit(event("stepFinish", { reason: "stop", ...turn }))
+
+    await expect(result).resolves.toMatchObject({ compactions: [] })
+  })
+
+  it("keeps a subagent's compaction out of the turn and names the tool that spawned it", async () => {
+    const { session, source, result } = await startTurn()
+    const compacted: unknown[] = []
+    session.on("contextCompacted", (value) => compacted.push(value))
+
+    source.emit(
+      event("contextCompacted", {
+        itemId: "c-9",
+        ...compaction,
+        parentToolId: "tool-1",
+        lifecycle: { turnId: "child-1" },
+      }),
+    )
+    source.emit(event("stepFinish", { reason: "stop", ...turn }))
+
+    await expect(result).resolves.toMatchObject({ reason: "stop", compactions: [] })
+    expect(compacted).toEqual([
+      { ...compaction, itemId: "c-9", turnId: "child-1", parentToolId: "tool-1" },
+    ])
+  })
+
+  it("hands the compactions of a turn the box ends with an error to the error", async () => {
+    const { session, source, result } = await startTurn()
+    const errors: unknown[] = []
+    session.on("error", (value) => errors.push(value))
+
+    source.emit(
+      event("error", { message: "The agent turn failed", compactions: [compaction], ...turn }),
+    )
+
+    await expect(result).rejects.toMatchObject({
+      name: "AgentTaskTurnError",
+      message: "The agent turn failed",
+      compactions: [compaction],
+    })
+    expect(errors).toEqual([{ error: "The agent turn failed", compactions: [compaction] }])
+  })
+
+  it("sets an empty list on the error event and on the error of a turn that had none", async () => {
+    const { session, source, result } = await startTurn()
+    const errors: unknown[] = []
+    session.on("error", (value) => errors.push(value))
+
+    source.emit(event("error", { code: "INTERNAL_ERROR", message: "Failed", ...turn }))
+
+    await expect(result).rejects.toMatchObject({ code: "INTERNAL_ERROR", compactions: [] })
+    expect(errors).toEqual([{ code: "INTERNAL_ERROR", error: "Failed", compactions: [] }])
+  })
+
+  it("does not emit again the compaction of a turn that already ended here", async () => {
+    const { session, source, result } = await startTurn()
+    const compacted: unknown[] = []
+    session.on("contextCompacted", (value) => compacted.push(value))
+
+    source.emit(event("stepFinish", { reason: "stop", compactions: [compaction], ...turn }))
+    await result
+    source.emit(event("contextCompacted", { itemId: "c-1", ...compaction, ...turn }))
+
+    expect(compacted).toEqual([])
+  })
+
+  it("puts the compactions an interrupted stepFinish lists in the stopped turn", async () => {
+    const { session, source, result } = await startTurn()
+
+    await session.cancel()
+    source.emit(
+      event("stepFinish", {
+        reason: "interrupted",
+        compactions: [compaction],
+        lifecycle: { turnId: "turn-1", terminal: true, interruptTerminal: true },
+      }),
+    )
+
+    await expect(result).resolves.toMatchObject({
+      reason: "interrupted",
+      compactions: [compaction],
+    })
+  })
+
+  it("does not emit again a compaction of the running turn the stream replays after a drop", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([closing("answer", "Done"), oldMessage]))
+    const { session, source } = createSession(tasks)
+    const result = session.sendAndWait("Analyze")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    const compacted: unknown[] = []
+    session.on("contextCompacted", ({ itemId }) => compacted.push(itemId))
+    const sequenced = (type: string, payload: object, sequence: number): AgentTaskEvent => ({
+      ...event(type, { ...payload, ...turn }),
+      sequence,
+    })
+
+    source.emit(sequenced("stepStart", {}, 1), 0)
+    source.emit(sequenced("contextCompacted", { itemId: "c-1", ...compaction }, 2), 0)
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(sequenced("contextCompacted", { itemId: "c-1", ...compaction }, 2), 1)
+    source.emit(sequenced("contextCompacted", { itemId: "c-2", ...compaction }, 3), 1)
+    source.emit(sequenced("stepFinish", { reason: "stop" }, 4), 1)
+    await result
+
+    expect(compacted).toEqual(["c-1", "c-2"])
+  })
+
+  it("closes a turn found only in the history with no compactions", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([closing("new", "TM-OK"), oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("long turn")
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+
+    source.disconnect(new Error("network"), 0)
+
+    const ended = await result
+    expect(ended).toMatchObject({ content: "TM-OK", reason: "reconciled" })
+    expect(ended.compactions).toEqual([])
+  })
+
+  it("keeps the stepFinish compactions when a recovered turn resolves from the persisted message", async () => {
+    const oldMessage = message("old", "AGENT", "old answer")
+    const finalMessage = message("final", "AGENT", "complete persisted answer")
+    const tasks = createTasks()
+    tasks.listMessages
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValueOnce(page([oldMessage]))
+      .mockResolvedValue(page([finalMessage, oldMessage]))
+    const source = new FakeEventSource()
+    const { session } = createSession(tasks, source)
+    const result = session.sendAndWait("recover terminal", { timeoutMs: 8_000 })
+    await vi.waitFor(() => expect(tasks.sendInput).toHaveBeenCalledOnce())
+    source.disconnect(new Error("network"), 0)
+    await vi.waitFor(() => expect(source.taskIds).toHaveLength(2))
+    source.emit(event("stepFinish", { reason: "endTurn", compactions: [compaction] }), 1)
+
+    await expect(result).resolves.toMatchObject({
+      content: "complete persisted answer",
+      compactions: [compaction],
+    })
   })
 })
