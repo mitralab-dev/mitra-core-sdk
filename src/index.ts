@@ -58,6 +58,8 @@ export {
   defaultSdkCoreErrorFactory,
 } from "./errors"
 export type { SdkCoreErrorFactory } from "./errors"
+export { FileTransferError } from "./fileTransferError"
+export type { FileTransferErrorDetails, FileTransferStep } from "./fileTransferError"
 export {
   API_KEY_EXCHANGE_PATH,
   appAccessTokenPath,
@@ -90,6 +92,15 @@ export { createDataSourcesModule } from "./modules/dataSources"
 export type { DataSourcesModule } from "./modules/dataSources"
 export { createEntitiesModule } from "./modules/entities"
 export type { EntitiesModule, EntitiesProxy } from "./modules/entities"
+export { createFilesModule } from "./modules/files"
+export type {
+  FileDownloadOptions,
+  FilesFetch,
+  FilesFetchResponse,
+  FilesModule,
+  FilesModuleOptions,
+  FileUploadOptions,
+} from "./modules/files"
 export { createFunctionsModule } from "./modules/functions"
 export type {
   EmptyFunctionInput,
@@ -204,6 +215,17 @@ export type {
   EntityListOptions,
   EntityListResponse,
   EntityTable,
+  FileCreator,
+  FileKind,
+  FileMetadata,
+  FileReadUrl,
+  FileReadUrlItem,
+  FileReadUrlOptions,
+  FileReadUrls,
+  FileStatus,
+  FileUpload,
+  FileUploadInput,
+  FileVisibility,
   FunctionBulkCreateInput,
   FunctionBulkDeleteInput,
   FunctionBulkDeleteResult,

@@ -17,6 +17,7 @@ import { createContextModule, type ContextModule } from "./modules/context"
 import { createCustomQueriesModule, type CustomQueriesModule } from "./modules/customQueries"
 import { createDataSourcesModule, type DataSourcesModule } from "./modules/dataSources"
 import { createEntitiesModule, type EntitiesProxy } from "./modules/entities"
+import { createFilesModule, type FilesModule, type FilesModuleOptions } from "./modules/files"
 import {
   createFunctionsModule,
   type FunctionsModule,
@@ -69,6 +70,7 @@ export interface SdkCoreOptions {
   /** Resolves the app fixed by the concrete client without inspecting tokens in core. */
   getAppId?: () => string | undefined
   functions?: FunctionsModuleOptions
+  files?: FilesModuleOptions
   errors?: SdkCoreErrorFactory
 }
 
@@ -84,6 +86,7 @@ export interface SdkCore {
   readonly customQueries: CustomQueriesModule
   readonly dataSources: DataSourcesModule
   readonly entities: EntitiesProxy
+  readonly files: FilesModule
   readonly functions: FunctionsModule
   readonly functionsAdmin: FunctionsAdminModule
   readonly imports: ImportsModule
@@ -136,6 +139,7 @@ export function createSdkCore(options: SdkCoreOptions): SdkCore {
     customQueries: createCustomQueriesModule(options.transports.dataManager, errors),
     dataSources: createDataSourcesModule(options.transports.dataManager, errors),
     entities: createEntitiesModule(options.transports.dataManager, errors),
+    files: createFilesModule(options.transports.dataManager, options.files, errors),
     functions: createFunctionsModule(options.transports.functions, options.functions, errors),
     functionsAdmin,
     imports: createImportsModule(options.transports.dataManager, errors),
