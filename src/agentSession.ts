@@ -30,6 +30,10 @@ import type {
 export { AgentTaskTurnError }
 
 const CANCEL_SAFETY_MS = 10_000
+const DELIVERY_DELAY_MS = 20_000
+// Each read back to a turn's start is a trip to the Copilot: a very long turn stops here with its
+// start missing, and the next `loadOlder` goes on from the oldest row it brought.
+const MAX_TURN_START_READS = 10
 const RECONCILE_DELAY_MS = 1_000
 // About 3 s at the poll interval: the Copilot writes the closing row right after the terminal.
 const ENDED_POLLS_BEFORE_NEWEST = 3
@@ -107,6 +111,13 @@ export interface NewAgentTaskSessionOptions {
 export interface ExistingAgentTaskSessionOptions {
   taskId: string
   transport?: AgentSessionTransport
+  /**
+   * With the session open for this task in `error`, closes it and opens a new one, as a "try
+   * again" does. A session in any other status is returned as is. Without it a failed session
+   * keeps being returned until it is closed, so a screen that asks for the session on every
+   * render does not reopen it in a loop.
+   */
+  reopen?: boolean
 }
 
 export type AgentTaskSessionOptions = NewAgentTaskSessionOptions | ExistingAgentTaskSessionOptions
@@ -390,6 +401,14 @@ export interface AgentTaskSessionEventMap {
    * that does not wait for the answer can close it or return.
    */
   accepted: Record<string, never>
+  /**
+   * A message this session sent did not reach the server within `deliveryDelayMs` of the send
+   * (the network is down, or the server does not answer): `delayed`, then `sent` when it gets
+   * there or `failed` when it cannot go, which also comes as `error`. Only a delayed message has
+   * this event. A delayed message is not dropped and goes out once, so it must not be sent again:
+   * the Copilot does not dedupe by `clientMessageId`, and a second send is a second message.
+   */
+  delivery: { clientMessageId: string; state: "delayed" | "sent" | "failed" }
   cancelled: Record<string, never>
   /** T3's queue of the chat changed: a message entered it, moved, or left it. */
   queueChange: { queue: readonly AgentQueueItem[] }
@@ -492,12 +511,14 @@ export interface AgentTaskSession {
    */
   readonly hasOlder: boolean
   /**
-   * Reads the page before the oldest row `history` holds, with the size `loadHistory` used, and
-   * puts it before `history`, in the box's order. Resolves with the items it added (none when
-   * there is nothing older) and emits `historyLoaded`. A read still running when `history` is
-   * replaced resolves with nothing.
+   * Reads the page before the oldest row `history` holds, with `limit` or else the size
+   * `loadHistory` used, and puts it before `history`, in the box's order. A page that starts in
+   * the middle of a turn is read on back to the person's message that opened it, so `history`
+   * never starts inside a turn. Resolves with the items it added (none when there is nothing
+   * older) and emits `historyLoaded`. A read still running when `history` is replaced resolves
+   * with nothing.
    */
-  loadOlder(): Promise<readonly AgentTimelineItem[]>
+  loadOlder(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
   /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
   /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
@@ -539,6 +560,11 @@ export interface AgentTaskSessionManagerOptions {
   eventSource: AgentTaskEventSource
   /** Where the box channel may live and how to dial it outside a browser. */
   directChannel?: AgentDirectChannelOptions
+  /**
+   * How long a message may take to reach the server before the session emits `delivery` with
+   * `delayed`. 20 s by default: past a cold box, whose channel takes 5 to 10 s to open.
+   */
+  deliveryDelayMs?: number
 }
 
 interface TurnWaiter {
@@ -775,6 +801,12 @@ function hasOlderRows(page: Page<AgentMessage>): boolean {
   return page.page.totalPages > page.page.number + 1
 }
 
+// Rows joined from several reads, as one page that says whether the Copilot has rows before them.
+function pageWithOlder(content: AgentMessage[], older: boolean): Page<AgentMessage> {
+  const size = content.length
+  return { content, page: { size, totalElements: size, totalPages: older ? 2 : 1, number: 0 } }
+}
+
 // A row of the chat itself, of the types the Copilot answers without `kinds=all`: the rows a
 // turn's answer is read from.
 function isChatRow(message: AgentMessage): boolean {
@@ -919,7 +951,12 @@ export function createAgentTaskSessionManager(
     session(requested) {
       if ("taskId" in requested) {
         const current = sessions.get(requested.taskId)
-        if (current && current.status !== "closed") return current
+        if (current && current.status !== "closed") {
+          if (!requested.reopen || current.status !== "error") return current
+          // Its listeners and waiters end here; a message it had not handed over yet still goes
+          // out once, as on any close.
+          current.close()
+        }
       }
       // A business agent's chat that will talk to its box is born there, instead of being moved
       // on the first channel request, which made the first open wait for a boot. The Copilot
@@ -936,6 +973,7 @@ export function createAgentTaskSessionManager(
         tasks: options.tasks,
         eventSource: options.eventSource,
         channel,
+        deliveryDelayMs: options.deliveryDelayMs ?? DELIVERY_DELAY_MS,
         onTaskId: (taskId, value) => sessions.set(taskId, value),
         onClose: (taskId, value) => {
           if (sessions.get(taskId) === value) sessions.delete(taskId)
@@ -958,6 +996,7 @@ interface SessionDependencies {
   tasks: AgentTasksModule
   eventSource: AgentTaskEventSource
   channel: AgentDirectChannel
+  deliveryDelayMs: number
   onTaskId(taskId: string, session: CoreAgentTaskSession): void
   onClose(taskId: string, session: CoreAgentTaskSession): void
 }
@@ -1043,6 +1082,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private channelLog: number | undefined
   private olderRead: { generation: number; promise: Promise<readonly AgentTimelineItem[]> } | null =
     null
+  // Messages sent and not at the server yet, by `clientMessageId`, each with its `delivery` clock.
+  private readonly deliveries = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout> | undefined; delayed: boolean }
+  >()
 
   constructor(
     private readonly options: AgentTaskSessionOptions,
@@ -1187,10 +1231,11 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return this._hasOlder
   }
 
-  loadOlder(): Promise<readonly AgentTimelineItem[]> {
+  loadOlder(options: { limit?: number } = {}): Promise<readonly AgentTimelineItem[]> {
     if (this.olderRead?.generation !== this.historyGeneration) {
       const generation = this.historyGeneration
-      const promise = this.readOlder(generation).finally(() => {
+      const size = options.limit ?? this.historyLimit
+      const promise = this.readOlder(generation, size).finally(() => {
         if (this.olderRead?.promise === promise) this.olderRead = null
       })
       this.olderRead = { generation, promise }
@@ -1198,25 +1243,16 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return this.olderRead.promise
   }
 
-  private async readOlder(generation: number): Promise<readonly AgentTimelineItem[]> {
+  private async readOlder(
+    generation: number,
+    size: number | undefined,
+  ): Promise<readonly AgentTimelineItem[]> {
     const oldest = oldestRowOf(this._history)
     if (!this._taskId || !this._hasOlder || !oldest) return []
-    let page: Page<AgentMessage>
-    try {
-      page = await this.dependencies.tasks.listMessages(this._taskId, {
-        before: oldest.id,
-        ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
-        sort: "createdAt,desc",
-        kinds: "all",
-        include: "plan",
-      })
-    } catch (error) {
-      // A read of a history since replaced resolves with nothing, as its success would.
-      if (generation !== this.historyGeneration || this.isClosed()) return []
-      throw error
-    }
-    if (generation !== this.historyGeneration || this.isClosed()) return []
-    const rows = [...page.content].reverse().map(toAgentTimelineItem)
+    const page = await this.readBefore(oldest.id, size, generation)
+    const whole = page && (await this.backToTurnStart(page, size, generation))
+    if (!whole) return []
+    const rows = [...whole.content].reverse().map(toAgentTimelineItem)
     const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
     const liveComparable =
       this.rowsInChannelLog &&
@@ -1233,10 +1269,67 @@ class CoreAgentTaskSession implements AgentTaskSession {
       taken.add(held)
       return rowOrHeld(held, row, liveComparable)
     })
-    this._hasOlder = hasOlderRows(page)
+    this._hasOlder = hasOlderRows(whole)
     this._history = [...older, ...this._history.filter((item) => !taken.has(item))]
     this.emit("historyLoaded", { history: this.history })
     return older
+  }
+
+  // The rows recorded before `before`, or null once `history` was replaced or the session closed:
+  // a read of a history since replaced resolves with nothing, as its success would.
+  private async readBefore(
+    before: string,
+    size: number | undefined,
+    generation: number,
+  ): Promise<Page<AgentMessage> | null> {
+    try {
+      const page = await this.dependencies.tasks.listMessages(this._taskId!, {
+        before,
+        ...(size !== undefined ? { size } : {}),
+        sort: "createdAt,desc",
+        kinds: "all",
+        include: "plan",
+      })
+      return generation !== this.historyGeneration || this.isClosed() ? null : page
+    } catch (error) {
+      if (generation !== this.historyGeneration || this.isClosed()) return null
+      throw error
+    }
+  }
+
+  // The Copilot pages by piece, so a page can start inside a turn, and without the person's
+  // message that opened it a screen cannot tell the answer from the text between tools (Crew,
+  // 0.3.9). The rows before it are read with the same size until that message, and what the last
+  // read brought from before it is left for the next page. A steer is a person's message too: a
+  // turn steered past a page boundary starts at the steer. Rows carry no turn id to do better.
+  private async backToTurnStart(
+    page: Page<AgentMessage>,
+    size: number | undefined,
+    generation: number,
+  ): Promise<Page<AgentMessage> | null> {
+    let content = page.content
+    let last = page
+    let reads = 0
+    while (hasOlderRows(last) && reads < MAX_TURN_START_READS) {
+      const oldest = content[content.length - 1]
+      if (!oldest || oldest.sender === "USER") break
+      reads++
+      const older = await this.readBefore(oldest.id, size, generation)
+      if (!older) return null
+      // A Copilot before mitra-copilot#549 ignores `before` and answers the newest rows again.
+      const known = new Set(content.map((message) => message.id))
+      if (older.content.some((message) => known.has(message.id))) break
+      last = older
+      const start = older.content.findIndex((message) => message.sender === "USER")
+      if (start >= 0) {
+        const left = start + 1 < older.content.length
+        content = [...content, ...older.content.slice(0, start + 1)]
+        return pageWithOlder(content, left || hasOlderRows(older))
+      }
+      if (older.content.length === 0) break
+      content = [...content, ...older.content]
+    }
+    return content === page.content ? page : pageWithOlder(content, hasOlderRows(last))
   }
 
   // A page that starts at a piece held live, with live pieces before it that no row of the page
@@ -1434,6 +1527,8 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.connection?.close()
     this.connection = null
     this.recoveryGeneration += 1
+    for (const delivery of this.deliveries.values()) clearTimeout(delivery.timer)
+    this.deliveries.clear()
     const closedError = new Error("Agent task session is closed.")
     this.activeWaiter?.reject(closedError)
     this.activeWaiter = undefined
@@ -1469,6 +1564,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     waiter?: TurnWaiter,
   ): void {
     this.sentTexts.set(clientMessageId, prompt)
+    this.watchDelivery(clientMessageId)
     this.dispatching = true
     let handedOver!: () => void
     this.handOff = new Promise<void>((resolve) => {
@@ -1483,6 +1579,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
           this.setStatus("idle")
         }
         return false
+      })
+      .then((sent) => {
+        this.deliveryEnded(clientMessageId, sent ? "sent" : "failed")
+        return sent
       })
       .finally(() => {
         handedOver()
@@ -1620,6 +1720,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       this.strayedSteers.push(steered)
     }
     this.sentTexts.set(steered.clientMessageId, prompt)
+    this.watchDelivery(steered.clientMessageId)
     const input = messageInput(prompt, options)
     this.pendingSteers += 1
     const handed = this.handOff.then(async () => {
@@ -1639,6 +1740,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       .then((admitted) => {
         if (!admitted) {
           this.forgetSteer(steered)
+          this.deliveryEnded(steered.clientMessageId, "failed")
           waiter?.reject(
             steered.refusal ?? new AgentTaskTurnError("The Agent box did not take the message."),
           )
@@ -1650,6 +1752,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       })
       .catch((error: unknown) => {
         this.forgetSteer(steered)
+        this.deliveryEnded(steered.clientMessageId, "failed")
         waiter?.reject(error)
         this.emitSendError(error)
       })
@@ -1811,7 +1914,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
         historyCursor,
       )
       .then((connection) => {
-        if (this.isClosed() || this._status === "error") {
+        // A send from a session in `error` opens the channel its turn needs: dropped, the turn
+        // would run with nothing here to hear it (Crew, 0.3.9).
+        if (this.isClosed() || (this._status === "error" && !this.dispatching)) {
           connection.close()
           return
         }
@@ -2291,6 +2396,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   }
 
   private acceptOnce(id: string): void {
+    this.deliveryEnded(id, "sent")
     if (this.acceptedIds.includes(id)) return
     this.acceptedIds.push(id)
     if (this.acceptedIds.length > 32) this.acceptedIds.shift()
@@ -2864,6 +2970,31 @@ class CoreAgentTaskSession implements AgentTaskSession {
       else options.signal.addEventListener("abort", abortListener, { once: true })
     }
     return waiter
+  }
+
+  // A message waits in silence for whatever it needs before it leaves (the task, the channel, a
+  // read of the history, the box's answer) when the network is down without failing the request
+  // (Crew, 0.3.9). Failing it after a deadline could not stop the request already out, which may
+  // still deliver it, and a send again would be a second message: the screen is told instead.
+  private watchDelivery(id: string): void {
+    const delivery = {
+      timer: undefined as ReturnType<typeof setTimeout> | undefined,
+      delayed: false,
+    }
+    delivery.timer = setTimeout(() => {
+      delivery.timer = undefined
+      delivery.delayed = true
+      this.emit("delivery", { clientMessageId: id, state: "delayed" })
+    }, this.dependencies.deliveryDelayMs)
+    this.deliveries.set(id, delivery)
+  }
+
+  private deliveryEnded(id: string, state: "sent" | "failed"): void {
+    const delivery = this.deliveries.get(id)
+    if (!delivery) return
+    this.deliveries.delete(id)
+    clearTimeout(delivery.timer)
+    if (delivery.delayed) this.emit("delivery", { clientMessageId: id, state })
   }
 
   private emitError(prefix: string, error: unknown): void {
