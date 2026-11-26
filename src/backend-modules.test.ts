@@ -857,6 +857,8 @@ describe("agent and workflow modules", () => {
       kinds: "all",
       include: "plan",
       before: "message-1",
+      thread: "root",
+      parentToolId: "tool-1",
     })
     // Without `kinds` the Copilot answers the rows 0.2.13 read; `all` asks for every row, and
     // `include: "plan"` for the `PLAN` rows on top.
@@ -873,6 +875,8 @@ describe("agent and workflow modules", () => {
       kinds: "all",
       include: "plan",
       before: "message-1",
+      thread: "root",
+      parentToolId: "tool-1",
     })
     expect(taskTransport.requests[3]?.options.body).toEqual({
       agentType: "CODEX",

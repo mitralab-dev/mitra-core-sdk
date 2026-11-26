@@ -583,6 +583,17 @@ export interface AgentMessageListOptions extends PageOptions {
   include?: "plan"
   /** Id of a message: only the rows recorded before it, so the next page back holds still. */
   before?: string
+  /**
+   * `root` asks only for the rows of the chat itself, with every kind, and the page counts only
+   * them: a subagent's rows no longer push the chat out of the newest page. A Copilot without it
+   * ignores it and answers every thread.
+   */
+  thread?: "root"
+  /**
+   * The `toolId` of the tool call that spawned a subagent: only that subagent's rows. A Copilot
+   * without it ignores it and answers every thread.
+   */
+  parentToolId?: string
 }
 
 export type AppColor =

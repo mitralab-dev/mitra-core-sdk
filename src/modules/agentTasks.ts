@@ -157,6 +157,8 @@ export function createAgentTasksModule(
             kinds: options.kinds,
             include: options.include,
             before: options.before,
+            thread: options.thread,
+            parentToolId: options.parentToolId,
           },
         }),
         context,

@@ -12,6 +12,22 @@ All notable changes to this project are documented in this file.
   call again only asks, until `connected: true` or 400 `OAUTH_LOGIN_FAILED` or
   `OAUTH_FLOW_EXPIRED`. Both calls may answer 503: repeat the same call. With the account off they
   answer 400 `OAUTH_NOT_SUPPORTED`.
+- Behavior change: `history` holds only the chat's own thread. A subagent's pieces (its text,
+  reasoning, tools, approvals and questions) no longer enter it, neither from the Copilot nor live;
+  they still reach `subagentDelta`, `subagentTool`, `delta`, `tool` and `raw` as before. A card
+  reads them with the new `session.loadSubagent(toolId, { limit?, before? })`, which resolves with
+  `AgentSubagentHistory` (`items` in the box's order, `hasOlder` and the `before` for the page
+  behind). The tool call that spawned the subagent stays in `history`. Every read of the session's
+  history asks for `thread=root`, so a subagent's rows no longer fill the newest page (on the Crew,
+  47 of 50 rows were a subagent's and the chat opened empty); a Copilot without the parameter
+  answers every thread and the session leaves the subagent's rows out, with the same `history`.
+- Added `thread: "root"` and `parentToolId` to `agentTasks.listMessages`, sent as query
+  parameters: only the chat's rows, or only the rows of the subagent that tool call spawned. A
+  Copilot without them ignores them.
+- The open reads back to the start of the turn, as `loadOlder` does: a `loadHistory` whose page
+  replaces the history is read on back to the person's message, with the same size and limit of
+  reads, so the chat no longer opens inside a turn. A page that reaches the history the session
+  holds is unchanged.
 - Added the `clientMessageId` option to `send` and `sendAndWait`: the message goes out with that
   id instead of a new one, and `send` returns it. It is for a layer that held the message before
   the session and already showed its id, as the platform SDK does while the browser is offline.

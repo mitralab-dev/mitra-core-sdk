@@ -35,6 +35,15 @@ const DELIVERY_DELAY_MS = 20_000
 // start missing, and the next `loadOlder` goes on from the oldest row it brought.
 const MAX_TURN_START_READS = 10
 const RECONCILE_DELAY_MS = 1_000
+// Every read of the chat's history asks for its own thread: a subagent's rows filled the newest
+// page and the chat opened empty (Crew, 0.3.10: 47 of 50 rows). A Copilot that ignores `thread`
+// still answers them, and `rootItemsOf` leaves them out.
+const ROOT_HISTORY = {
+  sort: "createdAt,desc",
+  kinds: "all",
+  include: "plan",
+  thread: "root",
+} as const
 // About 3 s at the poll interval: the Copilot writes the closing row right after the terminal.
 const ENDED_POLLS_BEFORE_NEWEST = 3
 const TURN_TAIL_TYPES: ReadonlySet<string> = new Set([
@@ -358,6 +367,13 @@ export type AgentTimelineItem =
       subagent?: Partial<AgentSubagentFrame>
     } & AgentTimelineItemIdentity)
 
+export interface AgentSubagentHistory {
+  items: readonly AgentTimelineItem[]
+  hasOlder: boolean
+  /** The oldest row read, to pass as `before` for the page before this one; absent on none. */
+  before?: string
+}
+
 export interface AgentTurnResult {
   task: AgentTask
   content: string
@@ -525,6 +541,16 @@ export interface AgentTaskSession {
    * with nothing.
    */
   loadOlder(options?: { limit?: number }): Promise<readonly AgentTimelineItem[]>
+  /**
+   * Reads the pieces of the subagent the tool call `toolId` spawned, which `history` leaves out:
+   * the newest `limit` rows (the Copilot's page size without it), or the ones before `before`.
+   * Resolves with them in the box's order, whether there are older ones, and the `before` that
+   * reads the page before this one.
+   */
+  loadSubagent(
+    toolId: string,
+    options?: { limit?: number; before?: string },
+  ): Promise<AgentSubagentHistory>
   /** Changes the text of a queued message (T3's `queued-run.edit`); only the box channel takes it. */
   editQueueItem(id: string, text: string): void
   /** Takes a message out of the queue (T3's `queued-run.cancel`); only the box channel takes it. */
@@ -940,6 +966,16 @@ export function toAgentTimelineItem(message: AgentMessage): AgentTimelineItem {
   }
 }
 
+function parentToolIdOfItem(item: AgentTimelineItem): string | undefined {
+  return item.kind === "tool" ? item.tool.parentToolId : item.parentToolId
+}
+
+// The items of the chat's own thread: a subagent's pieces are read by `loadSubagent`. Filtered by
+// item, not by row, so the paging still steps over the rows an older Copilot answers.
+function rootItemsOf(messages: readonly AgentMessage[]): AgentTimelineItem[] {
+  return messages.map(toAgentTimelineItem).filter((item) => parentToolIdOfItem(item) === undefined)
+}
+
 function liveAtOf(event: AgentTaskEvent): string {
   return new Date(typeof event.timestamp === "number" ? event.timestamp : Date.now()).toISOString()
 }
@@ -1226,14 +1262,20 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   async loadHistory(options: { limit?: number } = {}): Promise<readonly AgentTimelineItem[]> {
     if (!this._taskId) return []
+    const generation = this.historyGeneration
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       ...(options.limit !== undefined ? { size: options.limit } : {}),
-      sort: "createdAt,desc",
-      kinds: "all",
-      include: "plan",
+      ...ROOT_HISTORY,
     })
     this.historyLimit = options.limit
-    await this.rereadHistory(page)
+    // A page that replaces the history (the open) is read back to the start of its turn, as on
+    // `loadOlder`: opened inside a turn, a screen cannot tell the answer from the text between
+    // tools. A page that reaches the history keeps what is before it. A history replaced during
+    // the read back keeps the newer one.
+    const whole = this.reachesHistory(page)
+      ? page
+      : await this.backToTurnStart(page, options.limit, generation)
+    if (whole) await this.rereadHistory(whole)
     const history = this.history
     this.emit("historyLoaded", { history })
     return history
@@ -1264,7 +1306,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     const page = await this.readBefore(oldest.id, size, generation)
     const whole = page && (await this.backToTurnStart(page, size, generation))
     if (!whole) return []
-    const rows = [...whole.content].reverse().map(toAgentTimelineItem)
+    const rows = rootItemsOf([...whole.content].reverse())
     const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
     const liveComparable =
       this.rowsInChannelLog &&
@@ -1287,6 +1329,32 @@ class CoreAgentTaskSession implements AgentTaskSession {
     return older
   }
 
+  async loadSubagent(
+    toolId: string,
+    options: { limit?: number; before?: string } = {},
+  ): Promise<AgentSubagentHistory> {
+    if (!this._taskId) return { items: [], hasOlder: false }
+    const page = await this.dependencies.tasks.listMessages(this._taskId, {
+      ...(options.limit !== undefined ? { size: options.limit } : {}),
+      ...(options.before !== undefined ? { before: options.before } : {}),
+      sort: "createdAt,desc",
+      kinds: "all",
+      include: "plan",
+      parentToolId: toolId,
+    })
+    // A Copilot that ignores `parentToolId` answers every thread: `before` still steps by row.
+    const items = [...page.content]
+      .reverse()
+      .map(toAgentTimelineItem)
+      .filter((item) => parentToolIdOfItem(item) === toolId)
+    const oldest = page.content[page.content.length - 1]
+    return {
+      items,
+      hasOlder: hasOlderRows(page),
+      ...(oldest === undefined ? {} : { before: oldest.id }),
+    }
+  }
+
   // The rows recorded before `before`, or null once `history` was replaced or the session closed:
   // a read of a history since replaced resolves with nothing, as its success would.
   private async readBefore(
@@ -1298,9 +1366,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
       const page = await this.dependencies.tasks.listMessages(this._taskId!, {
         before,
         ...(size !== undefined ? { size } : {}),
-        sort: "createdAt,desc",
-        kinds: "all",
-        include: "plan",
+        ...ROOT_HISTORY,
       })
       return generation !== this.historyGeneration || this.isClosed() ? null : page
     } catch (error) {
@@ -1362,9 +1428,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
         older = await this.dependencies.tasks.listMessages(this._taskId, {
           before: oldest.id,
           ...(this.historyLimit !== undefined ? { size: this.historyLimit } : {}),
-          sort: "createdAt,desc",
-          kinds: "all",
-          include: "plan",
+          ...ROOT_HISTORY,
         })
       } catch (error) {
         if (generation !== this.historyGeneration || this.isClosed()) return
@@ -1377,10 +1441,15 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.replaceHistory(current)
   }
 
+  private reachesHistory(page: Page<AgentMessage>): boolean {
+    const oldest = rootItemsOf(page.content).pop()
+    return oldest !== undefined && this._history.some((item) => samePiece(item, oldest))
+  }
+
   // Newest first, as the Copilot answers. Once rows before the page were read, a row the history
   // does not hold at all (one the session never heard) is still inside the gap.
   private skipsRows(page: Page<AgentMessage>, extended: boolean): boolean {
-    const rows = page.content.map(toAgentTimelineItem)
+    const rows = rootItemsOf(page.content)
     const first = rows[rows.length - 1]
     if (!first) return false
     const anchor = this._history.findIndex((item) => samePiece(item, first))
@@ -1399,7 +1468,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // `loadOlder` (#145). A page that does not reach the history it already has replaces it.
   private replaceHistory(page: Page<AgentMessage>): void {
     const oldest = oldestRowOf(this._history)?.id
-    const rows = [...page.content].reverse().map(toAgentTimelineItem)
+    const rows = rootItemsOf([...page.content].reverse())
     const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
     const liveComparable =
       this.rowsInChannelLog &&
@@ -1985,9 +2054,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) return
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
-      sort: "createdAt,desc",
-      kinds: "all",
-      include: "plan",
+      ...ROOT_HISTORY,
     })
     this.turnBaselineIds = new Set(page.content.map((message) => message.id))
   }
@@ -1996,9 +2063,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     if (!this._taskId) return false
     const page = await this.dependencies.tasks.listMessages(this._taskId, {
       size: 100,
-      sort: "createdAt,desc",
-      kinds: "all",
-      include: "plan",
+      ...ROOT_HISTORY,
     })
     await this.rereadHistory(page)
     this.emit("historyLoaded", { history: this.history })
@@ -2640,7 +2705,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
     event: AgentTaskEvent,
     payload: Record<string, unknown> | null,
     kind: "text" | "thinking",
-    parentToolId?: string,
   ): void {
     const itemId = typeof payload?.itemId === "string" ? payload.itemId : undefined
     if (itemId === undefined) return
@@ -2657,7 +2721,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         at: liveAtOf(event),
         itemId,
         ...(sequence === undefined ? {} : { sequence }),
-        ...parentToolIdOf(parentToolId),
       }),
       (item) => {
         const held = item.lastSequence ?? item.sequence
@@ -2698,11 +2761,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // An approval or a question T3 asks mid-turn enters where it came, with the frame's payload as
   // it came, as the Copilot records it (`APPROVAL` and `USER_INPUT_REQUEST` rows). It still
   // reaches the app as a `raw` event, as before.
-  private liveRequest(
-    event: AgentTaskEvent,
-    payload: Record<string, unknown> | null,
-    parentToolId?: string,
-  ): void {
+  private liveRequest(event: AgentTaskEvent, payload: Record<string, unknown> | null): void {
     if (!payload) return
     const kind =
       event.type === "approval"
@@ -2724,7 +2783,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
           at: liveAtOf(event),
           ...(sequence === undefined ? {} : { sequence }),
           ...(itemId === undefined ? {} : { itemId }),
-          ...parentToolIdOf(parentToolId),
         }
         return kind === "notification"
           ? { ...item, kind, ...notificationFieldsOf(payload) }
@@ -2777,7 +2835,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
 
   // A child thread's frames are the subagent's conversation: they open no turn and settle no
   // message. Its text and tools still reach `delta`, `content` and `tool` as they did in 0.2.13,
-  // which knew no subagents, so an app that only bumps the version sees what it saw before.
+  // which knew no subagents, so an app that only bumps the version sees what it saw before. None
+  // enters `history`, which holds the chat's own thread as `thread=root` reads it back: the
+  // subagent's pieces come from `loadSubagent`, and its approvals still reach `raw`.
   private handleSubagentFrame(event: AgentTaskEvent, payload: Record<string, unknown>): void {
     const parentToolId = payload.parentToolId as string
     switch (event.type) {
@@ -2788,7 +2848,6 @@ class CoreAgentTaskSession implements AgentTaskSession {
         const kind = event.type === "thinking" ? "thinking" : "text"
         const identity = { ...itemDeltaOf(payload), ...pieceIdentityOf(event, payload) }
         if (kind === "text") this._content += delta
-        this.liveText(event, payload, kind, parentToolId)
         this.emit("delta", { delta, kind, parentToolId, ...identity })
         this.emit("subagentDelta", { parentToolId, delta, kind, ...identity })
         break
@@ -2799,15 +2858,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
           ...toolEventOf(event, payload, event.type === "toolCall" ? "call" : "result"),
           parentToolId,
         }
-        this.liveTool(tool, event)
         this.emit("tool", tool)
         this.emit("subagentTool", tool)
         break
       }
-      case "approval":
-      case "user_input_request":
-        this.liveRequest(event, payload, parentToolId)
-        break
       case "contextCompacted":
         this.emitCompaction(event, payload, parentToolId)
         break

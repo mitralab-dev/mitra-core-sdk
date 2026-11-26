@@ -188,7 +188,8 @@ describe("Crew 1: older history by whole turn", () => {
 
     await session.loadOlder()
 
-    expect(tasks.listMessages).toHaveBeenCalledTimes(3)
+    // The open and the loadOlder each read one page and stop at the first read back.
+    expect(tasks.listMessages).toHaveBeenCalledTimes(4)
   })
 
   it("stops reading back after 10 reads when the turn's start is further away", async () => {
@@ -389,5 +390,138 @@ describe("Crew 3b: a message held before the session", () => {
       ),
     )
     session.close()
+  })
+})
+
+describe("Crew 4: the chat's history without the subagent's rows", () => {
+  // The Copilot with mitra-copilot's `thread=root` and `parentToolId`: each counts and pages only
+  // the rows of its thread. `copilotMessages` is the Copilot before it, which ignores both.
+  function threadMessages(rows: AgentMessage[]) {
+    return vi.fn(async (id: string, options: AgentMessageListOptions = {}) => {
+      const thread =
+        options.parentToolId !== undefined
+          ? rows.filter((r) => r.parentToolId === options.parentToolId)
+          : options.thread === "root"
+            ? rows.filter((r) => r.parentToolId === undefined)
+            : rows
+      return copilotMessages(thread)(id, options)
+    })
+  }
+  const child = (id: string) => row(id, "AGENT", "SUBAGENT_TEXT", { parentToolId: "tool-1" })
+  const spawn = row("spawn", "AGENT", "TOOL_USE", {
+    content: JSON.stringify({ name: "Task", toolId: "tool-1", input: {} }),
+  })
+  // A turn with a subagent of 50 rows: the newest page of 50 has 47 of them and 3 of the chat.
+  const children = Array.from({ length: 50 }, (_, index) => child(`c${index}`))
+  const rows = [
+    row("q", "USER"),
+    spawn,
+    ...children,
+    row("result", "AGENT", "TOOL_USE", {
+      content: JSON.stringify({ name: "Task", toolId: "tool-1", content: "done" }),
+    }),
+    row("summary", "AGENT"),
+    row("end", "AGENT", "TEXT", { usage: { inputTokens: 1, outputTokens: 1 } }),
+  ]
+  const ids = (items: readonly { id: string }[]) => items.map((item) => item.id)
+  const chat = ["q", "spawn", "result", "summary", "end"]
+
+  async function open(listMessages: AgentTasksModule["listMessages"]) {
+    const tasks = createTasks({ listMessages })
+    const source = new FakeEventSource()
+    const session = manager(tasks, source).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    return { session, source, tasks }
+  }
+
+  it("opens a chat whose newest page is 47 subagent rows of 50 with the person's message", async () => {
+    const { session, tasks } = await open(threadMessages(rows))
+
+    expect(tasks.listMessages).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ thread: "root", kinds: "all" }),
+    )
+    expect(ids(session.history)).toEqual(chat)
+    expect(session.history[0]).toMatchObject({ kind: "user" })
+    expect(session.hasOlder).toBe(false)
+  })
+
+  it("gives the same history with a Copilot that ignores thread=root", async () => {
+    const { session } = await open(copilotMessages(rows))
+
+    expect(ids(session.history)).toEqual(chat)
+    expect(session.hasOlder).toBe(false)
+  })
+
+  it("opens at the start of a turn longer than the page, with no subagent", async () => {
+    const turn = (name: string, pieces: number) => [
+      row(`${name}-q`, "USER"),
+      ...Array.from({ length: pieces }, (_, index) => row(`${name}-${index}`, "AGENT")),
+    ]
+    const { session } = await open(copilotMessages([...turn("t1", 3), ...turn("t2", 60)]))
+
+    expect(ids(session.history)[0]).toBe("t2-q")
+    expect(session.history).toHaveLength(61)
+    expect(session.hasOlder).toBe(true)
+  })
+
+  it("keeps the subagent's live pieces out of history, and still emits them", async () => {
+    const { session, source, tasks } = await open(copilotMessages(rows))
+    const subagentDelta = vi.fn()
+    const subagentTool = vi.fn()
+    session.on("subagentDelta", subagentDelta)
+    session.on("subagentTool", subagentTool)
+
+    const frame = (type: string, payload: Record<string, unknown>, sequence: number) =>
+      source.emit({ type, payload: { parentToolId: "tool-1", ...payload }, timestamp: 1, sequence })
+    frame("textDelta", { text: "more", itemId: "c-live" }, 60)
+    frame("thinking", { text: "hmm", itemId: "r-live" }, 61)
+    frame("toolCall", { name: "Read", toolId: "ct-1", itemId: "ct-1", input: {} }, 62)
+    frame("approval", { requestId: "req-1", itemId: "ap-1" }, 63)
+
+    expect(subagentDelta).toHaveBeenCalledTimes(2)
+    expect(subagentTool).toHaveBeenCalledWith(expect.objectContaining({ toolId: "ct-1" }))
+    expect(ids(session.history)).toEqual(chat)
+
+    // A reload with the subagent's rows on the page reads no page back to place them.
+    const reads = tasks.listMessages.mock.calls.length
+    await session.loadHistory()
+    expect(tasks.listMessages.mock.calls.length - reads).toBe(1)
+    expect(ids(session.history)).toEqual(chat)
+  })
+
+  it("reads a subagent's pieces in order, page by page", async () => {
+    const { session, tasks } = await open(threadMessages(rows))
+
+    const newest = await session.loadSubagent("tool-1", { limit: 20 })
+
+    expect(tasks.listMessages).toHaveBeenLastCalledWith("task-1", {
+      size: 20,
+      sort: "createdAt,desc",
+      kinds: "all",
+      include: "plan",
+      parentToolId: "tool-1",
+    })
+    expect(ids(newest.items)).toEqual(ids(children.slice(30)))
+    expect(newest.items[0]).toMatchObject({ kind: "agent", parentToolId: "tool-1" })
+    expect(newest).toMatchObject({ hasOlder: true, before: "c30" })
+
+    const older = await session.loadSubagent("tool-1", { limit: 20, before: newest.before! })
+    expect(ids(older.items)).toEqual(ids(children.slice(10, 30)))
+    const oldest = await session.loadSubagent("tool-1", { limit: 20, before: older.before! })
+    expect(ids(oldest.items)).toEqual(ids(children.slice(0, 10)))
+    expect(oldest.hasOlder).toBe(false)
+  })
+
+  it("keeps only the subagent's pieces from a Copilot that ignores parentToolId", async () => {
+    const { session } = await open(copilotMessages(rows))
+
+    const newest = await session.loadSubagent("tool-1", { limit: 20 })
+
+    // The page is the newest 20 rows of every thread: the chat's 3 are left out.
+    expect(ids(newest.items)).toEqual(ids(children.slice(33)))
+    expect(newest).toMatchObject({ hasOlder: true, before: "c33" })
+    const older = await session.loadSubagent("tool-1", { limit: 20, before: newest.before! })
+    expect(ids(older.items)).toEqual(ids(children.slice(13, 33)))
   })
 })

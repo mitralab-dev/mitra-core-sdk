@@ -904,11 +904,10 @@ describe("Agent task session", () => {
       content: "complete persisted answer",
       reason: "endTurn",
     })
-    // The history the recovery loaded keeps every piece, not only the answer's rows.
+    // The history the recovery loaded keeps every piece of the chat, not only the answer's rows;
+    // the subagent's are `loadSubagent`'s.
     expect(session.history.map((item) => item.kind)).toEqual([
       "agent",
-      "agent",
-      "tool",
       "agent",
       "reasoning",
       "approval",
@@ -1238,6 +1237,7 @@ describe("Agent task session", () => {
       sort: "createdAt,desc",
       kinds: "all",
       include: "plan",
+      thread: "root",
     })
 
     const combined = withAgentTaskSessions(tasks, manager)
@@ -1265,6 +1265,7 @@ describe("Agent task session", () => {
       sort: "createdAt,desc",
       kinds: "all",
       include: "plan",
+      thread: "root",
     })
     expect(session.history).toHaveLength(100)
     expect(session.history[0]).toMatchObject({ text: "message-51" })
@@ -1319,6 +1320,7 @@ describe("Agent older history", () => {
       sort: "createdAt,desc",
       kinds: "all",
       include: "plan",
+      thread: "root",
     })
     expect(tasks.listMessages).toHaveBeenNthCalledWith(4, "task-1", {
       before: "m3",
@@ -1326,6 +1328,7 @@ describe("Agent older history", () => {
       sort: "createdAt,desc",
       kinds: "all",
       include: "plan",
+      thread: "root",
     })
     expect(first.map((item) => item.id)).toEqual(["m3", "m4"])
     expect(second.map((item) => item.id)).toEqual(["m1", "m2"])
@@ -1373,7 +1376,8 @@ describe("Agent older history", () => {
             failOlder = reject
           }),
       )
-      .mockResolvedValueOnce(olderPage(newestFirst(3, 6), 3))
+      // Starting at the person's message, so the reload reads nothing back.
+      .mockResolvedValueOnce(olderPage(newestFirst(2, 6), 2))
       .mockRejectedValueOnce(new Error("current read failed"))
     const session = openSession(tasks)
     await vi.waitFor(() => expect(session.status).toBe("idle"))
@@ -1385,7 +1389,7 @@ describe("Agent older history", () => {
 
     await expect(stale).resolves.toEqual([])
     await expect(session.loadOlder()).rejects.toThrow("current read failed")
-    expect(session.history.map((item) => item.id)).toEqual(["m4", "m5", "m6"])
+    expect(session.history.map((item) => item.id)).toEqual(["m3", "m4", "m5", "m6"])
   })
 
   it("asks nothing when history holds every row or no row of the Copilot", async () => {
@@ -1416,13 +1420,17 @@ describe("Agent older history", () => {
       sequence: 1,
     }
 
-    // `newest` is what the Copilot answers to a page that is not a `before` read.
+    // `newest` is what the Copilot answers to a page that is not a `before` read. The open reads
+    // back to the turn's start; these cases are a history that starts inside the turn anyway (a
+    // turn longer than those reads, or a reread that replaced the history), so the reads back at
+    // the open find nothing and `older` comes only to the reads after it.
     function openRunningTurn(older: AgentMessage[], newest: { page: Page<AgentMessage> }) {
       const tasks = createTasks()
-      tasks.listMessages.mockImplementation(async (_taskId, query) =>
-        query?.before ? olderPage(older) : newest.page,
-      )
       const source = new FakeEventSource()
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return newest.page
+        return source.observers.length > 0 ? olderPage(older) : olderPage([], older.length)
+      })
       const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
         taskId: "task-1",
         transport: "http",
@@ -1713,6 +1721,7 @@ describe("Agent older history", () => {
         sort: "createdAt,desc",
         kinds: "all",
         include: "plan",
+        thread: "root",
       })
       const ids = session.history.map((item) => item.id)
       expect(ids).toEqual(["r1", "r2", "r3", "r4", "a5", "a6", "a7"])
@@ -2125,12 +2134,20 @@ describe("Agent older history", () => {
       sequence: 45,
     }
 
-    function openLongTurn(): { session: AgentTaskSession; source: FakeEventSource } {
+    // `beyondOpen`: a turn longer than the reads back at the open, whose question only a read
+    // after it reaches.
+    function openLongTurn(beyondOpen = false): {
+      session: AgentTaskSession
+      source: FakeEventSource
+    } {
       const tasks = createTasks()
-      tasks.listMessages.mockImplementation(async (_taskId, query) =>
-        query?.before ? olderPage([question]) : olderPage([...turnRows].reverse(), 1),
-      )
       const source = new FakeEventSource()
+      tasks.listMessages.mockImplementation(async (_taskId, query) => {
+        if (!query?.before) return olderPage([...turnRows].reverse(), 1)
+        return beyondOpen && source.observers.length === 0
+          ? olderPage([], 1)
+          : olderPage([question])
+      })
       const session = createAgentTaskSessionManager({ tasks, eventSource: source }).session({
         taskId: "task-1",
         transport: "http",
@@ -2138,8 +2155,18 @@ describe("Agent older history", () => {
       return { session, source }
     }
 
-    it("keeps the question out of the end and in its place once the older rows load", async () => {
+    it("opens with the question in its place, and the stepStart sent again leaves it", async () => {
       const { session, source } = openLongTurn()
+      await vi.waitFor(() => expect(source.observers).toHaveLength(1))
+      source.emit({ ...event("hello", { threadId: "thread-1", lastSequence: 48 }) })
+      source.emit(runningStart)
+
+      expect(session.history.map((item) => item.id)).toEqual(["q", "r1", "r2", "r3"])
+      expect(session.hasOlder).toBe(false)
+    })
+
+    it("keeps the question out of the end and in its place once the older rows load", async () => {
+      const { session, source } = openLongTurn(true)
       await vi.waitFor(() => expect(source.observers).toHaveLength(1))
       source.emit({ ...event("hello", { threadId: "thread-1", lastSequence: 48 }) })
       source.emit(runningStart)
@@ -2150,7 +2177,7 @@ describe("Agent older history", () => {
     })
 
     it("still shows the question of a box whose log started over", async () => {
-      const { session, source } = openLongTurn()
+      const { session, source } = openLongTurn(true)
       await vi.waitFor(() => expect(source.observers).toHaveLength(1))
       source.emit({ ...event("hello", { threadId: "thread-2", lastSequence: 3 }) })
       source.emit({
@@ -2552,6 +2579,7 @@ describe("Agent history item identity", () => {
       sort: "createdAt,desc",
       kinds: "all",
       include: "plan",
+      thread: "root",
     })
     expect(session.history).toEqual([
       { id: "old", kind: "user", text: "Before", at: "2026-01-01T00:00:03Z" },
@@ -2596,35 +2624,6 @@ describe("Agent history item identity", () => {
         subagent: { toolId: "tool-9", subagentId: "sub-1", status: "completed" },
       },
       {
-        id: "sr",
-        kind: "reasoning",
-        text: "Where to look",
-        at: "2026-01-01T00:00:02Z",
-        sequence: 5,
-        boxLog: 2,
-        itemId: "sr-1",
-        parentToolId: "tool-9",
-      },
-      {
-        id: "st",
-        kind: "agent",
-        text: "Found it",
-        at: "2026-01-01T00:00:02Z",
-        sequence: 6,
-        boxLog: 2,
-        itemId: "s-1",
-        parentToolId: "tool-9",
-      },
-      {
-        id: "tc",
-        kind: "tool",
-        tool: { tool: "Read", toolId: "t-1", parentToolId: "tool-9", phase: "call" },
-        at: "2026-01-01T00:00:02Z",
-        sequence: 7,
-        boxLog: 2,
-        itemId: "t-1",
-      },
-      {
         id: "r",
         kind: "reasoning",
         text: "Thought first",
@@ -2645,6 +2644,40 @@ describe("Agent history item identity", () => {
         reason: "stop",
       },
     ])
+    // The subagent's rows are its own items, read apart from the chat's history.
+    await expect(session.loadSubagent("tool-9")).resolves.toMatchObject({
+      items: [
+        {
+          id: "sr",
+          kind: "reasoning",
+          text: "Where to look",
+          at: "2026-01-01T00:00:02Z",
+          sequence: 5,
+          boxLog: 2,
+          itemId: "sr-1",
+          parentToolId: "tool-9",
+        },
+        {
+          id: "st",
+          kind: "agent",
+          text: "Found it",
+          at: "2026-01-01T00:00:02Z",
+          sequence: 6,
+          boxLog: 2,
+          itemId: "s-1",
+          parentToolId: "tool-9",
+        },
+        {
+          id: "tc",
+          kind: "tool",
+          tool: { tool: "Read", toolId: "t-1", parentToolId: "tool-9", phase: "call" },
+          at: "2026-01-01T00:00:02Z",
+          sequence: 7,
+          boxLog: 2,
+          itemId: "t-1",
+        },
+      ],
+    })
   })
 })
 
