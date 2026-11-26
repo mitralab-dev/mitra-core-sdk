@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Added `GOOGLE` to the known values of `CopilotProvider`. Types only: a Gemini API key and a Google account are connected by the
+  existing methods of `agentCredentials` and `agentConnections` (`saveApiKey`, `startOAuth`,
+  `exchangeOAuth`), where the Copilot has them on, and appear in `list`, `listModels` and
+  `providers` like any other provider. Keep the same `scope` on `startOAuth` and `exchangeOAuth`.
+  A new `startOAuth` of the person ends the sign-in before it. `exchangeOAuth` may answer `connected: false`: the code is still being verified, and the same
+  call again only asks, until `connected: true` or 400 `OAUTH_LOGIN_FAILED` or
+  `OAUTH_FLOW_EXPIRED`. Both calls may answer 503: repeat the same call. With the account off they
+  answer 400 `OAUTH_NOT_SUPPORTED`.
 - Added `turn` to `AgentTask` (`AgentTaskTurn`, with `AgentTaskLastTurn`): where the chat's turn
   stands, as `GET /api/v1/tasks/{id}` answers for a chat on an agent box. Optional and nullable:
   absent from the listing, from the writes, from other runtimes and from an older Copilot. A

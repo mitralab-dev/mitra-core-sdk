@@ -1234,7 +1234,7 @@ export interface IntegrationExecution {
   createdAt: string
 }
 
-export type CopilotProvider = "ANTHROPIC" | "OPENAI" | (string & {})
+export type CopilotProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | (string & {})
 
 /** Execution runtime a chat is born on. Absent means the Copilot server default. */
 export type AgentTaskRuntime = "T3" | "RUNNER"

@@ -27,6 +27,7 @@ import type {
   AgentConnection,
   AgentModel,
   AgentTask,
+  CopilotProvider,
   CustomQueryDefinition,
   CustomQuerySummary,
   Transport,
@@ -1316,6 +1317,118 @@ describe("credential scope", () => {
       path: "/api/v1/credentials/OPENAI/api-key",
       options: { method: "PUT", body: { apiKey: "secret" }, params: { scope: "ACCOUNT" } },
     })
+  })
+})
+
+describe("google api key", () => {
+  // CopilotProvider takes any string, so only its named values prove GOOGLE is known.
+  type Known<T> = T extends string ? (string extends T ? never : T) : never
+  const google: Known<CopilotProvider> = "GOOGLE"
+
+  it("saves the key on the person's account and on the app's connection", async () => {
+    const transport = new QueueTransport([undefined, undefined])
+
+    await createAgentCredentialsModule(transport).saveApiKey(google, "gemini-key", {
+      scope: "ACCOUNT",
+    })
+    await createAgentConnectionsModule(transport).saveApiKey("c-1", google, "gemini-key")
+
+    expect(transport.requests).toStrictEqual([
+      {
+        path: "/api/v1/credentials/GOOGLE/api-key",
+        options: { method: "PUT", body: { apiKey: "gemini-key" }, params: { scope: "ACCOUNT" } },
+      },
+      {
+        path: "/api/v1/connections/c-1/providers/GOOGLE/api-key",
+        options: { method: "PUT", body: { apiKey: "gemini-key" } },
+      },
+    ])
+  })
+
+  it("connects a Google account on the person, on the app and on a connection", async () => {
+    const started = { authUrl: "https://accounts.google.test/o/oauth2", state: "opaque" }
+    const code = { code: "4/0A-code", state: "opaque" }
+    const verifying = { connected: false, email: null }
+    const connected = { connected: true, email: null }
+    const transport = new QueueTransport([
+      started,
+      verifying,
+      connected,
+      started,
+      connected,
+      started,
+      connected,
+    ])
+    const credentials = createAgentCredentialsModule(transport)
+    const connections = createAgentConnectionsModule(transport)
+    const account = { scope: "ACCOUNT" } as const
+
+    await expect(credentials.startOAuth(google)).resolves.toEqual(started)
+    await expect(credentials.exchangeOAuth(google, code)).resolves.toEqual(verifying)
+    await expect(credentials.exchangeOAuth(google, code)).resolves.toEqual(connected)
+    await credentials.startOAuth(google, account)
+    await expect(credentials.exchangeOAuth(google, code, account)).resolves.toEqual(connected)
+    await expect(connections.startOAuth("c-1", google)).resolves.toEqual(started)
+    await expect(connections.exchangeOAuth("c-1", google, code)).resolves.toEqual(connected)
+
+    const personal = { provider: "GOOGLE", ...code }
+    const onConnection = "/api/v1/connections/c-1/providers/GOOGLE/oauth"
+    expect(
+      transport.requests.map(({ path, options }) => [path, options.body, options.params]),
+    ).toEqual([
+      ["/api/v1/oauth/start", { provider: "GOOGLE" }, undefined],
+      ["/api/v1/oauth/exchange", personal, undefined],
+      ["/api/v1/oauth/exchange", personal, undefined],
+      ["/api/v1/oauth/start", { provider: "GOOGLE" }, account],
+      ["/api/v1/oauth/exchange", personal, account],
+      [`${onConnection}/start`, undefined, undefined],
+      [`${onConnection}/exchange`, code, undefined],
+    ])
+  })
+
+  it("lists the account, its models and its provider", async () => {
+    const status = {
+      provider: google,
+      connected: true,
+      credentialType: "OAUTH",
+      accountEmail: null,
+      maskedApiKey: null,
+    }
+    const model = {
+      model: "google/gemini-4-neon",
+      name: "Gemini 4 Neon",
+      provider: google,
+      agentType: "GOOGLE_GEMINI_4_NEON",
+      reasoningOptions: ["low", "medium", "high"],
+      providerName: null,
+    }
+    const ready = { provider: google, providerName: null, models: [model], usage: null }
+    const credentials = createAgentCredentialsModule(
+      new QueueTransport([[status], [model], [ready]]),
+    )
+
+    await expect(credentials.list()).resolves.toEqual([status])
+    await expect(credentials.listModels("a-1")).resolves.toEqual([model])
+    await expect(credentials.providers("a-1")).resolves.toEqual([ready])
+  })
+
+  it("passes on the refusal of an account that is off", async () => {
+    const refusal = new Error("OAUTH_NOT_SUPPORTED")
+    const transport: Transport = { request: () => Promise.reject(refusal) }
+
+    await expect(createAgentConnectionsModule(transport).startOAuth("c-1", google)).rejects.toBe(
+      refusal,
+    )
+    await expect(createAgentCredentialsModule(transport).startOAuth(google)).rejects.toBe(refusal)
+  })
+
+  it("passes on the refusal of a blank key", async () => {
+    const refusal = new Error("VALIDATION_FAILED")
+    const transport: Transport = { request: () => Promise.reject(refusal) }
+
+    await expect(
+      createAgentConnectionsModule(transport).saveApiKey("c-1", google, " "),
+    ).rejects.toBe(refusal)
   })
 })
 
