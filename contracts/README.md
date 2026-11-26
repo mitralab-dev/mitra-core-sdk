@@ -24,6 +24,12 @@ publishes.
 
 ## Versions
 
+- `0.3.11` is the `0.3.10` parity surface with the turn state on `AgentTask`, `agentTasks.turnStates`,
+  the chat's own instructions and folder (`instructions`, `folderKey`, `setInstructions`), the
+  compactions on the session and the agent turn hook types, which the parity cases do not cover.
+  Same parity cases; the version exists so a consumer pinning the package can pin a corpus with the
+  same number.
+
 - `0.3.10` is the `0.3.9` parity surface with the `files` module for app files on the Data Manager,
   which the parity cases do not cover. Same parity cases; the version exists so a consumer pinning
   the package can pin a corpus with the same number.

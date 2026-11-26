@@ -2,7 +2,10 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.3.11
+
+This release carries the turn state, the turn hook types and the chat's own instructions and
+folder (mitra-copilot#585 and #589).
 
 - Added `turn` to `AgentTask` (`AgentTaskTurn`, with `AgentTaskLastTurn`): where the chat's turn
   stands, as `GET /api/v1/tasks/{id}` answers for a chat on an agent box. Optional and nullable:
@@ -10,11 +13,12 @@ All notable changes to this project are documented in this file.
   `turn` this version cannot read is treated as absent, with no error, on every method that
   answers a task: the session opens a chat through `get`, and a change in the block must not keep
   a chat from opening. `state` and `status` accept future values (mitra-copilot#585).
-- Added `agentTasks.turnStates(ids)`, backed by `GET /api/v1/tasks/turn-states?taskIds=<id>,<id>` (one comma-separated
-  value): it answers
-  `AgentTaskTurnState[]` (`{ taskId, turn }`, `turn` null for a chat that does not run on an agent
-  box). No ids, no request; the ids go in lower case and a repeated one is sent once; more than
-  100 ids go in requests of 100, one after the other, and the answers are joined as they came. A
+- Added `agentTasks.turnStates(ids)`, backed by
+  `GET /api/v1/tasks/turn-states?taskIds=<id>,<id>` (one comma-separated value): it answers
+  `AgentTaskTurnStateEntry[]` (`{ taskId, turn }`, `turn` null for a chat that does not run on an
+  agent box). An id that is not a UUID is left out before the request, because the Copilot refuses
+  the whole request for one; no ids left, no request. The ids go in lower case and a repeated one
+  is sent once; more than 100 ids go in requests of 100, one after the other, and the answers are joined as they came. A
   request that fails rejects the whole call. An answer that is not a list, or an entry with no
   `taskId`, is refused; an entry whose `turn` cannot be read answers `turn: null`. Optional on
   `AgentTasksModule`, as `channel`, so hand-written modules keep compiling.
@@ -25,8 +29,9 @@ All notable changes to this project are documented in this file.
   is refused with 409 `TASK_INSTRUCTIONS_NEED_A_NEW_CHAT`, unless it was created with a
   `folderKey`; `null` or blank text clears them to `""`. `instructions` is absent on a chat
   created without them (unless created with a `folderKey`) and from the listing; a value that is
-  not text is treated as absent, with no error, as `turn`. A change reaches the box before the next turn, but the conversation under way only uses
-  it after a compaction; send `/compact` to apply it at once. Optional on `AgentTasksModule`, as
+  not text is treated as absent, with no error, as `turn`. The `rename` answer does not carry
+  them either. A change reaches the box before the next turn, but the conversation under way only
+  uses it after a compaction; send `/compact` to apply it at once. Optional on `AgentTasksModule`, as
   `turnStates`.
 - Added the folder chosen at creation (mitra-copilot#589): `AgentTaskCreateInput.folderKey`, sent
   on `POST /api/v1/tasks`, and `AgentTask.folderKey`. Chats created with the same key for the

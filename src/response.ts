@@ -10,7 +10,7 @@ import type {
   AgentTask,
   AgentTaskChannel,
   AgentTaskTurn,
-  AgentTaskTurnState,
+  AgentTaskTurnStateEntry,
   AgentTurnCompaction,
   AgentTurnUsage,
   AgentTurnUsageRequest,
@@ -1403,12 +1403,15 @@ export function expectAgentTaskTurnStates(
   value: unknown,
   context: string,
   errors: SdkCoreErrorFactory = defaultSdkCoreErrorFactory,
-): AgentTaskTurnState[] {
+): AgentTaskTurnStateEntry[] {
   return expectObjectArray<JsonObject>(value, context, errors).map((state, position) => {
     if (typeof state.taskId !== "string") {
       invalidField(`${context} item ${position}`, "taskId", errors)
     }
-    return { ...state, turn: agentTaskTurnOf(state.turn) ?? null } as unknown as AgentTaskTurnState
+    return {
+      ...state,
+      turn: agentTaskTurnOf(state.turn) ?? null,
+    } as unknown as AgentTaskTurnStateEntry
   })
 }
 
