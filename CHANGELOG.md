@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.11
+
+This release carries the turn state, the turn hook types and the chat's own instructions and
+folder (mitra-copilot#585 and #589).
+
 - Added `turn` to `AgentTask` (`AgentTaskTurn`, with `AgentTaskLastTurn`): where the chat's turn
   stands, as `GET /api/v1/tasks/{id}` answers for a chat on an agent box. Optional and nullable:
   absent from the listing, from the writes, from other runtimes and from an older Copilot. A
