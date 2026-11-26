@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Added the `clientMessageId` option to `send` and `sendAndWait`: the message goes out with that
+  id instead of a new one, and `send` returns it. It is for a layer that held the message before
+  the session and already showed its id, as the platform SDK does while the browser is offline.
 - `session.loadOlder({ limit? })` reads by whole turn: a page that starts inside a turn is read on
   back, with the same size, to the person's message that opened it, so a screen gets the start of
   the turn with the page. `limit` is optional; without it the size `loadHistory` used still

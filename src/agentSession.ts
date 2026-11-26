@@ -132,6 +132,12 @@ export interface AgentSendOptions {
    * `resumeQueue`. With no turn running the message starts one.
    */
   mode?: "queue" | "steer"
+  /**
+   * The id to send the message with, in place of a new one: for a layer that held the message
+   * before it reached the session and already showed the person this id. It must not have gone
+   * out before, since the Copilot does not dedupe by it.
+   */
+  clientMessageId?: string
 }
 
 export interface AgentSendAndWaitOptions extends AgentSendOptions {
@@ -156,7 +162,7 @@ export interface AgentBackgroundTask {
   childThreadId?: string
 }
 
-export interface AgentQueueItem extends AgentSendOptions {
+export interface AgentQueueItem extends Omit<AgentSendOptions, "clientMessageId"> {
   /** The `clientMessageId` the message went out with: what `send` returned for it. */
   id: string
   text: string
@@ -1137,7 +1143,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
     this.requireOpen()
     if (!prompt.trim()) return undefined
     if (this.isBusy()) return this.steer(prompt, options)
-    const clientMessageId = newClientMessageId()
+    const clientMessageId = options.clientMessageId || newClientMessageId()
     this.startDispatch(prompt, options, clientMessageId)
     return clientMessageId
   }
@@ -1151,12 +1157,18 @@ class CoreAgentTaskSession implements AgentTaskSession {
       ...(options.agentType ? { agentType: options.agentType } : {}),
       ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
       ...(options.mode ? { mode: options.mode } : {}),
+      ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),
     }
     if (this.isBusy()) {
       this.steer(prompt, sendOptions, waiter)
       return waiter.promise
     }
-    this.startDispatch(prompt, sendOptions, newClientMessageId(), waiter)
+    this.startDispatch(
+      prompt,
+      sendOptions,
+      sendOptions.clientMessageId || newClientMessageId(),
+      waiter,
+    )
     return waiter.promise
   }
 
@@ -1710,7 +1722,7 @@ class CoreAgentTaskSession implements AgentTaskSession {
   // session for a message that asks for another model, which would end that turn.
   private steer(prompt: string, options: AgentSendOptions, waiter?: TurnWaiter): string {
     const steered: SteeredMessage = {
-      clientMessageId: newClientMessageId(),
+      clientMessageId: options.clientMessageId || newClientMessageId(),
       ...(waiter ? { waiter } : {}),
       taken: false,
     }
