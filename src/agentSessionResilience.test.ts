@@ -337,3 +337,57 @@ describe("Crew 3: a send while the network is down", () => {
     expect(delivery).not.toHaveBeenCalled()
   })
 })
+
+describe("Crew 3b: a message held before the session", () => {
+  // The platform SDK holds a message while the browser is offline, before it reaches the session,
+  // and tells the screen its id then: it goes out with that same id when the network is back.
+  it("sends with the id it was given and returns it", async () => {
+    const tasks = createTasks()
+    const session = manager(tasks, new FakeEventSource()).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    expect(session.send("held", { clientMessageId: "held-1" })).toBe("held-1")
+
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenCalledWith("task-1", {
+        type: "message",
+        content: "held",
+        clientMessageId: "held-1",
+      }),
+    )
+  })
+
+  it("sends a sendAndWait with the id it was given", async () => {
+    const tasks = createTasks()
+    const session = manager(tasks, new FakeEventSource()).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+
+    void session.sendAndWait("held", { clientMessageId: "held-2" }).catch(() => undefined)
+
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenCalledWith(
+        "task-1",
+        expect.objectContaining({ content: "held", clientMessageId: "held-2" }),
+      ),
+    )
+    session.close()
+  })
+
+  it("sends a message behind a running turn with the id it was given", async () => {
+    const tasks = createTasks()
+    const session = manager(tasks, new FakeEventSource()).session({ taskId: "task-1" })
+    await vi.waitFor(() => expect(session.status).toBe("idle"))
+    session.send("first")
+    await vi.waitFor(() => expect(session.status).toBe("streaming"))
+
+    expect(session.send("held", { clientMessageId: "held-3" })).toBe("held-3")
+
+    await vi.waitFor(() =>
+      expect(tasks.sendInput).toHaveBeenLastCalledWith(
+        "task-1",
+        expect.objectContaining({ content: "held", clientMessageId: "held-3" }),
+      ),
+    )
+    session.close()
+  })
+})
