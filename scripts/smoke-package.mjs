@@ -33,7 +33,7 @@ try {
   const source = `
 import { createFilesModule, FileTransferError, type FileMetadata, type FileReadUrlItem, type FilesFetch, type FilesModule } from "@mitralab.io/sdk-core"
 import { createAiProvidersModule, type AiProviders, type AiProvidersModule, type IncludedAiQuota, type IncludedAiQuotaWindow, type ManagedAiProfile, type OpencodeAiProvider } from "@mitralab.io/sdk-core"
-import { isAgentTurnEvent, type AgentTaskTurn, type AgentTaskTurnState, type AgentTurnCompaction, type AgentTurnEvent } from "@mitralab.io/sdk-core"
+import { isAgentTurnEvent, type AgentTaskTurn, type AgentTaskTurnStateEntry, type AgentTurnCompaction, type AgentTurnEvent } from "@mitralab.io/sdk-core"
 import { createAgentTaskSessionManager, createSdkCore, withAgentTaskSessions, type AgentMessage, type AgentNotification, type AgentPlan, type AgentPlanStep, type AgentProviderUsage, type AgentReadyProvider, type AgentTaskEventSource, type AgentTaskSession, type AgentTimelineItem, type AgentTurnUsage, type Page, type CustomQueryInput, type FunctionCreateInput, type Tenant, type Transport } from "@mitralab.io/sdk-core"
 const tenant: Tenant = {
   id: "tenant-1",
@@ -144,7 +144,7 @@ void turnPlan
 void onPlan
 void planStepsOf
 const turnOf = async (): Promise<AgentTaskTurn | null> => (await core.agentTasks.get("task-1")).turn ?? null
-const turnStatesOf = async (): Promise<AgentTaskTurnState[]> => (await core.agentTasks.turnStates?.(["task-1"])) ?? []
+const turnStatesOf = async (): Promise<AgentTaskTurnStateEntry[]> => (await core.agentTasks.turnStates?.(["task-1"])) ?? []
 const clearedInstructionsOf = async (): Promise<string | undefined> => (await core.agentTasks.setInstructions?.("task-1", null))?.instructions
 const createdInstructionsOf = async (): Promise<string | undefined> => (await core.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
 const folderKeyOf = async (): Promise<string | undefined> => (await core.agentTasks.create({ agentType: "CLAUDE", folderKey: "crew-bot-1" })).folderKey
@@ -272,7 +272,7 @@ void turnPlan
 void onPlan
 void planStepsOf
 const turnOf = async (): Promise<core.AgentTaskTurn | null> => (await client.agentTasks.get("task-1")).turn ?? null
-const turnStatesOf = async (): Promise<core.AgentTaskTurnState[]> => (await client.agentTasks.turnStates?.(["task-1"])) ?? []
+const turnStatesOf = async (): Promise<core.AgentTaskTurnStateEntry[]> => (await client.agentTasks.turnStates?.(["task-1"])) ?? []
 const clearedInstructionsOf = async (): Promise<string | undefined> => (await client.agentTasks.setInstructions?.("task-1", null))?.instructions
 const createdInstructionsOf = async (): Promise<string | undefined> => (await client.agentTasks.create({ agentType: "CLAUDE", instructions: "You are Ana." })).instructions
 const folderKeyOf = async (): Promise<string | undefined> => (await client.agentTasks.create({ agentType: "CLAUDE", folderKey: "crew-bot-1" })).folderKey

@@ -176,7 +176,7 @@ export type {
   AgentTaskListOptions,
   AgentTaskRuntime,
   AgentTaskTurn,
-  AgentTaskTurnState,
+  AgentTaskTurnStateEntry,
   AgentTurnCompaction,
   AgentTurnUsage,
   AgentTurnUsageRequest,

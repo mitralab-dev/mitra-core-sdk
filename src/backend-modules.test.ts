@@ -441,6 +441,8 @@ const failedIntegrationExecution = {
   source: null,
 }
 
+const chatId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`
+
 describe("apps and public Functions", () => {
   it("covers the Code Studio lifecycle with encoded paths and file semantics", async () => {
     const transport = new QueueTransport([
@@ -1115,31 +1117,57 @@ describe("agent and workflow modules", () => {
 
   it("reads the turn state of several chats in one request", async () => {
     const states = [
-      { taskId: "task-1", turn: agentTaskTurn },
-      { taskId: "task-2", turn: null },
+      { taskId: chatId(1), turn: agentTaskTurn },
+      { taskId: chatId(2), turn: null },
     ]
     const transport = new QueueTransport([states])
     const tasks = createAgentTasksModule(transport)
 
-    await expect(tasks.turnStates?.(["task-1", "task-2", "task-1", "gone"])).resolves.toEqual(
+    // chatId(3) does not exist, so the Copilot leaves it out of the answer.
+    await expect(tasks.turnStates?.([chatId(1), chatId(2), chatId(1), chatId(3)])).resolves.toEqual(
       states,
     )
     expect(transport.requests).toEqual([
       {
         path: "/api/v1/tasks/turn-states",
-        options: { method: "GET", params: { taskIds: "task-1,task-2,gone" } },
+        options: {
+          method: "GET",
+          params: { taskIds: [chatId(1), chatId(2), chatId(3)].join(",") },
+        },
       },
     ])
   })
 
   it("sends an id written in two letter cases once, in lower case", async () => {
+    const upper = "AAAAAAAA-0000-4000-8000-00000000000A"
     const transport = new QueueTransport([[]])
 
-    await createAgentTasksModule(transport).turnStates?.(["Task-A", "task-a", "TASK-B"])
+    await createAgentTasksModule(transport).turnStates?.([upper, upper.toLowerCase(), chatId(2)])
 
     expect(transport.requests.map(({ options }) => options.params)).toEqual([
-      { taskIds: "task-a,task-b" },
+      { taskIds: `${upper.toLowerCase()},${chatId(2)}` },
     ])
+  })
+
+  it("leaves out an id that is not a UUID, which the Copilot would refuse with the whole request", async () => {
+    const transport = new QueueTransport([[{ taskId: chatId(1), turn: null }]])
+    const tasks = createAgentTasksModule(transport)
+
+    await expect(tasks.turnStates?.(["draft-7", "", chatId(1), ` ${chatId(2)}`])).resolves.toEqual([
+      { taskId: chatId(1), turn: null },
+    ])
+    expect(transport.requests.map(({ options }) => options.params)).toEqual([
+      { taskIds: chatId(1) },
+    ])
+  })
+
+  it("asks nothing when no id is a UUID", async () => {
+    const transport = new QueueTransport()
+
+    await expect(createAgentTasksModule(transport).turnStates?.(["draft-7", ""])).resolves.toEqual(
+      [],
+    )
+    expect(transport.requests).toEqual([])
   })
 
   it("asks nothing for an empty list of chats", async () => {
@@ -1150,7 +1178,7 @@ describe("agent and workflow modules", () => {
   })
 
   it("splits more than 100 chats into requests of 100 and joins what each answered", async () => {
-    const ids = Array.from({ length: 250 }, (_, position) => `task-${position}`)
+    const ids = Array.from({ length: 250 }, (_, position) => chatId(position))
     const answer = (taskIds: string[]) => taskIds.map((taskId) => ({ taskId, turn: null }))
     // The Copilot leaves out the chats the caller may not read: here the whole second batch.
     const transport = new QueueTransport([answer(ids.slice(0, 100)), [], answer(ids.slice(200))])
@@ -1166,36 +1194,36 @@ describe("agent and workflow modules", () => {
   })
 
   it.each([
-    ["an object", { taskId: "task-1", turn: null }],
+    ["an object", { taskId: chatId(1), turn: null }],
     ["an entry with no task id", [{ turn: null }]],
   ])("rejects a turn states answer that is %s", async (_shape, response) => {
     const tasks = createAgentTasksModule(new QueueTransport([response]))
 
-    await expect(tasks.turnStates?.(["task-1"])).rejects.toBeInstanceOf(SdkCoreResponseError)
+    await expect(tasks.turnStates?.([chatId(1)])).rejects.toBeInstanceOf(SdkCoreResponseError)
   })
 
   it("answers a null turn for the one entry whose turn it cannot read", async () => {
     const transport = new QueueTransport([
       [
-        { taskId: "task-1", turn: agentTaskTurn },
-        { taskId: "task-2", turn: { state: "IDLE" } },
-        { taskId: "task-3" },
-        { taskId: "task-4", turn: { ...agentTaskTurn, lastTurn: { turnId: 7 } } },
+        { taskId: chatId(1), turn: agentTaskTurn },
+        { taskId: chatId(2), turn: { state: "IDLE" } },
+        { taskId: chatId(3) },
+        { taskId: chatId(4), turn: { ...agentTaskTurn, lastTurn: { turnId: 7 } } },
       ],
     ])
 
     await expect(
-      createAgentTasksModule(transport).turnStates?.(["task-1", "task-2", "task-3", "task-4"]),
+      createAgentTasksModule(transport).turnStates?.([chatId(1), chatId(2), chatId(3), chatId(4)]),
     ).resolves.toEqual([
-      { taskId: "task-1", turn: agentTaskTurn },
-      { taskId: "task-2", turn: null },
-      { taskId: "task-3", turn: null },
-      { taskId: "task-4", turn: null },
+      { taskId: chatId(1), turn: agentTaskTurn },
+      { taskId: chatId(2), turn: null },
+      { taskId: chatId(3), turn: null },
+      { taskId: chatId(4), turn: null },
     ])
   })
 
   it("rejects the whole call when one batch in the middle fails", async () => {
-    const ids = Array.from({ length: 250 }, (_, position) => `task-${position}`)
+    const ids = Array.from({ length: 250 }, (_, position) => chatId(position))
     // The transport has no answer for the second request, so that one fails.
     const transport = new QueueTransport([
       ids.slice(0, 100).map((taskId) => ({ taskId, turn: null })),

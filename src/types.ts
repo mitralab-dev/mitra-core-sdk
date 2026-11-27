@@ -1319,7 +1319,7 @@ export interface AgentTask {
    * unless it was created with a `folderKey`: that one always carries them, `""` or the text its
    * folder already had. Also absent from the listing and from a Copilot that predates them. `""`
    * on a chat whose text was cleared, which can get text again. A value that is not text is left
-   * out, with no error.
+   * out, with no error. Absent from the `rename` answer too, even on a chat that has them.
    */
   instructions?: string
   /**
@@ -1366,7 +1366,7 @@ export interface AgentTaskLastTurn {
 }
 
 /** One chat of `agentTasks.turnStates`; `turn` is null for a chat that does not run on an agent box. */
-export interface AgentTaskTurnState {
+export interface AgentTaskTurnStateEntry {
   taskId: string
   turn: AgentTaskTurn | null
 }
