@@ -1290,7 +1290,10 @@ describe("Agent older history", () => {
     })
   }
 
-  const rows = ["m1", "m2", "m3", "m4", "m5", "m6"].map((id) => message(id, "AGENT", id))
+  // Three turns of two rows, each opened by the person's message.
+  const rows = ["m1", "m2", "m3", "m4", "m5", "m6"].map((id, index) =>
+    message(id, index % 2 === 0 ? "USER" : "AGENT", id),
+  )
   const newestFirst = (from: number, to: number) => rows.slice(from, to).reverse()
 
   it("puts the page before the oldest row in front of history, in order, until the first row", async () => {
