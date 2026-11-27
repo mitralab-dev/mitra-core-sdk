@@ -35,10 +35,10 @@ All notable changes to this project are documented in this file.
   back, with the same size, to the person's message that opened it, so a screen gets the start of
   the turn with the page. `limit` is optional; without it the size `loadHistory` used still
   applies. A steer is a person's message too, so a turn steered past a page boundary starts at the
-  steer. The first page (`loadHistory` and the open) is unchanged: the newest rows, which can
-  start inside a turn. The read back stops when the Copilot ignores `before`, and after 10 reads:
-  a turn longer than that comes without its start, `hasOlder` stays true and the next `loadOlder`
-  goes on from the oldest row it brought.
+  steer. The open reads back the same way (entry above). The read back stops when the Copilot
+  ignores `before`, and after 10 reads: a turn longer than that comes without its start,
+  `hasOlder` stays true and the next `loadOlder` goes on from the oldest row it read, kept or
+  not, so pages a Copilot without `thread=root` fills with a subagent's rows are not read twice.
 - Added `reopen` to `session({ taskId, reopen: true })`: a session in `error` is closed (its
   listeners stop, a pending `sendAndWait` is rejected, a message not handed over yet goes out
   once) and a new one opens. Without it, or with a session in any other status, the same session

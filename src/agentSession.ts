@@ -1114,6 +1114,9 @@ class CoreAgentTaskSession implements AgentTaskSession {
   private openingCursor: AgentHistoryCursor | undefined
   private historyLimit: number | undefined
   private _hasOlder = false
+  // The oldest row read so far, kept or not: a page of a Copilot that ignores `thread=root` can
+  // be all subagent rows, and reading before the oldest kept row would read it again (#162).
+  private olderCursor: string | undefined
   // Moves whenever `history` is replaced, so a `loadOlder` still reading drops what it read.
   private historyGeneration = 0
   // Whether the box the channel follows counts in the log of the history's rows. A box whose hello
@@ -1301,11 +1304,12 @@ class CoreAgentTaskSession implements AgentTaskSession {
     generation: number,
     size: number | undefined,
   ): Promise<readonly AgentTimelineItem[]> {
-    const oldest = oldestRowOf(this._history)
-    if (!this._taskId || !this._hasOlder || !oldest) return []
-    const page = await this.readBefore(oldest.id, size, generation)
+    const before = this.olderCursor ?? oldestRowOf(this._history)?.id
+    if (!this._taskId || !this._hasOlder || !before) return []
+    const page = await this.readBefore(before, size, generation)
     const whole = page && (await this.backToTurnStart(page, size, generation))
     if (!whole) return []
+    this.olderCursor = whole.content[whole.content.length - 1]?.id ?? before
     const rows = rootItemsOf([...whole.content].reverse())
     const rowsLog = [...rows].reverse().find((item) => item.boxLog !== undefined)?.boxLog
     const liveComparable =
@@ -1484,7 +1488,10 @@ class CoreAgentTaskSession implements AgentTaskSession {
         ? []
         : this._history.slice(0, anchor).filter((item) => !rows.some((row) => samePiece(item, row)))
     const replaced = anchor < 0 ? this._history : this._history.slice(anchor)
-    if (anchor < 0) this._hasOlder = hasOlderRows(page)
+    if (anchor < 0) {
+      this._hasOlder = hasOlderRows(page)
+      this.olderCursor = page.content[page.content.length - 1]?.id
+    }
     // The box hands the Copilot its events in batches (200 ms plus the request), so a row read
     // mid-turn can be older than the frames this session already applied to the same piece: the
     // plan the Copilot updates in place went back to its first version (#145).

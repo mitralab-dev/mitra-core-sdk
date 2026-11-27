@@ -513,6 +513,37 @@ describe("Crew 4: the chat's history without the subagent's rows", () => {
     expect(oldest.hasOlder).toBe(false)
   })
 
+  it("goes on past older pages that held only subagent rows, from a Copilot that ignores thread=root", async () => {
+    // Gandalf on #162: the next page was read before the oldest row kept, so a read whose rows
+    // were all a subagent's left the cursor in place and every loadOlder read the same rows.
+    const olderChild = (id: string) => row(id, "AGENT", "SUBAGENT_TEXT", { parentToolId: "tool-0" })
+    const olderSpawn = row("t1-spawn", "AGENT", "TOOL_USE", {
+      content: JSON.stringify({ name: "Task", toolId: "tool-0", input: {} }),
+    })
+    const newest = [
+      row("q2", "USER"),
+      ...Array.from({ length: 49 }, (_, index) => row(`a${index}`, "AGENT")),
+    ]
+    const thread = [
+      row("t1-q", "USER"),
+      olderSpawn,
+      ...Array.from({ length: 30 }, (_, index) => olderChild(`d${index}`)),
+      ...newest,
+    ]
+    const { session } = await open(copilotMessages(thread))
+    expect(ids(session.history)[0]).toBe("q2")
+
+    // Before q2: 2 rows, then 10 reads of 2 back, all of the older subagent.
+    const first = await session.loadOlder({ limit: 2 })
+    expect(first).toEqual([])
+    expect(session.hasOlder).toBe(true)
+
+    const second = await session.loadOlder({ limit: 2 })
+    expect(ids(second)).toEqual(["t1-q", "t1-spawn"])
+    expect(ids(session.history).slice(0, 3)).toEqual(["t1-q", "t1-spawn", "q2"])
+    expect(session.hasOlder).toBe(false)
+  })
+
   it("keeps only the subagent's pieces from a Copilot that ignores parentToolId", async () => {
     const { session } = await open(copilotMessages(rows))
 
