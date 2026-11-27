@@ -123,7 +123,8 @@ interface Piece {
 // The app: one piece per message, per stretch of text or reasoning (by `itemId`, a subagent's
 // under the tool call that spawned it) and per tool (by `toolId`), in the order they came, with a
 // steered message placed at the `sequence` it went in. History items are drawn one per row, as
-// they come.
+// they come. A subagent's pieces are left to its card, which reads them with `loadSubagent`: the
+// history holds only the chat's own thread.
 function pieceKey(kind: string, itemId?: string, parentToolId?: string): string {
   return parentToolId === undefined ? `${kind}:${itemId}` : `${kind}:${parentToolId}/${itemId}`
 }
@@ -194,12 +195,9 @@ function draw(session: AgentTaskSession) {
     const itemId = (payload as { itemId?: string }).itemId
     if (kind) add({ key: `${kind}:${itemId}`, text: "", result: payload })
   })
-  session.on("subagentDelta", ({ delta, kind, itemId, sequence, parentToolId }) => {
-    text(pieceKey(kind === "text" ? "text" : "reasoning", itemId, parentToolId), delta, sequence)
+  session.on("tool", ({ toolId, phase, content, sequence, parentToolId }) => {
+    if (parentToolId === undefined) tool(toolId ?? "", phase, content, sequence)
   })
-  session.on("tool", ({ toolId, phase, content, sequence }) =>
-    tool(toolId ?? "", phase, content, sequence),
-  )
   // The box names the message whose turn starts, with its text: the question is shown there, also
   // when the history does not have it yet.
   session.on("turnStart", ({ clientMessageId, text: said }) => {
@@ -409,9 +407,6 @@ describe("Agent conversation opened in the middle of a run", () => {
       { key: "reasoning:r1", text: "Birds first", result: undefined },
       { key: "text:a1", text: "Hello", result: undefined },
       { key: "tool:tool-1", text: "", result: "Three birds found" },
-      { key: "reasoning:tool-1/c0", text: "Look around", result: undefined },
-      { key: "text:tool-1/s1", text: "Three birds", result: undefined },
-      { key: "tool:ct-1", text: "", result: "ok" },
       { key: `user:${recorded.sent[1]!.id}`, text: "Also cats", result: undefined },
       { key: "text:a2", text: "And cats", result: undefined },
       {
@@ -454,9 +449,11 @@ describe("Agent conversation opened in the middle of a run", () => {
       const app = draw(fresh)
       await vi.waitFor(() => expect(fresh.status).not.toBe("opening"))
       const socket = BoxSocket.instances.at(-1)!
+      // From the chat's own rows: a subagent's rows are not in the history the replay continues.
+      const rootRows = history.filter((row) => row.parentToolId === undefined)
       expect(socket.sent[0], `cut ${cursor}/${logged}`).toEqual({
         type: "replay",
-        fromSequence: Math.max(...history.map((row) => row.lastSequence ?? row.sequence ?? 0)),
+        fromSequence: Math.max(...rootRows.map((row) => row.lastSequence ?? row.sequence ?? 0)),
       })
       for (const frame of recorded.frames.slice(logged)) socket.deliver(frame)
       await vi.waitFor(() => expect(fresh.status).toBe("idle"))
@@ -516,17 +513,13 @@ describe("Agent conversation drawn from the session history alone", () => {
       { key: "reasoning:r1", text: "Birds first" },
       { key: "text:a1", text: "Hello" },
       { key: "tool:tool-1", text: "", result: undefined },
-      { key: "reasoning:tool-1/c0", text: "Look around" },
-      { key: "text:tool-1/s1", text: "Three birds" },
-      { key: "tool:ct-1", text: "", result: "ok" },
       { key: "user:second-id", text: "Also cats" },
       { key: "text:a2", text: "And cats" },
     ])
-    // The call and the result are each an item where it came, as the reload has them.
-    const phases = live.history.flatMap((item) =>
-      item.kind === "tool" && item.tool.toolId === "ct-1" ? [item.tool.phase] : [],
+    // The subagent's own tool, call and result, is not in the history: its card reads it.
+    expect(live.history.some((item) => item.kind === "tool" && item.tool.toolId === "ct-1")).toBe(
+      false,
     )
-    expect(phases).toEqual(["call", "result"])
     live.close()
   })
 
@@ -604,9 +597,6 @@ describe("Agent conversation drawn from the session history alone", () => {
       { key: "reasoning:r1", text: "Birds first" },
       { key: "text:a1", text: "Hello" },
       { key: "tool:tool-1", text: "", result: undefined },
-      { key: "reasoning:tool-1/c0", text: "Look around" },
-      { key: "text:tool-1/s1", text: "Three birds" },
-      { key: "tool:ct-1", text: "", result: "ok" },
       { key: "user:second-id", text: "Also cats" },
       { key: "text:a2", text: "And cats" },
     ]

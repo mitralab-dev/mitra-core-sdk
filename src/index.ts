@@ -29,6 +29,7 @@ export type {
   AgentTaskSessionStatus,
   AgentTasksWithSessions,
   AgentSubagent,
+  AgentSubagentHistory,
   AgentSubagentStatus,
   AgentTimelineItem,
   AgentTimelineItemIdentity,

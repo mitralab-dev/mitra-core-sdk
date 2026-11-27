@@ -2,6 +2,55 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- Added `GOOGLE` to the known values of `CopilotProvider`. Types only: a Gemini API key and a Google account are connected by the
+  existing methods of `agentCredentials` and `agentConnections` (`saveApiKey`, `startOAuth`,
+  `exchangeOAuth`), where the Copilot has them on, and appear in `list`, `listModels` and
+  `providers` like any other provider. Keep the same `scope` on `startOAuth` and `exchangeOAuth`.
+  A new `startOAuth` of the person ends the sign-in before it. `exchangeOAuth` may answer `connected: false`: the code is still being verified, and the same
+  call again only asks, until `connected: true` or 400 `OAUTH_LOGIN_FAILED` or
+  `OAUTH_FLOW_EXPIRED`. Both calls may answer 503: repeat the same call. With the account off they
+  answer 400 `OAUTH_NOT_SUPPORTED`.
+- Behavior change: `history` holds only the chat's own thread. A subagent's pieces (its text,
+  reasoning, tools, approvals and questions) no longer enter it, neither from the Copilot nor live;
+  they still reach `subagentDelta`, `subagentTool`, `delta`, `tool` and `raw` as before. A card
+  reads them with the new `session.loadSubagent(toolId, { limit?, before? })`, which resolves with
+  `AgentSubagentHistory` (`items` in the box's order, `hasOlder` and the `before` for the page
+  behind). The tool call that spawned the subagent stays in `history`. Every read of the session's
+  history asks for `thread=root`, so a subagent's rows no longer fill the newest page (on the Crew,
+  47 of 50 rows were a subagent's and the chat opened empty); a Copilot without the parameter
+  answers every thread and the session leaves the subagent's rows out, with the same `history`.
+- Added `thread: "root"` and `parentToolId` to `agentTasks.listMessages`, sent as query
+  parameters: only the chat's rows, or only the rows of the subagent that tool call spawned. A
+  Copilot without them ignores them.
+- The open reads back to the start of the turn, as `loadOlder` does: a `loadHistory` whose page
+  replaces the history is read on back to the person's message, with the same size and limit of
+  reads, so the chat no longer opens inside a turn. A page that reaches the history the session
+  holds is unchanged.
+- Added the `clientMessageId` option to `send` and `sendAndWait`: the message goes out with that
+  id instead of a new one, and `send` returns it. It is for a layer that held the message before
+  the session and already showed its id, as the platform SDK does while the browser is offline.
+- `session.loadOlder({ limit? })` reads by whole turn: a page that starts inside a turn is read on
+  back, with the same size, to the person's message that opened it, so a screen gets the start of
+  the turn with the page. `limit` is optional; without it the size `loadHistory` used still
+  applies. A steer is a person's message too, so a turn steered past a page boundary starts at the
+  steer. The open reads back the same way (entry above). The read back stops when the Copilot
+  ignores `before`, and after 10 reads: a turn longer than that comes without its start,
+  `hasOlder` stays true and the next `loadOlder` goes on from the oldest row it read, kept or
+  not, so pages a Copilot without `thread=root` fills with a subagent's rows are not read twice.
+- Added `reopen` to `session({ taskId, reopen: true })`: a session in `error` is closed (its
+  listeners stop, a pending `sendAndWait` is rejected, a message not handed over yet goes out
+  once) and a new one opens. Without it, or with a session in any other status, the same session
+  comes back as before.
+- Fixed a `send` from a session in `error`: it closed the channel it had just opened, so the turn
+  ran with nothing to hear it. It now keeps that channel and follows the turn.
+- Added the `delivery` event and the manager option `deliveryDelayMs` (20 s by default): a
+  message that has not reached the server by then emits `delivery` with `state: "delayed"`, then
+  `sent` or `failed`. Only a delayed message has the event. The message is not dropped nor
+  rejected by the deadline and goes out once when the network is back; sending it again would be
+  a second message, since the Copilot does not dedupe by `clientMessageId`.
+
 ## 0.3.11
 
 This release carries the turn state, the turn hook types and the chat's own instructions and

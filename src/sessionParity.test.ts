@@ -80,11 +80,16 @@ describe("Agent session parity with 0.2.13", () => {
     before.forEach((recorded, index) =>
       differences(recorded.payload, now[index]!.payload, `${index}:${recorded.event}`, found),
     )
-    // The one value that changes on purpose: a turn the box announces with `stepStart` starts with
-    // its content clean. 0.2.13 carried the turn before into the turn the agent opened by itself.
+    // The values that change on purpose: a turn the box announces with `stepStart` starts with
+    // its content clean (0.2.13 carried the turn before into the turn the agent opened by itself),
+    // and the history leaves out the subagent's tool row, which its card reads with `loadSubagent`.
     expect(found).toEqual([
+      expect.stringMatching(/^0:historyLoaded\.history: /),
       '18:turnEnd.content: "Subagent done" instead of "HelThree birdsloSubagent done"',
     ])
+    const historyIds = (recorded: RecordedEvent) =>
+      (recorded.payload as { history: { id: string }[] }).history.map((item) => item.id)
+    expect(historyIds(now[0]!)).toEqual(historyIds(before[0]!).filter((id) => id !== "m-3"))
     // The added fields are there: the comparison is not passing on an empty stream.
     expect(now.find((recorded) => recorded.event === "delta")?.payload).toMatchObject({
       itemId: "a1",
